@@ -1,0 +1,27 @@
+---
+description: Stable baseline — before physics/navigation changes read docs/CHECKPOINT.md
+alwaysApply: true
+---
+
+# Stable Baseline (2026-06-17)
+
+Verified state: RTL navigation, viewport centering, smooth molecule pull, secondary grid, stretch, hull collision, **stable physics at 4–7 blocks**.
+
+**Before fixing a bug:** read `docs/CHECKPOINT.md`.
+
+## Do not break
+
+- `centerViewport` / clamp — `scrollBy` + `getViewportClampLimits`; never `scrollTo(Math.max(0, pageXOffset…))`
+- `constrainScrollPosition` — not during `dragState`, pan, or edge-scroll
+- `#app { direction: ltr }` + `.note-card { direction: rtl }`
+- `smoothOrbitTargets` — `dragBlock` lerp while dragging; no raw snap
+- `nudgeMoleculeHull` — weakened to `overrideTarget`; no hard `setPosition` on shared stretch
+- `refreshPhysicsFlags` / `onBankGrid` — do not reintroduce O(n²)+ loops per dot
+- `stabilizeOrbitTargets` — staged fuse (step toward layout), not freeze on `prev`; body reach `scale(280)` only
+- **No** `clampOverrideNearBlocks` — breaks secondary grid and legitimate orbits
+- Stretch — single pass: `ensureStretchBinding` → `assignStretchSlotLanes` → `layoutStretchedFromBinding`; no `applyBindingOffsets` as a second pass
+- `applyMotionSettling` — stricter snap from block 4 (not on stretched notes)
+
+## Regression
+
+If the user reports scroll lock, jitter, bank stickiness, or stretch collapse at 4+ blocks — compare against `docs/CHECKPOINT.md` before aggressive fixes.

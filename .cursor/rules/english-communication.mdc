@@ -1,0 +1,34 @@
+---
+description: Project communication — English for docs and agents; Hebrew for site content only
+alwaysApply: true
+---
+
+# Communication — English for work, Hebrew for the site
+
+## Default language
+
+| Context | Language |
+|---------|----------|
+| Agent replies, plans, summaries | **English** |
+| Documentation (`docs/`, `AGENTS.md`, work sessions) | **English** |
+| Code identifiers (variables, functions, classes) | **English** |
+| Code comments | **English** (preferred) |
+| Site UI, note content, tags from data | **Hebrew** (do not change) |
+
+## Site content is out of scope
+
+The product is a Hebrew RTL catalog. Do not translate:
+
+- Note titles and body text from the data pipeline
+- UI strings shown to visitors (`index.html` title, in-app labels)
+- Tag names as they appear in the sheet / on screen
+
+When discussing Hebrew UI copy in docs or agent replies, quote it as-is or describe it in English.
+
+## Code references
+
+Put file paths, function names, and selectors in fenced code blocks or on their own line — not mixed into running prose in a way that hurts readability.
+
+## Tone
+
+Clinical, professional, analytical. No filler. Go straight to the technical point.

@@ -1,0 +1,10 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Cursor debug logs
+.cursor/debug-*.log
+
+# Editor local state (keep shared settings if you add them)
+.vscode/*.code-workspace

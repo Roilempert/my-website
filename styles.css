@@ -1,0 +1,2303 @@
+/* ==========================================================================
+   00. SYSTEM & RESET
+   ========================================================================== */
+:root {
+    --bg-main: #F3F3F3;
+    --main-text: #101010;
+    --accent-olive: #6a6e00;
+    --card-bg: #ffffff;
+    --block-hover-bg: #dedede;
+    --note-text: #000000;
+    --base-space: 1rem;
+    --grid-gap: 0.01rem;       /* shared inter-cell gap — primary + workspace grids */
+    --grid-padding: 0.12rem;   /* shared outer inset — #app padding + workspace bank margin */
+    --transition-fast: 0.2s ease;
+    --outline-weight: 0.2pt;
+    --capsule-radius: 9999px;
+    --site-type-size: 10pt;
+    --site-type-family: ratzif22, sans-serif;
+    --site-type-line: 1.2;
+}
+
+*, *:before, *:after {
+    box-sizing: border-box;
+    margin: 0;
+    padding: 0;
+}
+
+html {
+    scroll-padding: 40px;
+    font-size: 16px;
+    scrollbar-width: none;
+}
+
+::-webkit-scrollbar {
+    display: none;
+}
+
+body {
+    background-color: var(--bg-main);
+    min-height: 100vh;
+    min-width: 100vw; 
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    -ms-overflow-style: none;
+}
+
+/* Full-viewport pan layer — sits beneath #app; receives clicks through transparent grid cells */
+#nav-surface {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+    cursor: grab;
+    touch-action: none;
+}
+
+/* Film Grain */
+body::before {
+    content: "";
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    pointer-events: none;
+    z-index: 50;
+    opacity: 1.0; 
+    filter: grayscale(100%) contrast(300%) brightness(120%);
+    mix-blend-mode: multiply; 
+    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='3.0' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
+}      
+
+/* ==========================================================================
+   01. CANVAS (#app) & GLOBAL WRAPPERS
+   ========================================================================== */
+:root {
+    --canvas-width: 100vw;
+    --col-count: 25;
+}
+
+body.view-level-1 {
+    /* Wider than the viewport: leaves room to roam and to clear space around blocks */
+    --canvas-width: 180vw;
+    --col-count: 30; 
+}
+
+body.view-level-2,
+body.view-level-3 {
+    /* Micro-authoritative grid — L2 silhouettes share L3 note positions */
+    --canvas-width: 400vw;
+    --col-count: 10;
+}
+
+#app {
+    display: grid;
+    /* הזרקת משתנה הזום הקיים שלך ליצירת עמודות מדויקות */
+    grid-template-columns: repeat(var(--col-count), 1fr);
+    grid-auto-rows: max-content;
+    gap: var(--grid-gap);
+    padding: var(--grid-padding);
+    width: var(--canvas-width); 
+    min-height: 100vh;
+    opacity: 0;
+    position: relative;
+    z-index: 2;
+    direction: ltr;
+    transition: opacity 0.4s ease, width 0.6s cubic-bezier(0.25, 1, 0.5, 1), grid-template-columns 0.6s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+body.is-meso-to-micro #app {
+    transition: none;
+}
+
+body.is-macro-grid-settle #app {
+    transition: none !important;
+}
+
+/* In-place layout only during macro↔meso transition animation */
+body.is-macro-to-meso.is-meso-in-place #app {
+    display: block;
+    position: relative;
+    transition: none !important;
+}
+
+body.is-macro-to-meso.is-meso-in-place .note-wrapper.is-meso-anchored {
+    position: absolute;
+    width: var(--meso-anchor-w, var(--catalog-cell-w-meso, 70px));
+    height: var(--meso-anchor-h, var(--catalog-cell-h-meso, 81px));
+    margin: 0;
+    left: 0;
+    top: 0;
+    transform: translate(-50%, -50%)
+        scale(calc(
+            var(--macro-meso-size-min, 0.5) +
+            (1 - var(--macro-meso-size-min, 0.5)) * var(--macro-meso-reveal, 0)
+        ));
+    pointer-events: none;
+    transition: none !important;
+}
+
+body.view-level-2.is-catalog-layout #app,
+body.view-level-3.is-catalog-layout #app {
+    display: block;
+    position: relative;
+    transition: none;
+}
+
+body.is-catalog-layout .note-wrapper.is-catalog-anchored {
+    position: absolute;
+    width: var(--catalog-cell-w, 86px);
+    height: var(--catalog-cell-h, 100px);
+    margin: 0;
+    left: 0;
+    top: 0;
+    transform: translate(-50%, -50%);
+    pointer-events: auto;
+    overflow: hidden;
+    transition: left 0.45s cubic-bezier(0.25, 1, 0.5, 1),
+                top 0.45s cubic-bezier(0.25, 1, 0.5, 1),
+                width 0.45s cubic-bezier(0.25, 1, 0.5, 1),
+                height 0.45s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* L2: תא מצו ≈ אמצע בין מולקולה לפתק מלא */
+body.view-level-2.is-catalog-layout:not(.is-meso-to-micro) .note-wrapper.is-catalog-anchored {
+    width: var(--catalog-cell-w-meso, var(--catalog-cell-w, 86px));
+    height: var(--catalog-cell-h-meso, var(--catalog-cell-h, 100px));
+}
+
+body.view-level-3.is-catalog-layout .note-wrapper.is-catalog-anchored {
+    width: var(--catalog-cell-w, 86px);
+    height: var(--catalog-cell-h, 100px);
+}
+
+body.is-meso-to-micro.is-catalog-layout .note-wrapper.is-catalog-anchored {
+    width: calc(var(--catalog-cell-w, 86px) * var(--catalog-cell-lerp, 1));
+    height: calc(var(--catalog-cell-h, 100px) * var(--catalog-cell-lerp, 1));
+    transition: none !important;
+}
+
+body.is-catalog-layout.is-catalog-settling .note-wrapper.is-meso-anchored {
+    transition: none !important;
+    transform: translate(-50%, -50%) scale(1);
+}
+
+body.is-catalog-layout.is-catalog-settling .note-wrapper.is-meso-anchored .meso-silhouette__shape {
+    opacity: calc(0.88 + var(--catalog-settle-progress, 0) * 0.12);
+}
+
+body.is-catalog-layout.is-macro-to-meso .note-wrapper.is-catalog-anchored {
+    transition: none;
+}
+
+/* Catalog workspace lens — L2/L3 emphasis from L1 blocks */
+body.view-level-2.is-catalog-lens .note-wrapper.is-molecule-muted,
+body.view-level-3.is-catalog-lens .note-wrapper.is-molecule-muted {
+    opacity: 0.38;
+}
+
+body.view-level-2.is-catalog-lens .note-wrapper.is-molecule-muted .meso-silhouette__shape,
+body.view-level-3.is-catalog-lens .note-wrapper.is-molecule-muted .meso-silhouette__shape {
+    opacity: 0.28;
+}
+
+body.view-level-2.is-catalog-lens .note-wrapper.is-molecule-focused,
+body.view-level-3.is-catalog-lens .note-wrapper.is-molecule-focused {
+    opacity: 1;
+}
+
+body.view-level-2.is-catalog-lens .note-wrapper.is-molecule-focused .meso-silhouette__shape,
+body.view-level-3.is-catalog-lens .note-wrapper.is-molecule-focused .meso-silhouette__shape {
+    opacity: 1;
+}
+
+/* Silhouette measurement uses micro (L3) grid cell dimensions */
+body.is-silhouette-micro-measure {
+    --canvas-width: 400vw;
+    --col-count: 10;
+}
+
+body.is-silhouette-micro-measure #app {
+    position: fixed !important;
+    left: -150vw !important;
+    top: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* L2 — אל תסתיר את הקנבס בזמן עדכון סילואטות (מניעת מסך ריק) */
+body.is-depth-v2.view-level-2.is-silhouette-micro-measure #app {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    visibility: visible !important;
+    pointer-events: none !important;
+}
+
+body.is-macro-to-meso .note-wrapper {
+    --note-zoom: var(--note-zoom-meso);
+}
+
+body.is-macro-to-meso #app {
+    transition: none !important;
+}
+
+body.is-macro-to-meso .note-stage {
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: none;
+    transition: none !important;
+}
+
+body.is-macro-to-meso.view-level-1 .note-stage {
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+body.is-macro-to-meso .note-stage .layer-small {
+    opacity: 1 !important;
+}
+
+body.is-macro-to-meso:not(.is-meso-zoom-out) .note-wrapper.is-meso-anchored .layer-dot {
+    opacity: calc(1 - var(--macro-meso-reveal, 0)) !important;
+    visibility: visible !important;
+    pointer-events: none;
+    transition: none !important;
+    transform: scale(1) translate(0, 0) !important;
+}
+
+body.view-level-2.is-meso-in-place .note-wrapper.is-meso-anchored .layer-dot,
+body.is-macro-to-meso.is-meso-in-place:not(.is-meso-zoom-out) .note-wrapper.is-meso-anchored .layer-dot {
+    opacity: 0 !important;
+}
+
+/* L2→L1: dots + canvas links fade in with silhouette fade-out */
+body.is-meso-zoom-out.is-meso-in-place .note-wrapper.is-meso-anchored .layer-dot {
+    left: 50%;
+    top: 50%;
+    margin-left: calc(var(--dot-size, 10px) / -2);
+    margin-top: calc(var(--dot-size, 10px) / -2);
+    opacity: calc(1 - var(--macro-meso-reveal, 0)) !important;
+    visibility: visible !important;
+    transform: scale(1) translate(var(--phys-x, 0px), var(--phys-y, 0px)) !important;
+}
+
+body.is-meso-zoom-out .link-canvas {
+    opacity: 1;
+}
+
+body.is-macro-to-meso .note-wrapper.is-meso-anchored .meso-silhouette__shape {
+    opacity: var(--macro-meso-reveal, 0);
+    transition: none !important;
+}
+
+body.is-macro-to-meso .note-wrapper.is-meso-anchored .meso-silhouette__tags {
+    opacity: calc(var(--macro-meso-reveal, 0) * 0.85);
+    transition: none !important;
+}
+
+body.is-macro-to-meso .meso-silhouette[data-silhouette-state="ready"] .meso-silhouette__svg,
+body.is-macro-to-meso .meso-silhouette[data-silhouette-state="empty"] .meso-silhouette__svg {
+    opacity: 1;
+}
+
+body.is-macro-to-meso .action-block.is-deployed,
+body.is-macro-to-meso .action-block.is-dragging {
+    opacity: var(--macro-meso-block-opacity, 0.35);
+    transition: opacity 0.35s ease;
+}
+
+body.is-macro-to-meso.is-meso-in-place #app {
+    transform: scale(calc(1 - var(--macro-meso-master, 0) * var(--macro-meso-scale, 0.028)));
+    transform-origin: 50vw 42vh;
+    transition: none !important;
+}
+
+body.is-macro-to-meso .link-canvas {
+    opacity: var(--macro-meso-link-fade, 1);
+    transition: none;
+}
+
+/* Macro: grid cells pass pan through; reserve warehouse scroll space */
+body.view-level-1 #app {
+    pointer-events: none;
+    padding-top: var(--scroll-breathing-room, 120px);
+    padding-bottom: var(--warehouse-reserve, 0px);
+}
+
+body.view-level-1 .note-wrapper {
+    pointer-events: none;
+}
+
+body.view-level-1.is-molecule-hover:not(.is-space-pan):not(.is-canvas-panning) {
+    cursor: pointer;
+}
+
+#app.is-ready {
+    opacity: 1;
+}
+
+/* Background pan */
+body.is-canvas-panning #nav-surface,
+body.is-space-pan #nav-surface,
+body.is-space-pan #app,
+body.is-space-pan .note-wrapper {
+    cursor: grabbing;
+}
+
+body.is-space-pan,
+body.is-space-pan #app,
+body.is-space-pan .note-wrapper {
+    cursor: grab;
+}
+
+.note-wrapper {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1; 
+    margin-bottom: 0;
+    break-inside: avoid;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: transform 0.35s cubic-bezier(0.25, 1, 0.5, 1);
+    --note-zoom-meso: 1;
+    --note-zoom-micro: 1;
+    --note-zoom: var(--note-zoom-micro);
+}
+
+body.view-level-2 .note-wrapper {
+    --note-zoom: var(--note-zoom-meso);
+    pointer-events: auto;
+}
+
+body.view-level-3 .note-wrapper {
+    --note-zoom: var(--note-zoom-micro);
+}
+
+body.is-meso-to-micro .note-wrapper {
+    --note-zoom: var(--transition-note-zoom, var(--note-zoom-meso));
+    transition: none !important;
+}
+
+/* Shared stage: silhouette (meso) and note (micro) scale and align together */
+.note-stage {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transform: scale(var(--note-zoom));
+    transform-origin: center center;
+    pointer-events: none;
+}
+
+body.is-meso-to-micro .note-stage {
+    will-change: transform;
+    pointer-events: auto;
+}
+
+body.view-level-2 .note-stage,
+body.view-level-3 .note-stage {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+}
+
+body.view-level-1 .note-stage {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.note-stage .layer-item.layer-small,
+.note-stage .layer-item.layer-full {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    transform: none;
+}
+
+/* גיבוי לגריד ישן — זום לגודל קטלוגי ממוצע */
+body.view-level-2:not(.is-catalog-layout) .note-stage .layer-item.layer-small {
+    transform: scale(var(--depth-meso-legacy-zoom, 0.16));
+    transform-origin: center center;
+}
+
+.layer-item {
+    position: absolute;
+    background-color: var(--card-bg);
+    border: 1px solid var(--bg-main);
+    opacity: 0;
+    pointer-events: none;
+    transform: scale(0.85);
+    transition: opacity 0.4s cubic-bezier(0.25, 1, 0.5, 1), transform 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.layer-item.layer-small,
+.layer-item.layer-full {
+    border: none;
+    background: transparent;
+}
+
+/* ==========================================================================
+   02. STATE MACHINE (DEPTH LOGIC)
+   ========================================================================== */
+body.is-depth-transition {
+    --depth-transition-fx: 0;
+    --depth-transition-blur: 0px;
+}
+
+body.is-depth-transition #app {
+    opacity: calc(1 - var(--depth-transition-fx, 0) * 0.09);
+    filter: blur(var(--depth-transition-blur, 0px));
+    transform: scale(calc(1 - var(--depth-transition-fx, 0) * 0.012));
+    transform-origin: 50vw 42vh;
+    transition: none;
+}
+
+body.is-meso-to-micro #app {
+    filter: blur(calc(var(--micro-atmosphere, 0) * 2px));
+    transition: none;
+}
+
+body.view-level-1 .layer-dot {
+    left: 50%;
+    top: 50%;
+    margin-left: calc(var(--dot-size, 10px) / -2);
+    margin-top: calc(var(--dot-size, 10px) / -2);
+    opacity: 1;
+    pointer-events: auto;
+    transition: opacity 0.4s cubic-bezier(0.25, 1, 0.5, 1),
+                background-color 0.35s ease,
+                border-color 0.35s ease,
+                border-width 0.35s ease;
+    transform: scale(1) translate(var(--phys-x, 0px), var(--phys-y, 0px));
+}
+
+body.view-level-2 .note-stage .layer-small {
+    opacity: 1;
+    pointer-events: auto;
+    visibility: visible;
+}
+
+body.view-level-2:not(.is-meso-to-micro) .note-stage .layer-full {
+    opacity: 0;
+    pointer-events: none;
+}
+
+body.view-level-3 .note-stage .layer-full {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+body.view-level-3:not(.is-meso-to-micro) .note-stage .layer-small {
+    opacity: 0;
+    pointer-events: none;
+}
+
+/* Meso ↔ micro: crossfade content inside fixed stage; scale ramps in phase 2 (JS) */
+body.is-meso-to-micro .note-stage {
+    transition: none !important;
+}
+
+body.is-meso-to-micro .note-stage .layer-item {
+    transition: none !important;
+}
+
+body.is-meso-to-micro .note-stage .layer-small,
+body.is-meso-to-micro .note-stage .layer-full {
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: none;
+    z-index: auto;
+}
+
+body.is-meso-to-micro .note-stage .layer-small {
+    z-index: 25;
+}
+
+body.is-meso-to-micro .note-stage .layer-full {
+    z-index: 20;
+}
+
+body.is-meso-to-micro .meso-silhouette__tags,
+body.is-meso-to-micro .meso-silhouette__shape {
+    opacity: calc(1 - var(--micro-reveal, 0));
+    transform: scale(calc(1 - var(--micro-reveal, 0) * 0.035));
+    transform-origin: center center;
+    transition: none !important;
+}
+
+body.is-meso-to-micro .note-card {
+    background-color: color-mix(
+        in srgb,
+        var(--card-bg) calc(var(--micro-reveal, 0) * 100%),
+        transparent
+    );
+    border-color: color-mix(
+        in srgb,
+        var(--bg-main) calc(var(--micro-reveal, 0) * 100%),
+        transparent
+    );
+    transition: none !important;
+}
+
+body.is-meso-to-micro .note-title,
+body.is-meso-to-micro .note-body,
+body.is-meso-to-micro .note-tags,
+body.is-meso-to-micro .note-idcode {
+    opacity: var(--micro-reveal, 0);
+    transition: none !important;
+}
+
+/* ==========================================================================
+   03. LAYER 3: MACRO (DOTS)
+   ========================================================================== */
+.layer-dot {
+    width: var(--dot-size, 10px);
+    height: var(--dot-size, 10px);
+    border-radius: 50%;
+    background-color: var(--dot-bg, var(--main-text));
+    z-index: 30;
+    border: none;
+    box-sizing: border-box;
+    transform: scale(0.85) translate(var(--phys-x, 0px), var(--phys-y, 0px));
+}
+
+/* Block on surface: matching-tag dots stay filled; all others → hollow on --bg-main */
+body.view-level-1.is-block-focus .layer-dot.is-dot-focused {
+    background-color: var(--dot-bg, var(--main-text));
+    border: none;
+}
+
+body.view-level-1.is-block-focus .layer-dot.is-dot-muted {
+    background-color: var(--bg-main);
+    border: 0.4pt solid var(--dot-bg, var(--main-text));
+}
+
+body.view-level-1 .note-wrapper.is-molecule-filtered-out {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+/* Filter exit — phase 1: hollow marking */
+body.view-level-1.is-block-filter .note-wrapper.is-molecule-filtering-hollow {
+    pointer-events: none;
+}
+
+body.view-level-1.is-block-filter .note-wrapper.is-molecule-filtering-hollow .layer-dot {
+    background-color: var(--bg-main);
+    border: 0.4pt solid var(--dot-bg, var(--main-text));
+    transition: background-color 0.1s ease, border-color 0.1s ease;
+}
+
+/* Filter exit — phase 2: axial peel + fade */
+body.view-level-1 .note-wrapper.is-molecule-filtering-peel {
+    pointer-events: none;
+    opacity: 1;
+    transition: opacity 0.38s ease-out;
+}
+
+body.view-level-1 .note-wrapper.is-molecule-filtering-peel.is-filter-peel-fade {
+    opacity: 0;
+}
+
+body.view-level-1 .note-wrapper.is-molecule-filtering-peel .layer-dot {
+    transition: opacity 0.38s ease-out;
+}
+
+body.view-level-1 .note-wrapper.is-molecule-filtering-peel.is-filter-peel-fade .layer-dot {
+    opacity: 0;
+}
+
+/* Macro level: artifact ID on molecule hover (viewport-fixed, follows hull) */
+.molecule-hover-id {
+    position: fixed;
+    z-index: 45;
+    display: none;
+    pointer-events: none;
+    writing-mode: horizontal-tb;
+    padding: 0.25rem 0.55rem;
+    background-color: var(--card-bg);
+    color: var(--main-text);
+    border: var(--outline-weight) solid var(--main-text);
+    border-radius: var(--capsule-radius);
+    transform: translate(-100%, -15%);
+    white-space: nowrap;
+    direction: ltr;
+}
+
+body.view-level-1 .molecule-hover-id.is-visible {
+    display: block;
+}
+
+.molecule-hover-id.site-type {
+    position: fixed;
+    left: auto;
+    top: auto;
+    transform: translate(-100%, -15%);
+    writing-mode: horizontal-tb;
+}
+
+/* ==========================================================================
+   04. LAYER 2: MEZZO (TYPOGRAPHIC SILHOUETTES)
+   ========================================================================== */
+.layer-small {
+    width: 100%;
+    height: 100%;
+    z-index: 20;
+    border: none;
+    background: transparent;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    overflow: visible;
+}
+
+.meso-silhouette {
+    width: 100%;
+    aspect-ratio: 20 / 21;
+    max-height: 100%;
+    height: auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+    position: relative;
+}
+
+.meso-silhouette__svg {
+    display: block;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+}
+
+.meso-silhouette__shape {
+    vector-effect: non-scaling-stroke;
+}
+
+.meso-silhouette__tags {
+    position: absolute;
+    left: 0;
+    bottom: 0;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--meso-tag-gap, 3px);
+    max-width: 100%;
+    pointer-events: none;
+}
+
+.meso-tag-dot {
+    width: var(--dot-size, 10px);
+    height: var(--dot-size, 10px);
+    border-radius: 50%;
+    flex-shrink: 0;
+    border: none;
+    box-sizing: border-box;
+}
+
+.meso-silhouette[data-silhouette-state="pending"] .meso-silhouette__svg {
+    opacity: 0;
+}
+
+.meso-silhouette[data-silhouette-state="ready"] .meso-silhouette__svg {
+    opacity: 1;
+}
+
+.meso-silhouette[data-silhouette-state="pending"] .meso-silhouette__tags,
+.meso-silhouette[data-silhouette-state="empty"] .meso-silhouette__tags,
+.meso-silhouette[data-silhouette-state="ready"] .meso-silhouette__tags {
+    opacity: 1;
+}
+
+body.view-level-2 .layer-dot,
+body.view-level-3 .layer-dot {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+/* ==========================================================================
+   05. LAYER 1: MICRO (FULL DATA & TYPOGRAPHY)
+   ========================================================================== */
+.layer-full {
+    width: 100%;
+    height: 100%;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+/* Typography Fonts */
+@font-face {
+    font-family: "ratzif22";
+    font-weight: 400;
+    src: url("../assets/fonts/ratzif22-regular.woff2") format("woff2");
+}
+
+@font-face {
+    font-family: "ratzif22";
+    font-weight: 600;
+    src: url("../assets/fonts/ratzif22-Bold.woff2") format("woff2");
+}
+
+@font-face {
+    font-family: "Ratzif22";
+    font-weight: 500;
+    src: url("../assets/fonts/ratzif22-medium.woff2") format("woff2");
+}
+
+@font-face {
+    font-family: "Neoklass";
+    font-weight: 600;
+    font-style: italic;
+    src: url("../assets/fonts/Neoklass-BoldItalic-TRIAL.woff2") format("woff2");
+}
+
+@font-face {
+    font-family: "NarkissTam";
+    font-weight: 400;
+    src: url("../assets/fonts/NarkissTam-Regular-TRIAL.woff2") format("woff2");
+}
+
+/*
+   .site-type — טיפוגרפיית שאר האתר (מחוץ ל-.note-card).
+   מחסן, בלוקים, תוויות hover. בתוך פתקים: .note-title / .note-body / .note-idcode / .tag
+*/
+.site-type {
+    font-family: var(--site-type-family);
+    font-size: var(--site-type-size);
+    line-height: var(--site-type-line);
+}
+
+/* Text Layout Properties */
+.note-title {
+    font-family: Neoklass, serif;
+    font-style: italic;
+    font-size: 66px;
+    font-weight: 600;
+    line-height: 0.9;
+}
+
+.note-body {
+    font-family: NarkissTam, serif;
+    font-size: 16px;
+    line-height: 1.2;
+    max-width: 55ch;
+    padding: 0 0.5rem;
+    white-space: pre-wrap;
+}
+
+.note-idcode {
+    font-family: ratzif22, sans-serif;
+    font-size: 14px;
+    position: absolute;
+    left: 0.5rem;
+    top: 50%;
+    transform: translateY(-50%);
+    writing-mode: vertical-rl;
+}
+
+.note-wrapper.is-measuring-silhouette .layer-full {
+    opacity: 1 !important;
+    visibility: hidden;
+    transform: scale(1) !important;
+    pointer-events: none;
+}
+
+.note-card {
+    background-color: var(--card-bg);
+    padding: 1rem 1rem 1.5rem 2rem;
+    display: flex;
+    flex-direction: column;
+    position: relative;
+    aspect-ratio: 20 / 21;
+    direction: rtl;
+    width: 100%;
+    height: auto;
+    max-height: 100%;
+    border: 1px solid var(--bg-main);
+    box-sizing: border-box;
+}
+
+.note-tags {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    justify-content: start;
+}
+
+.tag {
+    font-family: ratzif22, sans-serif;
+    font-size: 14px;
+    padding: 0.3rem 0.6rem;
+    border-radius: 50px;
+    background-color: var(--bg-main);
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    width: max-content;
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+.tag-circle {
+    width: var(--tag-dot-size, 7px);
+    height: var(--tag-dot-size, 7px);
+}
+
+/* ==========================================================================
+   06. INTERACTIONS & OVERLAYS
+   ========================================================================== */
+.focus-backdrop {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background: transparent;
+    z-index: 800;
+    display: none;
+    cursor: default;
+}
+
+.focus-backdrop.active {
+    display: block;
+}
+
+.focus-backdrop.active.is-popup {
+    background: rgba(16, 16, 16, 0.42);
+    cursor: pointer;
+    z-index: 1000;
+}
+
+.artifact-inspector-panel {
+    position: fixed;
+    left: 50%;
+    bottom: calc(var(--warehouse-reserve, 120px) + 1rem);
+    top: auto;
+    z-index: 1010;
+    --inspector-card-width: min(
+        92vw,
+        calc(
+            (100vw - 2 * var(--v2-meso-page-padding-x, 2.25rem) - (var(--v2-micro-viewport-cols, 3) - 1) * var(--v2-col-gap, 12px))
+            / var(--v2-micro-viewport-cols, 3)
+        )
+    );
+    width: var(--inspector-card-width);
+    max-height: calc(100vh - var(--warehouse-reserve, 120px) - 2rem);
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    overscroll-behavior: contain;
+    transform: translateX(-50%) scale(0.96);
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transition:
+        opacity 0.28s ease,
+        transform 0.28s cubic-bezier(0.25, 1, 0.5, 1),
+        visibility 0.28s ease;
+}
+
+.artifact-inspector-panel.is-open {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateX(-50%) scale(1);
+}
+
+.artifact-inspector-panel .micro-mock__card.note-card {
+    display: flex !important;
+    flex-direction: column;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 20 / 21;
+    min-height: calc(var(--inspector-card-width) * 21 / 20);
+    max-height: none;
+    overflow: visible;
+    box-shadow: 0 8px 32px rgba(16, 16, 16, 0.14);
+}
+
+.artifact-inspector-panel .note-idcode,
+.artifact-inspector-panel .note-title {
+    flex-shrink: 0;
+}
+
+.artifact-inspector-panel .note-body {
+    flex: 1 1 auto;
+    overflow: visible;
+    white-space: pre-wrap;
+}
+
+.artifact-inspector-panel .micro-mock__tags {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    justify-content: flex-start;
+    align-items: center;
+    flex-shrink: 0;
+    margin-top: auto;
+    padding-top: 0.5rem;
+    direction: rtl;
+}
+
+.artifact-inspector-panel .micro-mock__tag-block.action-block {
+    cursor: default;
+    pointer-events: none;
+    touch-action: auto;
+    flex-shrink: 0;
+}
+
+body.is-artifact-inspector-open {
+    overflow: hidden;
+}
+
+body.is-artifact-inspector-open .warehouse-shell {
+    z-index: 900;
+}
+
+body.is-artifact-inspector-open .artifact-inspector-panel,
+body.is-artifact-inspector-open .focus-backdrop.active.is-popup {
+    pointer-events: auto;
+}
+
+.note-wrapper.is-centered {
+    position: relative;
+    z-index: 1000;
+    pointer-events: auto;
+    backface-visibility: hidden;
+}
+
+/* Sibling link lines: rendered by JS on a canvas just below the dots (z 25) */
+.link-canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    z-index: 25;
+    pointer-events: none;
+}
+
+/* L2 focus — block↔note lines behind meso glyphs */
+body.is-depth-v2.view-level-2.is-depth-workspace-active .link-canvas {
+    z-index: 1;
+}
+
+/* ==========================================================================
+   07. ACTION WAREHOUSE (BOTTOM PORTAL DOCK)
+   ========================================================================== */
+.warehouse-shell {
+    position: fixed;
+    bottom: var(--warehouse-bottom-offset, 12px);
+    left: 50%;
+    width: var(--warehouse-width, 50%);
+    transform: translateX(-50%);
+    z-index: 900;
+    cursor: default;
+    transition: transform 0.5s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* Warehouse — visible on all depth levels */
+body.view-level-2 .warehouse-shell,
+body.view-level-3 .warehouse-shell {
+    transform: translateX(-50%);
+    pointer-events: auto;
+}
+
+.depth-block-bar {
+    display: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: center;
+    gap: 0.45rem;
+    width: 100%;
+    min-height: calc(var(--block-height, 26px) + 0.35rem);
+    padding: 0.35rem 0.65rem 0.5rem;
+    box-sizing: border-box;
+    direction: rtl;
+    pointer-events: none;
+}
+
+body.view-level-2 .depth-block-bar.has-blocks,
+body.view-level-3 .depth-block-bar.has-blocks,
+body.view-level-2 .depth-block-bar.is-drop-active,
+body.view-level-3 .depth-block-bar.is-drop-active {
+    display: flex;
+}
+
+body.view-level-2 .depth-block-bar.is-drop-active,
+body.view-level-3 .depth-block-bar.is-drop-active {
+    outline: 1px dashed rgba(16, 16, 16, 0.18);
+    outline-offset: -1px;
+    background: rgba(243, 243, 243, 0.72);
+}
+
+body.view-level-2 .depth-block-bar .action-block.is-depth-ui-mounted,
+body.view-level-3 .depth-block-bar .action-block.is-depth-ui-mounted {
+    position: relative;
+    top: auto;
+    left: auto;
+    margin: 0;
+    transform: none !important;
+    opacity: 1;
+    pointer-events: auto;
+    cursor: grab;
+    z-index: 1;
+    flex-shrink: 0;
+    box-shadow: 0 1px 0 rgba(16, 16, 16, 0.08);
+}
+
+body.view-level-2 .action-warehouse .action-block,
+body.view-level-3 .action-warehouse .action-block {
+    pointer-events: auto;
+    cursor: grab;
+}
+
+body.view-level-2 .action-block.is-dragging,
+body.view-level-3 .action-block.is-dragging {
+    opacity: 1;
+    pointer-events: auto;
+    z-index: 960;
+    cursor: grabbing;
+}
+
+body.view-level-2 .depth-block-bar .action-block--frame-filter.is-depth-ui-mounted,
+body.view-level-3 .depth-block-bar .action-block--frame-filter.is-depth-ui-mounted {
+    outline: 1px solid rgba(16, 16, 16, 0.2);
+    outline-offset: 2px;
+}
+
+body.view-level-2 .action-block.is-deployed:not(.is-depth-ui-mounted),
+body.view-level-3 .action-block.is-deployed:not(.is-depth-ui-mounted) {
+    visibility: hidden;
+    pointer-events: none;
+}
+
+body.view-level-2 .action-block--frame.is-drop-target,
+body.view-level-3 .action-block--frame.is-drop-target {
+    outline: 2px solid rgba(16, 16, 16, 0.28);
+    outline-offset: 2px;
+}
+
+.warehouse-reset {
+    position: absolute;
+    top: -32px;
+    left: 50%;
+    right: auto;
+    transform: translateX(-50%);
+    width: 24px;
+    height: 24px;
+    padding: 0;
+    border-radius: 50%;
+    border: var(--warehouse-outline, 1pt) solid var(--main-text);
+    background-color: var(--card-bg);
+    color: var(--main-text);
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    z-index: 1;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease, background-color var(--transition-fast), color var(--transition-fast);
+}
+
+.warehouse-shell.is-workspace-active .warehouse-reset {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+.warehouse-reset:hover {
+    background-color: var(--main-text);
+    color: var(--card-bg);
+}
+
+.action-warehouse {
+    position: relative;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+    overflow: hidden;
+    background-color: transparent;
+    border: var(--warehouse-outline, 1pt) solid var(--main-text);
+    border-radius: var(--warehouse-radius, 22px);
+    user-select: none;
+    -webkit-user-select: none;
+}
+
+.warehouse-label {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    z-index: 2;
+    letter-spacing: 0.12em;
+    color: var(--main-text);
+    direction: ltr;
+    text-align: center;
+    line-height: 1;
+    padding: 4px 0 3px;
+    background: transparent;
+    pointer-events: none;
+}
+
+.warehouse-scroll {
+    flex: 1;
+    min-width: 0;
+    max-height: var(--warehouse-tray-max-height, 102px);
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+    padding: 0;
+    background-color: transparent;
+    border-radius: inherit;
+}
+
+.warehouse-scroll::-webkit-scrollbar {
+    display: none;
+}
+
+.warehouse-tray-layout {
+    display: flex;
+    flex-direction: row;
+    direction: rtl;
+    align-items: flex-start;
+    gap: 0;
+    width: 100%;
+    padding: 22px 8px 6px 8px;
+    background-color: var(--card-bg);
+    border-radius: inherit;
+}
+
+.warehouse-tray-section--frames {
+    flex-shrink: 0;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    gap: 5px;
+    align-content: flex-start;
+    padding-left: 4px;
+    margin-top: calc(-1 * var(--frame-align-offset, 3px));
+}
+
+.warehouse-tray-divider {
+    flex-shrink: 0;
+    align-self: stretch;
+    width: 0;
+    min-height: var(--block-height, 26px);
+    border-left: var(--outline-weight) dashed #c4c4c4;
+    margin: 0 6px;
+}
+
+.warehouse-tray-section--blocks {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 5px;
+    align-content: flex-start;
+    padding-right: 4px;
+    min-width: 0;
+}
+
+.block-slot {
+    display: inline-flex;
+    width: max-content;
+    height: var(--block-height, 26px);
+    border: var(--outline-weight) dashed transparent;
+    border-radius: calc(var(--block-height, 26px) / 2);
+    transition: border-color var(--transition-fast);
+}
+
+.block-slot.is-empty {
+    min-width: var(--block-height, 26px);
+    border-color: #c4c4c4;
+}
+
+.block-slot--frame.is-empty {
+    border-color: #707070;
+}
+
+.action-block {
+    width: max-content;
+    height: var(--block-height, 26px);
+    padding: 0 0.55rem;
+    background-color: var(--card-bg);
+    border: var(--outline-weight) solid var(--main-text);
+    border-radius: calc(var(--block-height, 26px) / 2);
+    display: inline-flex;
+    flex-direction: row;
+    direction: rtl;
+    align-items: center;
+    justify-content: center;
+    gap: 0.4rem;
+    cursor: grab;
+    touch-action: none;
+    transition: background-color var(--transition-fast), opacity 0.4s ease;
+}
+
+.action-block:hover {
+    background-color: var(--block-hover-bg);
+}
+
+/* Workspace capture limit — docked tag/author pills muted (max 5 on surface) */
+.action-warehouse.is-capture-full .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block {
+    opacity: 0.52;
+}
+
+.action-warehouse.is-capture-full .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block:hover {
+    background-color: var(--card-bg);
+}
+
+.action-warehouse.is-capture-full .warehouse-tray-section--blocks .block-slot:not(.is-empty) .block-glyph {
+    background-color: var(--block-hover-bg) !important;
+}
+
+.action-warehouse.is-capture-full .warehouse-tray-section--blocks .block-slot:not(.is-empty) .block-label {
+    color: #a8a8a8;
+}
+
+/* L2/L3 focus — mute docked blocks that never co-occur with active filter blocks in any note */
+.action-warehouse.is-cooccurrence-filter .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block.is-dock-irrelevant {
+    opacity: 0.52;
+}
+
+.action-warehouse.is-cooccurrence-filter .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block.is-dock-irrelevant:hover {
+    background-color: var(--card-bg);
+}
+
+.action-warehouse.is-cooccurrence-filter .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block.is-dock-irrelevant .block-glyph {
+    background-color: var(--block-hover-bg) !important;
+}
+
+.action-warehouse.is-cooccurrence-filter .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block.is-dock-irrelevant .block-label {
+    color: #a8a8a8;
+}
+
+.action-block--author {
+    padding: 0 0.65rem;
+}
+
+.action-block--author .block-label {
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+/* While dragging: pinned to the viewport, driven by JS transforms */
+.action-block.is-dragging {
+    position: fixed;
+    top: 0;
+    left: 0;
+    margin: 0;
+    cursor: grabbing;
+    z-index: 950;
+    transition: opacity 0.4s ease;
+    box-shadow: 0 6px 0 rgba(16, 16, 16, 0.12);
+}
+
+/* Deployed: anchored to the canvas (page space), scrolls with the world */
+.action-block.is-deployed {
+    position: absolute;
+    top: 0;
+    left: 0;
+    margin: 0;
+    z-index: 100;
+    transition: opacity 0.4s ease;
+    box-shadow: 0 2px 0 rgba(16, 16, 16, 0.1);
+}
+
+body.view-level-1 .action-block.is-deployed {
+    cursor: pointer;
+}
+
+/* Snap-back animation toward the dock slot */
+.action-block.is-returning {
+    transition: transform 0.35s cubic-bezier(0.25, 1, 0.5, 1), opacity 0.4s ease;
+}
+
+.block-glyph {
+    flex-shrink: 0;
+    width: var(--block-glyph-size, 12px);
+    height: var(--block-glyph-size, 12px);
+    border-radius: 50%;
+}
+
+.block-label {
+    white-space: nowrap;
+    flex-shrink: 0;
+}
+
+/* --- Frame blocks (container shells on the workspace) --- */
+.block-slot--frame {
+    width: var(--frame-shell-width, 88px);
+    min-width: var(--frame-shell-width, 88px);
+    height: var(--frame-height, 32px);
+    min-height: var(--frame-height, 32px);
+    border-radius: var(--frame-radius, 6px);
+}
+
+.action-block--frame {
+    box-sizing: border-box;
+    width: var(--frame-shell-width, 88px);
+    min-width: var(--frame-shell-width, 88px);
+    max-width: var(--frame-shell-width, 88px);
+    height: var(--frame-height, 36px);
+    min-height: var(--frame-height, 36px);
+    padding: var(--frame-padding-y, 5px) var(--frame-padding-x, 6px)
+             var(--frame-padding-y, 5px)
+             calc(var(--frame-padding-x, 6px) + var(--frame-padding-left, 5px));
+    background-color: var(--main-text);
+    border-color: var(--main-text);
+    border-radius: var(--frame-radius, 6px);
+    gap: 0.35rem;
+    justify-content: flex-start;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.action-block--frame.has-nested-blocks {
+    width: max-content;
+    min-width: var(--frame-shell-width, 88px);
+    max-width: none;
+    height: auto;
+    align-items: center;
+}
+
+.action-block--frame:hover {
+    background-color: #2a2a2a;
+    border-color: #2a2a2a;
+}
+
+.action-block--frame-filter .frame-filter-icon {
+    flex-shrink: 0;
+    width: var(--block-glyph-size, 12px);
+    height: var(--block-glyph-size, 12px);
+    border: var(--outline-weight) solid var(--bg-main);
+    border-radius: 50%;
+    position: relative;
+    box-sizing: border-box;
+}
+
+.action-block--frame-filter .frame-filter-icon::after {
+    content: '';
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: 130%;
+    height: var(--outline-weight);
+    background-color: var(--bg-main);
+    transform: translate(-50%, -50%) rotate(-45deg);
+    transform-origin: center;
+}
+
+.frame-slot-window {
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: var(--frame-nested-gap, 4px);
+    overflow: visible;
+    padding: 0;
+    background: transparent;
+    border: none;
+    box-sizing: border-box;
+    transition: width 0.2s ease, height 0.2s ease, border-color var(--transition-fast);
+}
+
+/* Empty slot — hollow ellipse placeholder */
+.frame-slot-window:not(.is-filled) {
+    flex: 0 0 auto;
+    width: var(--frame-slot-min-width, 56px);
+    min-width: var(--frame-slot-min-width, 56px);
+    height: var(--block-height, 26px);
+    min-height: var(--block-height, 26px);
+    border: var(--outline-weight) solid var(--bg-main);
+    border-radius: calc(var(--block-height, 26px) / 2);
+    background-color: var(--card-bg);
+    justify-content: center;
+    align-items: center;
+}
+
+.action-block--frame.is-drop-target .frame-slot-window:not(.is-filled) {
+    background-color: var(--card-bg);
+    border-color: var(--bg-main);
+    box-shadow: inset 0 0 0 1px rgba(243, 243, 243, 0.35);
+}
+
+/* Filled — size driven by JS to match nested blocks (no visible chrome) */
+.frame-slot-window.is-filled {
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+}
+
+.frame-slot-window .action-block.is-nested {
+    position: relative;
+    top: auto;
+    left: auto;
+    margin: 0;
+    flex-shrink: 0;
+    width: 100%;
+    min-width: max-content;
+    align-self: center;
+    height: var(--block-height, 26px);
+    padding: 0 0.55rem;
+    transform: none !important;
+    box-shadow: none;
+    cursor: grab;
+    z-index: 2;
+    touch-action: none;
+    pointer-events: auto;
+    transition: opacity 0.25s ease;
+}
+
+.frame-slot-window .action-block.is-nested .block-glyph {
+    width: var(--block-glyph-size, 12px);
+    height: var(--block-glyph-size, 12px);
+}
+
+.frame-slot-window .action-block.is-nested .block-label {
+    font-size: 1em;
+}
+
+/* ==========================================================================
+   08. DEPTH V2 — גרידים פשוטים L2/L3 (מקום שמור)
+   ========================================================================== */
+body.is-depth-v2 #app {
+    transition: opacity 0.4s ease;
+}
+
+body.is-depth-v2.view-level-2,
+body.is-depth-v2.view-level-3 {
+    --canvas-width: var(--v2-canvas-width, 300vw);
+    --col-count: var(--v2-col-count, 10);
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout {
+    display: flex !important;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--v2-col-gap, 20px);
+    padding-inline: var(--v2-meso-page-padding-x, 2.5rem);
+    padding-top: var(--scroll-breathing-room, 120px);
+    box-sizing: border-box;
+    grid-template-columns: unset;
+    grid-auto-rows: unset;
+    width: var(--canvas-width, var(--v2-canvas-width, 300vw)) !important;
+    max-width: none;
+    margin-inline: 0;
+    position: relative;
+    left: auto;
+    right: auto;
+    opacity: 1 !important;
+    visibility: visible !important;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout .meso-grid-column {
+    flex: 1 1 0;
+    min-width: var(--v2-col-min-width, 0);
+    max-width: none;
+    display: flex;
+    flex-direction: column;
+    gap: 0;
+    align-items: stretch;
+    justify-content: flex-start;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout .note-wrapper {
+    grid-row: auto;
+    height: auto;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: flex-end;
+    overflow: visible;
+    min-height: 0;
+    padding-bottom: var(--v2-meso-item-gap, 14px);
+    margin-bottom: var(--v2-meso-item-gap, 14px);
+    box-sizing: border-box;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout .meso-grid-column .note-wrapper:last-child {
+    padding-bottom: 0;
+    margin-bottom: 0;
+}
+
+/* L2 focus hive — hex cluster centered on canvas when blocks are deployed */
+body.is-depth-v2.view-level-2 #app.is-meso-hive-layout {
+    display: block !important;
+    position: relative;
+    grid-template-columns: unset !important;
+    grid-auto-rows: unset !important;
+    width: var(--canvas-width, var(--v2-canvas-width, 175vw)) !important;
+    max-width: none;
+    padding-top: var(--scroll-breathing-room, 120px);
+    padding-inline: var(--v2-meso-page-padding-x, 2.25rem);
+    padding-bottom: var(--warehouse-reserve, 0px);
+    box-sizing: border-box;
+    pointer-events: none;
+    opacity: 1 !important;
+    visibility: visible !important;
+    overflow: visible;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-hive-layout .note-wrapper.is-meso-hive-anchored {
+    position: absolute;
+    width: var(--v2-hive-cell-width, 92px) !important;
+    min-height: var(--v2-hive-cell-height, 104px);
+    height: auto !important;
+    margin: 0;
+    padding-bottom: 0;
+    grid-row: auto !important;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: flex-end;
+    transform: translate(-50%, -50%);
+    pointer-events: auto;
+    overflow: visible;
+    cursor: pointer;
+    z-index: 2;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-hive-layout .note-wrapper > .depth-v2-glyph--meso {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: 100%;
+    height: auto !important;
+    min-height: 1px;
+    max-height: none !important;
+    flex: 0 0 auto;
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-hive-layout .depth-v2-glyph--meso {
+    position: relative !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: 100%;
+    height: auto !important;
+    min-height: 1px;
+    max-height: none !important;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-hive-layout .meso-mock__frame {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    max-height: none !important;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-hive-layout .note-stage {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    min-height: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-hive-layout .note-wrapper.is-meso-hive-anchored {
+    overflow: visible !important;
+}
+
+/* Filter fringe — filtered notes at canvas edge (L2/L3) */
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout.has-filter-fringe,
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout.has-filter-fringe {
+    padding-inline-end: calc(var(--v2-meso-page-padding-x, 2.25rem) + var(--v2-fringe-width, 12vw));
+}
+
+/* Workspace lens — L2/L3 grid break when blocks on surface (mirrors L1 void) */
+body.is-depth-v2.view-level-2 #app.is-workspace-lens-layout,
+body.is-depth-v2.view-level-3 #app.is-workspace-lens-layout {
+    display: block !important;
+    position: relative;
+    grid-template-columns: unset;
+    grid-auto-rows: unset;
+    width: var(--canvas-width, var(--v2-canvas-width, 175vw)) !important;
+    min-height: 100vh;
+    padding-top: var(--scroll-breathing-room, 120px);
+    padding-inline: var(--v2-meso-page-padding-x, 2.25rem);
+    box-sizing: border-box;
+    pointer-events: none;
+}
+
+body.is-depth-v2.view-level-2 #app.is-workspace-lens-layout .note-wrapper.is-workspace-lens-anchored,
+body.is-depth-v2.view-level-3 #app.is-workspace-lens-layout .note-wrapper.is-workspace-lens-anchored {
+    position: absolute;
+    width: auto;
+    height: auto;
+    min-height: 0;
+    margin: 0;
+    transform: translate(-50%, -50%);
+    pointer-events: auto;
+}
+
+body.is-depth-v2.view-level-2 #app.is-workspace-lens-layout .note-stage {
+    display: none !important;
+}
+
+body.is-depth-v2.view-level-2 #app.is-workspace-lens-layout .depth-v2-glyph--meso {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: 100%;
+    position: relative !important;
+}
+
+body.is-depth-v2.view-level-3 #app.is-workspace-lens-layout .depth-v2-glyph--micro {
+    display: block !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: 100%;
+    position: relative !important;
+}
+
+body.is-depth-v2 #app .filter-fringe-zone {
+    position: absolute;
+    top: var(--scroll-breathing-room, 120px);
+    inset-inline-end: var(--v2-meso-page-padding-x, 2.25rem);
+    width: var(--v2-fringe-width, 12vw);
+    min-width: 72px;
+    max-height: calc(100vh - var(--scroll-breathing-room, 120px) - 2rem);
+    overflow-y: auto;
+    overflow-x: hidden;
+    display: flex;
+    flex-direction: column;
+    gap: calc(var(--v2-meso-item-gap, 14px) * 0.75);
+    pointer-events: auto;
+    z-index: 3;
+    box-sizing: border-box;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout .filter-fringe-zone .note-wrapper {
+    width: 100%;
+    min-height: 0;
+    height: auto;
+    padding-bottom: 0;
+    margin-bottom: 0;
+    transform: scale(var(--v2-fringe-cell-scale, 0.72));
+    transform-origin: top center;
+    opacity: var(--v2-fringe-opacity, 0.42);
+    pointer-events: auto;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .filter-fringe-zone .note-wrapper {
+    width: 100%;
+    transform: scale(var(--v2-fringe-cell-scale, 0.72));
+    transform-origin: top center;
+    opacity: var(--v2-fringe-opacity, 0.42);
+    pointer-events: auto;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout .filter-fringe-zone .note-wrapper.is-molecule-filtered-out,
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .filter-fringe-zone .note-wrapper.is-molecule-filtered-out {
+    opacity: var(--v2-fringe-opacity, 0.42);
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout .note-stage {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    pointer-events: none !important;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout .note-wrapper > .depth-v2-glyph--meso {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: 100%;
+    height: auto !important;
+    min-height: 1px;
+    max-height: none !important;
+    flex: 0 0 auto;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout .depth-v2-glyph--meso {
+    position: relative !important;
+    left: auto !important;
+    right: auto !important;
+    top: auto !important;
+    bottom: auto !important;
+    transform: none !important;
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    width: 100%;
+    height: auto !important;
+    min-height: 1px;
+    max-height: none !important;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout .meso-mock__frame {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    max-height: none !important;
+}
+
+body.is-depth-v2.view-level-2 #app,
+body.is-depth-v2.view-level-3 #app {
+    display: grid;
+    grid-template-columns: repeat(var(--col-count), 1fr);
+    grid-auto-rows: var(--v2-cell-height, 72px);
+    row-gap: var(--v2-row-gap, 24px);
+    column-gap: var(--v2-col-gap, 20px);
+    width: var(--canvas-width);
+    position: relative;
+    pointer-events: none;
+    padding-bottom: var(--warehouse-reserve, 0px);
+    box-sizing: border-box;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout {
+    --v2-micro-col-width: calc(
+        (100vw - 2 * var(--v2-meso-page-padding-x) - (var(--v2-micro-viewport-cols, 3) - 1) * var(--v2-col-gap))
+        / var(--v2-micro-viewport-cols, 3)
+    );
+    display: grid !important;
+    grid-template-columns: repeat(var(--col-count), minmax(0, var(--v2-micro-col-width)));
+    grid-auto-rows: min-content;
+    row-gap: var(--v2-row-gap, 10px);
+    column-gap: var(--v2-col-gap, 12px);
+    width: calc(
+        var(--col-count) * var(--v2-micro-col-width)
+        + max(0, var(--col-count) - 1) * var(--v2-col-gap)
+        + 2 * var(--v2-meso-page-padding-x)
+    ) !important;
+    max-width: none;
+    padding-inline: var(--v2-meso-page-padding-x, 2.25rem);
+    padding-top: var(--scroll-breathing-room, 120px);
+    box-sizing: border-box;
+    opacity: 1 !important;
+    visibility: visible !important;
+    pointer-events: none;
+}
+
+body.is-depth-v2.view-level-2 .note-wrapper,
+body.is-depth-v2.view-level-3 .note-wrapper {
+    width: 100%;
+    aspect-ratio: auto;
+    margin-bottom: 0;
+}
+
+body.is-depth-v2.view-level-2 .note-wrapper {
+    height: 100%;
+    min-height: var(--v2-cell-height, 72px);
+    pointer-events: none;
+}
+
+body.is-depth-v2.view-level-2 .note-wrapper:not(.is-layout-excluded):not(.is-molecule-filtered-out) {
+    pointer-events: auto;
+    cursor: pointer;
+}
+
+body.is-depth-v2.view-level-2 .note-wrapper {
+    grid-row: span var(--meso-mock-row-span, 1);
+    justify-content: flex-end;
+    align-items: flex-end;
+    overflow: hidden;
+}
+
+body.is-depth-v2.view-level-3 .note-wrapper {
+    grid-row: auto;
+    min-height: 0;
+    height: auto;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    overflow: visible;
+    pointer-events: auto;
+}
+
+body.is-depth-v2.view-level-2 .note-stage {
+    position: relative;
+    width: 100%;
+    height: 100%;
+    justify-content: flex-end;
+    align-items: flex-end;
+    background: transparent;
+    overflow: hidden;
+}
+
+body.is-depth-v2.view-level-3 .note-stage {
+    position: relative;
+    width: 100%;
+    height: auto;
+    display: block;
+    background: transparent;
+    overflow: visible;
+    pointer-events: auto;
+    transform: none;
+    opacity: 1;
+    visibility: visible;
+}
+
+body.is-depth-v2.view-level-2 .note-stage {
+    transform: none;
+    opacity: 1;
+    visibility: visible;
+    pointer-events: none;
+}
+
+/* L1 — גריד מאקרו מקורי, לא יורש מ-L2/L3 */
+body.is-depth-v2.view-level-1 .note-wrapper {
+    width: 100%;
+    height: auto;
+    min-height: 0;
+    aspect-ratio: 1 / 1;
+    margin-bottom: 0;
+}
+
+body.is-depth-v2.view-level-1 #app {
+    display: grid;
+    grid-template-columns: repeat(var(--col-count), 1fr);
+    grid-auto-rows: max-content;
+    row-gap: var(--grid-gap);
+    column-gap: var(--grid-gap);
+    width: var(--canvas-width);
+}
+
+body.is-depth-v2.view-level-1 .note-stage {
+    transform: none;
+}
+
+/* L2/L3 — גרירה ושיטוט (אירועים עוברים ל-nav-surface) */
+body.is-depth-v2.view-level-2 #nav-surface,
+body.is-depth-v2.view-level-3 #nav-surface {
+    cursor: grab;
+}
+
+body.is-depth-v2.view-level-2.is-canvas-panning #nav-surface,
+body.is-depth-v2.view-level-3.is-canvas-panning #nav-surface,
+body.is-depth-v2.view-level-2.is-space-pan #nav-surface,
+body.is-depth-v2.view-level-3.is-space-pan #nav-surface {
+    cursor: grabbing;
+}
+
+/* מסתיר תוכן אמיתי — שלב 3 יחזיר */
+body.is-depth-v2 .meso-silhouette,
+body.is-depth-v2 .note-stage .layer-full .note-card {
+    display: none !important;
+}
+
+/* מעבר L1→L2 — סילואטות חשופות בזמן האנימציה */
+body.is-depth-v2.is-macro-to-meso.view-level-1:not(.is-meso-zoom-out) .meso-silhouette {
+    display: block !important;
+}
+
+body.is-depth-v2.is-macro-to-meso.view-level-1 .depth-v2-glyph {
+    display: none !important;
+}
+
+body.is-depth-v2 .depth-v2-glyph {
+    display: none;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    transform: translate(-50%, -50%);
+    pointer-events: none;
+}
+
+/* L2 — הדמיית סילואטה: מלבני שורות (בלי מדידת טקסט) */
+body.is-depth-v2.view-level-2 .depth-v2-glyph--meso {
+    display: flex !important;
+    position: absolute;
+    left: auto;
+    right: 0;
+    top: auto;
+    bottom: 0;
+    transform: none;
+    align-items: flex-end;
+    justify-content: flex-end;
+    width: 100%;
+    height: 100%;
+    max-width: 100%;
+    max-height: 100%;
+    overflow: hidden;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+    outline: none;
+    aspect-ratio: auto;
+    z-index: 25;
+    pointer-events: auto;
+    cursor: pointer;
+    font-size: calc(clamp(7px, 1.32vw, 14px) * var(--meso-mock-font-scale, 1) * var(--meso-mock-size-scale, 1));
+}
+
+.meso-mock__frame {
+    width: max-content;
+    max-width: var(--meso-mock-frame-width, 100%);
+    height: auto;
+    max-height: 100%;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    justify-content: flex-start;
+    align-self: flex-end;
+    gap: 0;
+    padding: 0;
+    box-sizing: border-box;
+    position: relative;
+    background: transparent;
+    border: none;
+    box-shadow: none;
+}
+
+/* blobs — gradient מאוחד; כל שורה חושפת את החלק שלה */
+.meso-mock__frame[data-gradient-mode="blobs"] {
+    position: relative;
+    overflow: hidden;
+    height: var(--meso-mock-content-h, auto);
+    min-height: 1px;
+    flex: none;
+    background: transparent;
+}
+
+.meso-mock__frame[data-gradient-mode="blobs"]::after {
+    content: none;
+    display: none;
+}
+
+.meso-mock__frame[data-gradient-mode="blobs"] .meso-mock__line {
+    position: absolute;
+    right: 0;
+    top: var(--meso-mock-line-top, 0);
+    box-sizing: border-box;
+    max-width: none;
+    background-image: var(--meso-mock-gradient, none);
+    background-size: var(--meso-mock-gradient-w, 100%) var(--meso-mock-gradient-h, 100%);
+    background-position: right var(--meso-mock-line-offset, 0);
+    background-repeat: no-repeat;
+    background-color: transparent;
+}
+
+.meso-mock__frame[data-gradient-mode="blobs"] .meso-mock__line::after {
+    content: "";
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: var(--meso-mock-grain-opacity, 0.05);
+    mix-blend-mode: overlay;
+    background-image: var(--meso-mock-grain-image, none);
+    background-size: var(--meso-mock-grain-tile, 64px) var(--meso-mock-grain-tile, 64px);
+}
+
+/* canvas — baked texture; slice per line (same as blobs, no DOM grain) */
+.meso-mock__frame[data-gradient-mode="canvas"] {
+    position: relative;
+    overflow: hidden;
+    height: var(--meso-mock-content-h, auto);
+    min-height: 1px;
+    flex: none;
+    background: transparent;
+}
+
+.meso-mock__frame[data-gradient-mode="canvas"]::after {
+    content: none;
+    display: none;
+}
+
+.meso-mock__frame[data-gradient-mode="canvas"] .meso-mock__line {
+    position: absolute;
+    right: 0;
+    top: var(--meso-mock-line-top, 0);
+    box-sizing: border-box;
+    max-width: none;
+    background-image: var(--meso-mock-gradient, none);
+    background-size: var(--meso-mock-gradient-w, 100%) var(--meso-mock-gradient-h, 100%);
+    background-position: right var(--meso-mock-line-offset, 0);
+    background-repeat: no-repeat;
+    background-color: transparent;
+}
+
+.meso-mock__frame[data-gradient-mode="canvas"] .meso-mock__line::after {
+    content: none;
+    display: none;
+}
+
+/* p5 mandala — baked morph shader; slice per line (same as shader) */
+.meso-mock__frame[data-gradient-mode="p5"] {
+    position: relative;
+    overflow: hidden;
+    height: var(--meso-mock-content-h, auto);
+    min-height: 1px;
+    flex: none;
+    background: transparent;
+}
+
+.meso-mock__frame[data-gradient-mode="p5"]::after {
+    content: none;
+    display: none;
+}
+
+.meso-mock__frame[data-gradient-mode="p5"] .meso-mock__line {
+    position: absolute;
+    right: 0;
+    top: var(--meso-mock-line-top, 0);
+    box-sizing: border-box;
+    max-width: none;
+    background-color: var(--meso-mock-bg, var(--bg-main));
+    background-image: var(--meso-mock-gradient, none);
+    background-size: calc(var(--meso-mock-gradient-w, 100%) * var(--meso-mock-texture-overscale, 1.35)) calc(var(--meso-mock-gradient-h, 100%) * var(--meso-mock-texture-overscale, 1.35));
+    background-position: right var(--meso-mock-line-offset, 0);
+    background-repeat: no-repeat;
+}
+
+.meso-mock__frame[data-gradient-mode="p5"] .meso-mock__line::after {
+    content: "";
+    display: block;
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: var(--meso-mock-grain-opacity, 0.2);
+    mix-blend-mode: multiply;
+    background-color: transparent;
+    background-image: var(--meso-mock-grain-image, none);
+    background-size: var(--meso-mock-grain-tile, 64px) var(--meso-mock-grain-tile, 64px);
+}
+
+/* shader — WebGL bake + optional live hover; slice per line */
+.meso-mock__frame[data-gradient-mode="shader"] {
+    position: relative;
+    overflow: hidden;
+    height: var(--meso-mock-content-h, auto);
+    min-height: 1px;
+    flex: none;
+    background: transparent;
+}
+
+.meso-mock__frame[data-gradient-mode="shader"]::after {
+    content: none;
+    display: none;
+}
+
+.meso-mock__frame[data-gradient-mode="shader"] .meso-mock__line {
+    position: absolute;
+    right: 0;
+    top: var(--meso-mock-line-top, 0);
+    box-sizing: border-box;
+    max-width: none;
+    background-image: var(--meso-mock-gradient, none);
+    background-size: calc(var(--meso-mock-gradient-w, 100%) * var(--meso-mock-texture-overscale, 1.78)) calc(var(--meso-mock-gradient-h, 100%) * var(--meso-mock-texture-overscale, 1.78));
+    background-position: right var(--meso-mock-line-offset, 0);
+    background-repeat: no-repeat;
+    background-color: transparent;
+}
+
+.meso-mock__frame[data-gradient-mode="shader"] .meso-mock__line::after {
+    content: none;
+    display: none;
+}
+
+.meso-mock__frame::after {
+    content: none;
+    display: none;
+}
+
+/* SVG — blobs אליפטיים; grain רק בתוך clipPath (בלי מלבן לבן) */
+.meso-mock__frame[data-gradient-mode="svg"] {
+    overflow: visible;
+}
+
+.meso-mock__frame[data-gradient-mode="svg"]::after {
+    content: none;
+    display: none;
+}
+
+.meso-mock__svg {
+    display: block;
+    overflow: visible;
+    background: transparent;
+}
+
+.meso-mock__blobs {
+    mix-blend-mode: normal;
+}
+
+.meso-mock__svg .meso-mock__rect {
+    vector-effect: non-scaling-stroke;
+}
+
+.meso-mock__line::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 1;
+    pointer-events: none;
+    opacity: var(--meso-mock-grain-opacity, 0.1);
+    mix-blend-mode: multiply;
+    background-color: transparent;
+    background-image: var(--meso-mock-grain-image, none);
+    background-size: var(--meso-mock-grain-tile, 56px) var(--meso-mock-grain-tile, 56px);
+}
+
+.meso-mock__line {
+    display: block;
+    width: var(--meso-mock-line-width, 100%);
+    min-width: 4px;
+    max-width: 100%;
+    height: var(--meso-mock-line-h, 11px);
+    position: relative;
+    z-index: 0;
+    background-color: transparent;
+    background-image: var(--meso-mock-gradient, none);
+    background-size: 100% 100%;
+    background-position: 0 0;
+    background-repeat: no-repeat;
+    border-radius: 0;
+    flex-shrink: 0;
+}
+
+.meso-mock__frame[data-gradient-mode="bands"] .meso-mock__line {
+    background-image: var(--meso-mock-gradient, none);
+    background-size: calc(100% / var(--meso-mock-line-w, 1)) 100%;
+    background-position: 100% 0;
+}
+
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout,
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout {
+    padding-bottom: var(--warehouse-reserve, 0px);
+}
+
+/* Filter / focus layout — only matching notes in grid; rest hidden */
+body.is-depth-v2.view-level-2 .note-wrapper.is-molecule-filtered-out,
+body.is-depth-v2.view-level-3 .note-wrapper.is-molecule-filtered-out,
+body.is-depth-v2.view-level-2 .note-wrapper.is-layout-excluded,
+body.is-depth-v2.view-level-3 .note-wrapper.is-layout-excluded {
+    display: none !important;
+}
+
+body.is-depth-v2.view-level-2.is-block-focus .note-wrapper.is-molecule-focused .depth-v2-glyph--meso {
+    opacity: 1;
+}
+
+/* Per-tag focus colors are baked in MesoMock.resolveTagColorForLens */
+
+body.is-depth-v2.view-level-2 .depth-v2-glyph--micro {
+    display: none !important;
+}
+
+body.is-depth-v2.view-level-3 .depth-v2-glyph--meso {
+    display: none !important;
+}
+
+/* L3 — פתק פיקטיבי (טיפוגרפיה מ-.note-title / .note-body / .note-idcode / .tag) */
+body.is-depth-v2.view-level-3 .depth-v2-glyph--micro {
+    position: relative;
+    display: block !important;
+    width: 100%;
+    height: auto;
+    background: none;
+    border: none;
+    box-sizing: border-box;
+    pointer-events: auto;
+}
+
+body.is-depth-v2.view-level-3 .micro-mock__card.note-card {
+    display: flex !important;
+    width: 100%;
+    height: auto;
+    aspect-ratio: 20 / 21;
+    max-height: none;
+    overflow: hidden;
+}
+
+/* תגיות L3 — pills כמו בלוקים במחסן (.action-block) */
+body.is-depth-v2.view-level-3 .micro-mock__tags {
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+    justify-content: flex-start;
+    align-items: center;
+    flex-shrink: 0;
+    margin-top: auto;
+    padding-top: 0.5rem;
+    direction: rtl;
+}
+
+body.is-depth-v2.view-level-3 .micro-mock__tag-block.action-block {
+    cursor: default;
+    pointer-events: none;
+    touch-action: auto;
+    flex-shrink: 0;
+}
+
+body.is-depth-v2.view-level-3.is-block-focus .note-wrapper.is-molecule-muted .depth-v2-glyph--micro {
+    opacity: 0.34;
+}
+
+body.is-depth-v2.view-level-3.is-block-focus .note-wrapper.is-molecule-focused .depth-v2-glyph--micro {
+    opacity: 1;
+}
+
+body.is-depth-v2.view-level-2 .note-stage .layer-small,
+body.is-depth-v2.view-level-2 .note-stage .layer-full,
+body.is-depth-v2.view-level-3 .note-stage .layer-small,
+body.is-depth-v2.view-level-3 .note-stage .layer-full {
+    display: none !important;
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+}
+
+body.is-depth-v2.view-level-2 .layer-dot,
+body.is-depth-v2.view-level-3 .layer-dot {
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+}
+
+body.is-depth-v2.view-level-1 .depth-v2-glyph {
+    display: none !important;
+}
+
+body.is-depth-v2.view-level-1 .note-stage {
+    opacity: 0;
+    visibility: hidden;
+}
