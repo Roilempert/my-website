@@ -148,7 +148,7 @@ const SpatialNavigation = {
         if (!(target instanceof Element)) return true;
         if (ArtifactInspector.isActive) return true;
         if (ActionWarehouse.dragState) return true;
-        return !!target.closest('.warehouse-shell, .action-block, .warehouse-reset, .focus-backdrop.active');
+        return !!target.closest('.warehouse-shell, .action-block, .warehouse-reset, .focus-backdrop.active, .site-navigation-layers, .site-navigation-maps');
     },
 
     canStartPan(e) {
@@ -281,6 +281,181 @@ const SpatialNavigation = {
         return [dx, dy];
     },
 
+    getViewportPageRect(forLevel = DepthController.currentLevel) {
+        const bottomReserve = forLevel === 1 ? ActionWarehouse.getScrollReserve() : 0;
+        return {
+            left: window.pageXOffset,
+            top: window.pageYOffset,
+            width: window.innerWidth,
+            height: Math.max(0, window.innerHeight - bottomReserve)
+        };
+    },
+
+    getMacroContentBounds() {
+        const appBounds = this.getAppBounds();
+        if (!appBounds) return null;
+
+        if (typeof PhysicsEngine === 'undefined' || !PhysicsEngine.bodiesData?.length) {
+            return appBounds;
+        }
+
+        const orbitCfg = CONFIG.warehouse.orbit;
+        const bodiesData = PhysicsEngine.bodiesData;
+        const groups = new Map();
+
+        bodiesData.forEach(item => {
+            if (item.isFiltered) return;
+            if (!groups.has(item.noteIndex)) {
+                groups.set(item.noteIndex, []);
+            }
+            groups.get(item.noteIndex).push(item);
+        });
+
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minY = Infinity;
+        let maxY = -Infinity;
+
+        groups.forEach((dots, noteIndex) => {
+            const radius = ActionWarehouse.noteMoleculeExtent(bodiesData, noteIndex, orbitCfg);
+            let cx = 0;
+            let cy = 0;
+            dots.forEach(item => {
+                cx += item.body.position.x;
+                cy += item.body.position.y;
+            });
+            cx /= dots.length;
+            cy /= dots.length;
+            minX = Math.min(minX, cx - radius);
+            maxX = Math.max(maxX, cx + radius);
+            minY = Math.min(minY, cy - radius);
+            maxY = Math.max(maxY, cy + radius);
+        });
+
+        ActionWarehouse.blocks.forEach(block => {
+            if (block.state !== 'active') return;
+            const r = ActionWarehouse.getBlockCollisionRadius(block);
+            minX = Math.min(minX, block.bodyX - r);
+            maxX = Math.max(maxX, block.bodyX + r);
+            minY = Math.min(minY, block.bodyY - r);
+            maxY = Math.max(maxY, block.bodyY + r);
+        });
+
+        if (!Number.isFinite(minX)) return appBounds;
+        return this.mergeBounds(appBounds, { minX, maxX, minY, maxY });
+    },
+
+    getCatalogLevelBounds(level) {
+        const app = document.getElementById('app');
+        const appBounds = this.getAppBounds();
+        if (!app || !appBounds) return appBounds;
+
+        const layout = CatalogState?.catalogLayout;
+        if (layout?.bounds && layout.mode === 'catalog') {
+            const rect = app.getBoundingClientRect();
+            const scrollX = window.pageXOffset;
+            const scrollY = window.pageYOffset;
+            return {
+                minX: rect.left + scrollX,
+                maxX: rect.left + scrollX + layout.bounds.width,
+                minY: rect.top + scrollY,
+                maxY: rect.top + scrollY + layout.bounds.height
+            };
+        }
+
+        return appBounds;
+    },
+
+    getContentBoundsForLevel(level) {
+        if (level === 1) {
+            return this.getMacroContentBounds();
+        }
+
+        if (level >= 2) {
+            if (DepthController.currentLevel === level) {
+                if (DepthController.currentLevel >= 2 && CatalogLayoutEngine.isCatalogLayoutActive()) {
+                    return this.getCatalogLevelBounds(level);
+                }
+                if (MacroMesoBridge.isAnimating() && MacroMesoBridge.anchors.length > 0) {
+                    const half = (parseFloat(
+                        getComputedStyle(document.documentElement).getPropertyValue('--meso-anchor-size')
+                    ) || scale(108)) / 2;
+                    let minX = Infinity;
+                    let maxX = -Infinity;
+                    let minY = Infinity;
+                    let maxY = -Infinity;
+
+                    MacroMesoBridge.anchors.forEach(({ pageX, pageY }) => {
+                        minX = Math.min(minX, pageX - half);
+                        maxX = Math.max(maxX, pageX + half);
+                        minY = Math.min(minY, pageY - half);
+                        maxY = Math.max(maxY, pageY + half);
+                    });
+
+                    if (Number.isFinite(minX)) {
+                        return this.mergeBounds(this.getAppBounds(), { minX, maxX, minY, maxY });
+                    }
+                }
+            }
+            return this.getAppBounds();
+        }
+
+        return this.getAppBounds();
+    },
+
+    getContentMarkersForLevel(level) {
+        const markers = [];
+
+        if (level === 1 && typeof PhysicsEngine !== 'undefined' && PhysicsEngine.bodiesData?.length > 0) {
+            const groups = new Map();
+            PhysicsEngine.bodiesData.forEach(item => {
+                if (item.isFiltered) return;
+                if (!groups.has(item.noteIndex)) groups.set(item.noteIndex, []);
+                groups.get(item.noteIndex).push(item);
+            });
+            groups.forEach((dots) => {
+                let cx = 0;
+                let cy = 0;
+                dots.forEach(item => {
+                    cx += item.body.position.x;
+                    cy += item.body.position.y;
+                });
+                markers.push({ x: cx / dots.length, y: cy / dots.length });
+            });
+            return markers;
+        }
+
+        const app = document.getElementById('app');
+        if (!app) return markers;
+
+        const appRect = app.getBoundingClientRect();
+        const originX = appRect.left + window.pageXOffset;
+        const originY = appRect.top + window.pageYOffset;
+
+        const layout = CatalogState?.catalogLayout;
+        if (layout?.entries && layout.mode === 'catalog' && level >= 2) {
+            layout.entries.forEach((entry) => {
+                if (entry.localX != null && entry.localY != null) {
+                    markers.push({ x: originX + entry.localX, y: originY + entry.localY });
+                }
+            });
+            if (markers.length > 0) return markers;
+        }
+
+        if (DepthController.currentLevel === level) {
+            document.querySelectorAll('.note-wrapper').forEach((wrapper) => {
+                const rect = wrapper.getBoundingClientRect();
+                if (rect.width < 1 || rect.height < 1) return;
+                markers.push({
+                    x: rect.left + rect.width / 2 + window.pageXOffset,
+                    y: rect.top + rect.height / 2 + window.pageYOffset
+                });
+            });
+        }
+
+        return markers;
+    },
+
     // Live content bounding box in page coords — physics hull + full #app canvas
     getContentBounds() {
         const appBounds = this.getAppBounds();
@@ -322,7 +497,9 @@ const SpatialNavigation = {
             }
         }
 
-        if (DepthController.currentLevel === 1 && PhysicsEngine.bodiesData.length > 0) {
+        if (DepthController.currentLevel === 1 &&
+            typeof PhysicsEngine !== 'undefined' &&
+            PhysicsEngine.bodiesData?.length > 0) {
             const orbitCfg = CONFIG.warehouse.orbit;
             const bodiesData = PhysicsEngine.bodiesData;
             const groups = new Map();

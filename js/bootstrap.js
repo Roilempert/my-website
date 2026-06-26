@@ -12,13 +12,20 @@ document.addEventListener('DOMContentLoaded', () => {
     SpatialNavigation.init();
     ArtifactInspector.init();
     ActionWarehouse.init();
-    applySiteGridTokens();
 
     try {
         PhysicsEngine.init();
     } catch (err) {
         console.error('PhysicsEngine.init failed:', err);
     }
+
+    try {
+        NavigationMap.init();
+    } catch (err) {
+        console.error('NavigationMap.init failed:', err);
+    }
+
+    applySiteGridTokens();
 
     IdleRefresh.init();
 

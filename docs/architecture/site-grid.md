@@ -73,6 +73,8 @@ Tokens: `--site-meso-col-width`, `--site-micro-col-width`, `--site-meso-viewport
 | `blockBar` | Deployed blocks strip | `.depth-block-bar` | L2/L3 | Fixed `left` / `width` / `top` when visible |
 | `inspector` | Focus note card | `.artifact-inspector-panel` | All (L2/L3 overrides) | Panel position and size |
 | `filterFringe` | Filtered notes edge strip | `#filter-fringe-zone` | L2/L3 | `--v2-fringe-width`, top / max-height |
+| `navigationLayers` | Depth layer titles | `#site-navigation-layers` | All | Right strip — `--site-layer-navigationLayers-*` |
+| `navigationMaps` | Active-layer minimap | `#site-navigation-maps` | All | Bottom-right, right of warehouse — 3 cols × 2 rows |
 | `resetButton` | Warehouse RESET (×) | `.warehouse-reset` | All | Fixed anchor when workspace active |
 
 **Deferred:** deployed surface blocks, link canvas, hover ID badge, workspace void, film grain.

@@ -87,6 +87,9 @@ const DepthController = {
         [1, 2, 3].forEach(l => document.body.classList.remove(`view-level-${l}`));
         document.body.classList.add(`view-level-${level}`);
         applySiteGridTokens(document.documentElement, level);
+        if (typeof NavigationMap !== 'undefined') {
+            NavigationMap.onLevelChange(level);
+        }
         if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
             DepthV2.onLevelChange(level);
             return;

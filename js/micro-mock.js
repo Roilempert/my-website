@@ -40,9 +40,13 @@ const MicroMock = {
     },
 
     buildCardHTML(item) {
+        const title = String(item.title || '').trim();
+        const titleHTML = title
+            ? `<h2 class="note-title">${this.escapeHTML(title)}</h2>`
+            : '';
         return `<div class="micro-mock__card note-card" data-note-id="${this.escapeHTML(item.id)}">` +
             `<div class="note-idcode">${this.escapeHTML(item.id)}</div>` +
-            `<h2 class="note-title">${this.escapeHTML(item.title)}</h2>` +
+            titleHTML +
             `<div class="note-body">${this.escapeHTML(item.body)}</div>` +
             `<div class="micro-mock__tags">${this.buildTagsHTML(item.tags)}</div>` +
             `</div>`;

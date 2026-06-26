@@ -354,78 +354,6 @@ const AppState = {
             return true;
         };
 
-        const centerOnMicroGridViewport = () => {
-            if (!app.classList.contains('is-micro-grid-layout')) return false;
-
-            const root = document.documentElement;
-            const viewportCols = parseInt(
-                getComputedStyle(root).getPropertyValue('--site-micro-viewport-cols')
-                || getComputedStyle(root).getPropertyValue('--v2-micro-viewport-cols'),
-                10
-            ) || 3;
-
-            const columns = [...app.querySelectorAll(':scope > .micro-grid-column')].slice(0, viewportCols);
-            if (!columns.length) return false;
-
-            let minL = Infinity;
-            let minT = Infinity;
-            let maxR = -Infinity;
-            let maxB = -Infinity;
-
-            columns.forEach((col) => {
-                const rect = col.getBoundingClientRect();
-                if (rect.width < 1 && rect.height < 1) return;
-                minL = Math.min(minL, rect.left);
-                minT = Math.min(minT, rect.top);
-                maxR = Math.max(maxR, rect.right);
-                maxB = Math.max(maxB, rect.bottom);
-            });
-
-            if (!Number.isFinite(minL)) return false;
-
-            const appStyle = getComputedStyle(app);
-            const rootStyle = getComputedStyle(document.documentElement);
-            const paddingLeft = parseFloat(appStyle.paddingLeft) || 0;
-            const breathing = parseFloat(rootStyle.getPropertyValue('--scroll-breathing-room')) || 120;
-            const dX = minL - paddingLeft;
-            const dY = minT - breathing;
-
-            // #region agent log
-            fetch('http://127.0.0.1:7699/ingest/ba1e7923-43c5-435b-9e85-9bf447e897b8', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b92927' },
-                body: JSON.stringify({
-                    sessionId: 'b92927',
-                    runId: 'canvas-origin',
-                    hypothesisId: 'H17-H18',
-                    location: 'app-state.js:centerOnMicroGridViewport',
-                    message: 'L3 canvas-origin alignment',
-                    data: {
-                        viewportCols,
-                        clusterLeft: Math.round(minL),
-                        clusterRight: Math.round(maxR),
-                        clusterWidth: Math.round(maxR - minL),
-                        paddingLeft,
-                        breathing,
-                        dX: Math.round(dX),
-                        dY: Math.round(dY),
-                        windowWidth: window.innerWidth
-                    },
-                    timestamp: Date.now()
-                })
-            }).catch(() => {});
-            // #endregion
-
-            if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return true;
-
-            window.scrollBy({
-                left: dX,
-                top: dY,
-                behavior: options.smooth ? 'smooth' : 'auto'
-            });
-            return true;
-        };
-
         const centerOnCanvas = () => {
             const rect = app.getBoundingClientRect();
             const dX = rect.left + rect.width / 2 - window.innerWidth / 2;
@@ -440,17 +368,8 @@ const AppState = {
             });
         };
 
-        if (app.classList.contains('is-micro-grid-layout')) {
-            requestAnimationFrame(() => {
-                if (!centerOnMicroGridViewport()) centerOnCanvas();
-                requestAnimationFrame(() => {
-                    if (!centerOnMicroGridViewport()) centerOnCanvas();
-                });
-            });
-            return;
-        }
-
-        if (app.classList.contains('is-meso-column-layout') ||
+        if (app.classList.contains('is-micro-grid-layout') ||
+            app.classList.contains('is-meso-column-layout') ||
             app.classList.contains('is-meso-hive-layout')) {
             requestAnimationFrame(() => {
                 if (!centerOnColumnContent()) centerOnCanvas();

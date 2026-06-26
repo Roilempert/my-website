@@ -851,6 +851,12 @@ body.view-level-3 .layer-dot {
     src: url("../assets/fonts/NarkissTam-Regular-TRIAL.woff2") format("woff2");
 }
 
+@font-face {
+    font-family: "HelveticaNeue";
+    font-weight: 400;
+    src: url("../assets/fonts/HelveticaNeue-01.woff2") format("woff2");
+}
+
 /*
    .site-type — טיפוגרפיית שאר האתר (מחוץ ל-.note-card).
    מחסן, בלוקים, תוויות hover. בתוך פתקים: .note-title / .note-body / .note-idcode / .tag
@@ -871,7 +877,7 @@ body.view-level-3 .layer-dot {
 }
 
 .note-body {
-    font-family: NarkissTam, serif;
+    font-family: NarkissTam, HelveticaNeue, serif;
     font-size: 1rem;
     line-height: 1.2;
     max-width: 55ch;
@@ -1027,17 +1033,29 @@ body.site-grid .artifact-inspector-panel.is-open {
     max-height: none;
     overflow: visible;
     box-shadow: 0 8px 32px rgba(16, 16, 16, 0.14);
+    padding: calc(var(--site-grid-gap, 1.25rem) * 0.75) var(--site-grid-gap, 1.25rem) var(--site-grid-gap, 1.25rem);
 }
 
 .artifact-inspector-panel .note-idcode,
 .artifact-inspector-panel .note-title {
     flex-shrink: 0;
+    margin: 0;
 }
 
 .artifact-inspector-panel .note-body {
     flex: 1 1 auto;
     overflow: visible;
     white-space: pre-wrap;
+    margin: 0;
+    padding: 0;
+}
+
+.artifact-inspector-panel .note-title + .note-body {
+    margin-top: var(--site-grid-gap, 1.25rem);
+}
+
+.artifact-inspector-panel .note-title:empty {
+    display: none;
 }
 
 .artifact-inspector-panel .micro-mock__tags {
@@ -1049,7 +1067,7 @@ body.site-grid .artifact-inspector-panel.is-open {
     align-items: center;
     flex-shrink: 0;
     margin-top: auto;
-    padding-top: 0.5rem;
+    padding-top: var(--site-grid-padding, 2.5rem);
     direction: rtl;
 }
 
@@ -1094,6 +1112,99 @@ body.is-artifact-inspector-open .focus-backdrop.active.is-popup {
 /* L2 focus — block↔note lines behind meso glyphs */
 body.is-depth-v2.view-level-2.is-depth-workspace-active .link-canvas {
     z-index: 1;
+}
+
+/* ==========================================================================
+   06b. NAVIGATION — layer titles (right) + active minimap (3 cols × 2 rows)
+   ========================================================================== */
+
+/* Layer titles — right edge, no outline */
+.site-navigation-layers {
+    position: fixed;
+    z-index: 48;
+    display: flex;
+    flex-direction: column;
+    gap: var(--nav-layer-gap, 0.35rem);
+    box-sizing: border-box;
+    padding: 0.15rem 0.25rem;
+    background: transparent;
+    border: none;
+    direction: rtl;
+    pointer-events: none;
+    transition: opacity 0.25s ease;
+}
+
+body.site-grid .site-navigation-layers {
+    left: var(--site-layer-navigationLayers-left);
+    top: var(--site-layer-navigationLayers-top);
+    width: var(--site-layer-navigationLayers-width);
+    max-height: var(--site-layer-navigationLayers-height);
+}
+
+.site-navigation-layers.is-dimmed {
+    opacity: 0.45;
+}
+
+.site-navigation-layers__title {
+    font-family: var(--site-type-family);
+    font-size: var(--site-type-size);
+    line-height: var(--site-type-line);
+    color: var(--main-text);
+    text-align: right;
+    writing-mode: horizontal-tb;
+    user-select: none;
+    opacity: 0.4;
+    transition: opacity 0.2s ease;
+}
+
+.site-navigation-layers__title.is-active {
+    opacity: 1;
+    text-decoration: underline;
+    text-decoration-color: var(--accent-olive);
+    text-underline-offset: 3px;
+}
+
+/* Single minimap — bottom right, 3 site cols × 2 rows, no chrome */
+.site-navigation-maps {
+    position: fixed;
+    z-index: 48;
+    box-sizing: border-box;
+    padding: 0;
+    margin: 0;
+    border: none;
+    background: transparent;
+    overflow: hidden;
+    pointer-events: auto;
+    transition: opacity 0.25s ease;
+}
+
+body.site-grid .site-navigation-maps {
+    left: var(--site-layer-navigationMaps-left);
+    top: auto;
+    bottom: var(--warehouse-bottom-offset, 12px);
+    width: var(--site-layer-navigationMaps-width);
+    height: var(--site-layer-navigationMaps-height);
+}
+
+.site-navigation-maps.is-dimmed {
+    opacity: 0.45;
+    pointer-events: none;
+}
+
+.site-navigation-maps__map-wrap {
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+}
+
+.site-navigation-maps__map {
+    display: block;
+    width: 100%;
+    height: 100%;
+    border: none;
+    background: #e8e8e8;
+    box-sizing: border-box;
+    cursor: crosshair;
 }
 
 /* ==========================================================================
@@ -1989,6 +2100,7 @@ body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper {
     display: block;
     overflow-x: clip;
     box-sizing: border-box;
+    pointer-events: none;
 }
 
 body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper > .layer-dot,
@@ -2460,6 +2572,11 @@ body.is-depth-v2.view-level-3 .depth-v2-glyph--meso {
 /* L3 — פתק פיקטיבי (טיפוגרפיה מ-.note-title / .note-body / .note-idcode / .tag) */
 body.is-depth-v2.view-level-3 .depth-v2-glyph--micro {
     position: relative;
+    left: auto;
+    top: auto;
+    right: auto;
+    bottom: auto;
+    transform: none;
     display: block !important;
     width: 100%;
     height: auto;
@@ -2477,7 +2594,7 @@ body.is-depth-v2.view-level-3 .micro-mock__card.note-card {
     min-width: 0;
     height: auto;
     aspect-ratio: auto;
-    min-height: 0;
+    min-height: var(--site-micro-note-min-height, calc(6 * var(--site-grid-cell-h) + 5 * var(--site-grid-gap)));
     max-height: none;
     overflow-x: clip;
     overflow-y: visible;
@@ -2486,6 +2603,7 @@ body.is-depth-v2.view-level-3 .micro-mock__card.note-card {
     transform: none;
     transform-origin: top right;
     box-sizing: border-box;
+    padding: calc(var(--site-grid-gap, 1.25rem) * 0.75) var(--site-grid-gap, 1.25rem) var(--site-grid-gap, 1.25rem);
 }
 
 body.is-depth-v2.view-level-3 .micro-mock__card .note-title {
@@ -2495,14 +2613,25 @@ body.is-depth-v2.view-level-3 .micro-mock__card .note-title {
     word-break: break-word;
     max-width: 100%;
     min-width: 0;
+    margin: 0;
+}
+
+body.is-depth-v2.view-level-3 .micro-mock__card .note-title:empty {
+    display: none;
 }
 
 body.is-depth-v2.view-level-3 .micro-mock__card .note-body {
-    flex: 0 1 auto;
+    flex: 1 1 auto;
     overflow: visible;
     max-width: 100%;
     min-width: 0;
     overflow-wrap: anywhere;
+    margin: 0;
+    padding: 0;
+}
+
+body.is-depth-v2.view-level-3 .micro-mock__card .note-title + .note-body {
+    margin-top: var(--site-grid-gap, 1.25rem);
 }
 
 /* תגיות L3 — pills כמו בלוקים במחסן (.action-block) */
@@ -2514,8 +2643,8 @@ body.is-depth-v2.view-level-3 .micro-mock__tags {
     justify-content: flex-start;
     align-items: center;
     flex-shrink: 0;
-    margin-top: 0;
-    padding-top: 0.5rem;
+    margin-top: auto;
+    padding-top: var(--site-grid-padding, 2.5rem);
     direction: rtl;
 }
 
@@ -2568,6 +2697,7 @@ body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper {
     display: block !important;
     align-items: stretch !important;
     direction: ltr;
+    pointer-events: none !important;
 }
 
 body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-stage {
@@ -2592,18 +2722,27 @@ body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-stage .layer-full 
 }
 
 body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .depth-v2-glyph--micro {
+    position: relative !important;
+    left: auto !important;
+    top: auto !important;
+    right: auto !important;
+    bottom: auto !important;
     display: block !important;
     width: 100% !important;
     max-width: 100% !important;
     min-width: 0 !important;
     margin: 0 !important;
     transform: none !important;
+    pointer-events: none !important;
 }
 
 body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-mock__card.note-card {
     width: 100% !important;
     max-width: 100% !important;
     min-width: 0 !important;
+    min-height: var(--site-micro-note-min-height, calc(6 * var(--site-grid-cell-h) + 5 * var(--site-grid-gap))) !important;
     margin: 0 !important;
     transform: none !important;
+    pointer-events: auto !important;
+    cursor: pointer;
 }

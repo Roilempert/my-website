@@ -23,6 +23,7 @@ cat \
   depth-focus-links.js \
   depth-controller.js \
   spatial-navigation.js \
+  navigation-map.js \
   artifact-inspector.js \
   physics-engine.js \
   warehouse-core.js \

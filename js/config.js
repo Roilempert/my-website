@@ -24,6 +24,8 @@ const CONFIG = {
             blockBar:       { colStart: 4, colEnd: 16, rowStart: 8, rowEnd: 9  },
             inspector:    { colStart: 6, colEnd: 14, rowStart: 5, rowEnd: 9  },
             filterFringe: { colStart: 17, colEnd: 19, rowStart: 1, rowEnd: 9  },
+            navigationLayers: { colStart: 16, colEnd: 19, rowStart: 1, rowEnd: 4  },
+            navigationMaps:   { colStart: 16, colEnd: 19, rowStart: 9, rowEnd: 11 },
             resetButton:  { colStart: 3, colEnd: 4,  rowStart: 9, rowEnd: 10 }
         },
         regionsByLevel: {
@@ -34,6 +36,7 @@ const CONFIG = {
         contentColumns: { 1: 1, 2: 3, 3: 6 },
         contentColumnScale: { 3: 1.0 },
         contentGapScale: 0.88,
+        microNoteMinRows: 6,
         macroCanvasScrollFactor: 1.5
     },
 
@@ -294,6 +297,14 @@ const CONFIG = {
             minDrag: 2                // px before pan engages (ignores micro-jitter)
         },
         spacePanKey: 'Space'
+    },
+
+    /* --- Navigation map panel (minimaps + layer titles) --- */
+    navigationMap: {
+        labels: { 1: 'מאקרו', 2: 'מזו', 3: 'מיקרו' },
+        layerGap: { value: 0.35, unit: 'rem' },
+        frameInset: 2,
+        macroRefreshMs: 120
     },
 
     /* --- Artifact Inspector (focus/isolation overlay) --- */
@@ -633,6 +644,11 @@ function siteGridSpanWidth(span) {
     return `calc(${span} * var(--site-grid-cell-w) + ${span - 1} * var(--site-grid-gap))`;
 }
 
+function siteGridSpanHeight(span) {
+    if (span <= 1) return 'var(--site-grid-cell-h)';
+    return `calc(${span} * var(--site-grid-cell-h) + ${span - 1} * var(--site-grid-gap))`;
+}
+
 function getSiteGridViewportColCount(level = 1) {
     return getSiteGridContentColCount(level);
 }
@@ -688,10 +704,8 @@ function applySiteGridContentScale(root = document.documentElement) {
     root.style.setProperty('--site-macro-row-height', 'var(--site-grid-cell-h)');
     root.style.setProperty('--site-meso-col-width', siteGridContentColumnWidth(2));
     root.style.setProperty('--site-micro-col-width', siteGridContentColumnWidth(3));
-    root.style.setProperty(
-        '--site-micro-note-min-height',
-        'calc(var(--site-micro-col-width) * 21 / 20)'
-    );
+    const microMinRows = g.microNoteMinRows ?? 6;
+    root.style.setProperty('--site-micro-note-min-height', siteGridSpanHeight(microMinRows));
     root.style.setProperty(
         '--site-macro-canvas-width',
         `calc((${siteGridSpanWidth(span1)} * ${macroCols} + ${Math.max(0, macroCols - 1)} * var(--site-grid-gap) + 2 * var(--site-grid-padding)) * ${scrollFactor})`

@@ -767,79 +767,6 @@ const DepthV2 = {
         return this._mesoLayoutReadyPromise;
     },
 
-    // #region agent log
-    debugMicroColumnAlign(runId = 'top-right') {
-        const app = document.getElementById('app');
-        if (!app?.classList.contains('is-micro-grid-layout')) return;
-
-        const col = app.querySelector(':scope > .micro-grid-column');
-        if (!col) return;
-
-        const colRect = col.getBoundingClientRect();
-        const rootStyle = getComputedStyle(document.documentElement);
-        const siteMicroColToken = rootStyle.getPropertyValue('--site-micro-col-width').trim();
-        const siteCellW = rootStyle.getPropertyValue('--site-grid-cell-w').trim();
-        const siteSpan6Token = `calc(6 * ${siteCellW} + 5 * var(--site-grid-gap))`;
-        const notes = [...col.querySelectorAll(':scope > .note-wrapper:not(.is-layout-excluded)')].slice(0, 6);
-        const entries = notes.map((wrapper, i) => {
-            const card = wrapper.querySelector('.micro-mock__card');
-            const stage = wrapper.querySelector('.note-stage');
-            const glyph = wrapper.querySelector('.depth-v2-glyph--micro');
-            const layerSmall = wrapper.querySelector('.note-stage .layer-small');
-            const wRect = wrapper.getBoundingClientRect();
-            const sRect = stage?.getBoundingClientRect();
-            const gRect = glyph?.getBoundingClientRect();
-            const cRect = card?.getBoundingClientRect();
-            const wStyle = getComputedStyle(wrapper);
-            const stageStyle = stage ? getComputedStyle(stage) : null;
-            const layerSmallStyle = layerSmall ? getComputedStyle(layerSmall) : null;
-            return {
-                index: i,
-                noteId: wrapper.dataset.noteId,
-                wrapperLeft: Math.round(wRect.left),
-                wrapperRight: Math.round(wRect.right),
-                wrapperWidth: Math.round(wRect.width),
-                stageLeft: Math.round(sRect?.left ?? 0),
-                stageWidth: Math.round(sRect?.width ?? 0),
-                stageDisplay: stageStyle?.display,
-                layerSmallDisplay: layerSmallStyle?.display,
-                glyphLeft: Math.round(gRect?.left ?? 0),
-                glyphWidth: Math.round(gRect?.width ?? 0),
-                cardLeft: Math.round(cRect?.left ?? 0),
-                cardRight: Math.round(cRect?.right ?? 0),
-                cardWidth: Math.round(cRect?.width ?? 0),
-                colLeft: Math.round(colRect.left),
-                colRight: Math.round(colRect.right),
-                colWidth: Math.round(colRect.width),
-                rightDrift: Math.round(colRect.right - (cRect?.right ?? wRect.right)),
-                leftDrift: Math.round((cRect?.left ?? wRect.left) - colRect.left),
-                widthDrift: Math.round((cRect?.width ?? wRect.width) - colRect.width),
-                wrapperTransform: wStyle.transform,
-                stageTransform: stageStyle?.transform
-            };
-        });
-
-        fetch('http://127.0.0.1:7699/ingest/ba1e7923-43c5-435b-9e85-9bf447e897b8', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b92927' },
-            body: JSON.stringify({
-                sessionId: 'b92927',
-                runId,
-                hypothesisId: 'H19-H22',
-                location: 'depth-v2.js:debugMicroColumnAlign',
-                message: 'L3 column width + card inset',
-                data: {
-                    siteMicroColToken,
-                    siteSpan6Token,
-                    colWidth: Math.round(colRect.width),
-                    entries
-                },
-                timestamp: Date.now()
-            })
-        }).catch(() => {});
-    },
-    // #endregion
-
     prepareMicroGrid() {
         if (DepthController.currentLevel !== 3) return;
 
@@ -853,11 +780,6 @@ const DepthV2 = {
             if (typeof MicroMock !== 'undefined') {
                 MicroMock.applyAll();
             }
-            // #region agent log
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => this.debugMicroColumnAlign('top-right'));
-            });
-            // #endregion
             if (typeof AppState !== 'undefined') {
                 requestAnimationFrame(() => {
                     AppState.centerViewport();

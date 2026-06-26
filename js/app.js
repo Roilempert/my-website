@@ -387,78 +387,6 @@ const AppState = {
             return true;
         };
 
-        const centerOnMicroGridViewport = () => {
-            if (!app.classList.contains('is-micro-grid-layout')) return false;
-
-            const root = document.documentElement;
-            const viewportCols = parseInt(
-                getComputedStyle(root).getPropertyValue('--site-micro-viewport-cols')
-                || getComputedStyle(root).getPropertyValue('--v2-micro-viewport-cols'),
-                10
-            ) || 3;
-
-            const columns = [...app.querySelectorAll(':scope > .micro-grid-column')].slice(0, viewportCols);
-            if (!columns.length) return false;
-
-            let minL = Infinity;
-            let minT = Infinity;
-            let maxR = -Infinity;
-            let maxB = -Infinity;
-
-            columns.forEach((col) => {
-                const rect = col.getBoundingClientRect();
-                if (rect.width < 1 && rect.height < 1) return;
-                minL = Math.min(minL, rect.left);
-                minT = Math.min(minT, rect.top);
-                maxR = Math.max(maxR, rect.right);
-                maxB = Math.max(maxB, rect.bottom);
-            });
-
-            if (!Number.isFinite(minL)) return false;
-
-            const appStyle = getComputedStyle(app);
-            const rootStyle = getComputedStyle(document.documentElement);
-            const paddingLeft = parseFloat(appStyle.paddingLeft) || 0;
-            const breathing = parseFloat(rootStyle.getPropertyValue('--scroll-breathing-room')) || 120;
-            const dX = minL - paddingLeft;
-            const dY = minT - breathing;
-
-            // #region agent log
-            fetch('http://127.0.0.1:7699/ingest/ba1e7923-43c5-435b-9e85-9bf447e897b8', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b92927' },
-                body: JSON.stringify({
-                    sessionId: 'b92927',
-                    runId: 'canvas-origin',
-                    hypothesisId: 'H17-H18',
-                    location: 'app-state.js:centerOnMicroGridViewport',
-                    message: 'L3 canvas-origin alignment',
-                    data: {
-                        viewportCols,
-                        clusterLeft: Math.round(minL),
-                        clusterRight: Math.round(maxR),
-                        clusterWidth: Math.round(maxR - minL),
-                        paddingLeft,
-                        breathing,
-                        dX: Math.round(dX),
-                        dY: Math.round(dY),
-                        windowWidth: window.innerWidth
-                    },
-                    timestamp: Date.now()
-                })
-            }).catch(() => {});
-            // #endregion
-
-            if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return true;
-
-            window.scrollBy({
-                left: dX,
-                top: dY,
-                behavior: options.smooth ? 'smooth' : 'auto'
-            });
-            return true;
-        };
-
         const centerOnCanvas = () => {
             const rect = app.getBoundingClientRect();
             const dX = rect.left + rect.width / 2 - window.innerWidth / 2;
@@ -473,17 +401,8 @@ const AppState = {
             });
         };
 
-        if (app.classList.contains('is-micro-grid-layout')) {
-            requestAnimationFrame(() => {
-                if (!centerOnMicroGridViewport()) centerOnCanvas();
-                requestAnimationFrame(() => {
-                    if (!centerOnMicroGridViewport()) centerOnCanvas();
-                });
-            });
-            return;
-        }
-
-        if (app.classList.contains('is-meso-column-layout') ||
+        if (app.classList.contains('is-micro-grid-layout') ||
+            app.classList.contains('is-meso-column-layout') ||
             app.classList.contains('is-meso-hive-layout')) {
             requestAnimationFrame(() => {
                 if (!centerOnColumnContent()) centerOnCanvas();
@@ -3859,9 +3778,13 @@ const MicroMock = {
     },
 
     buildCardHTML(item) {
+        const title = String(item.title || '').trim();
+        const titleHTML = title
+            ? `<h2 class="note-title">${this.escapeHTML(title)}</h2>`
+            : '';
         return `<div class="micro-mock__card note-card" data-note-id="${this.escapeHTML(item.id)}">` +
             `<div class="note-idcode">${this.escapeHTML(item.id)}</div>` +
-            `<h2 class="note-title">${this.escapeHTML(item.title)}</h2>` +
+            titleHTML +
             `<div class="note-body">${this.escapeHTML(item.body)}</div>` +
             `<div class="micro-mock__tags">${this.buildTagsHTML(item.tags)}</div>` +
             `</div>`;
@@ -6333,79 +6256,6 @@ const DepthV2 = {
         return this._mesoLayoutReadyPromise;
     },
 
-    // #region agent log
-    debugMicroColumnAlign(runId = 'top-right') {
-        const app = document.getElementById('app');
-        if (!app?.classList.contains('is-micro-grid-layout')) return;
-
-        const col = app.querySelector(':scope > .micro-grid-column');
-        if (!col) return;
-
-        const colRect = col.getBoundingClientRect();
-        const rootStyle = getComputedStyle(document.documentElement);
-        const siteMicroColToken = rootStyle.getPropertyValue('--site-micro-col-width').trim();
-        const siteCellW = rootStyle.getPropertyValue('--site-grid-cell-w').trim();
-        const siteSpan6Token = `calc(6 * ${siteCellW} + 5 * var(--site-grid-gap))`;
-        const notes = [...col.querySelectorAll(':scope > .note-wrapper:not(.is-layout-excluded)')].slice(0, 6);
-        const entries = notes.map((wrapper, i) => {
-            const card = wrapper.querySelector('.micro-mock__card');
-            const stage = wrapper.querySelector('.note-stage');
-            const glyph = wrapper.querySelector('.depth-v2-glyph--micro');
-            const layerSmall = wrapper.querySelector('.note-stage .layer-small');
-            const wRect = wrapper.getBoundingClientRect();
-            const sRect = stage?.getBoundingClientRect();
-            const gRect = glyph?.getBoundingClientRect();
-            const cRect = card?.getBoundingClientRect();
-            const wStyle = getComputedStyle(wrapper);
-            const stageStyle = stage ? getComputedStyle(stage) : null;
-            const layerSmallStyle = layerSmall ? getComputedStyle(layerSmall) : null;
-            return {
-                index: i,
-                noteId: wrapper.dataset.noteId,
-                wrapperLeft: Math.round(wRect.left),
-                wrapperRight: Math.round(wRect.right),
-                wrapperWidth: Math.round(wRect.width),
-                stageLeft: Math.round(sRect?.left ?? 0),
-                stageWidth: Math.round(sRect?.width ?? 0),
-                stageDisplay: stageStyle?.display,
-                layerSmallDisplay: layerSmallStyle?.display,
-                glyphLeft: Math.round(gRect?.left ?? 0),
-                glyphWidth: Math.round(gRect?.width ?? 0),
-                cardLeft: Math.round(cRect?.left ?? 0),
-                cardRight: Math.round(cRect?.right ?? 0),
-                cardWidth: Math.round(cRect?.width ?? 0),
-                colLeft: Math.round(colRect.left),
-                colRight: Math.round(colRect.right),
-                colWidth: Math.round(colRect.width),
-                rightDrift: Math.round(colRect.right - (cRect?.right ?? wRect.right)),
-                leftDrift: Math.round((cRect?.left ?? wRect.left) - colRect.left),
-                widthDrift: Math.round((cRect?.width ?? wRect.width) - colRect.width),
-                wrapperTransform: wStyle.transform,
-                stageTransform: stageStyle?.transform
-            };
-        });
-
-        fetch('http://127.0.0.1:7699/ingest/ba1e7923-43c5-435b-9e85-9bf447e897b8', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b92927' },
-            body: JSON.stringify({
-                sessionId: 'b92927',
-                runId,
-                hypothesisId: 'H19-H22',
-                location: 'depth-v2.js:debugMicroColumnAlign',
-                message: 'L3 column width + card inset',
-                data: {
-                    siteMicroColToken,
-                    siteSpan6Token,
-                    colWidth: Math.round(colRect.width),
-                    entries
-                },
-                timestamp: Date.now()
-            })
-        }).catch(() => {});
-    },
-    // #endregion
-
     prepareMicroGrid() {
         if (DepthController.currentLevel !== 3) return;
 
@@ -6419,11 +6269,6 @@ const DepthV2 = {
             if (typeof MicroMock !== 'undefined') {
                 MicroMock.applyAll();
             }
-            // #region agent log
-            requestAnimationFrame(() => {
-                requestAnimationFrame(() => this.debugMicroColumnAlign('top-right'));
-            });
-            // #endregion
             if (typeof AppState !== 'undefined') {
                 requestAnimationFrame(() => {
                     AppState.centerViewport();
@@ -6847,6 +6692,9 @@ const DepthController = {
         [1, 2, 3].forEach(l => document.body.classList.remove(`view-level-${l}`));
         document.body.classList.add(`view-level-${level}`);
         applySiteGridTokens(document.documentElement, level);
+        if (typeof NavigationMap !== 'undefined') {
+            NavigationMap.onLevelChange(level);
+        }
         if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
             DepthV2.onLevelChange(level);
             return;
@@ -7433,7 +7281,7 @@ const SpatialNavigation = {
         if (!(target instanceof Element)) return true;
         if (ArtifactInspector.isActive) return true;
         if (ActionWarehouse.dragState) return true;
-        return !!target.closest('.warehouse-shell, .action-block, .warehouse-reset, .focus-backdrop.active');
+        return !!target.closest('.warehouse-shell, .action-block, .warehouse-reset, .focus-backdrop.active, .site-navigation-layers, .site-navigation-maps');
     },
 
     canStartPan(e) {
@@ -7566,6 +7414,181 @@ const SpatialNavigation = {
         return [dx, dy];
     },
 
+    getViewportPageRect(forLevel = DepthController.currentLevel) {
+        const bottomReserve = forLevel === 1 ? ActionWarehouse.getScrollReserve() : 0;
+        return {
+            left: window.pageXOffset,
+            top: window.pageYOffset,
+            width: window.innerWidth,
+            height: Math.max(0, window.innerHeight - bottomReserve)
+        };
+    },
+
+    getMacroContentBounds() {
+        const appBounds = this.getAppBounds();
+        if (!appBounds) return null;
+
+        if (typeof PhysicsEngine === 'undefined' || !PhysicsEngine.bodiesData?.length) {
+            return appBounds;
+        }
+
+        const orbitCfg = CONFIG.warehouse.orbit;
+        const bodiesData = PhysicsEngine.bodiesData;
+        const groups = new Map();
+
+        bodiesData.forEach(item => {
+            if (item.isFiltered) return;
+            if (!groups.has(item.noteIndex)) {
+                groups.set(item.noteIndex, []);
+            }
+            groups.get(item.noteIndex).push(item);
+        });
+
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minY = Infinity;
+        let maxY = -Infinity;
+
+        groups.forEach((dots, noteIndex) => {
+            const radius = ActionWarehouse.noteMoleculeExtent(bodiesData, noteIndex, orbitCfg);
+            let cx = 0;
+            let cy = 0;
+            dots.forEach(item => {
+                cx += item.body.position.x;
+                cy += item.body.position.y;
+            });
+            cx /= dots.length;
+            cy /= dots.length;
+            minX = Math.min(minX, cx - radius);
+            maxX = Math.max(maxX, cx + radius);
+            minY = Math.min(minY, cy - radius);
+            maxY = Math.max(maxY, cy + radius);
+        });
+
+        ActionWarehouse.blocks.forEach(block => {
+            if (block.state !== 'active') return;
+            const r = ActionWarehouse.getBlockCollisionRadius(block);
+            minX = Math.min(minX, block.bodyX - r);
+            maxX = Math.max(maxX, block.bodyX + r);
+            minY = Math.min(minY, block.bodyY - r);
+            maxY = Math.max(maxY, block.bodyY + r);
+        });
+
+        if (!Number.isFinite(minX)) return appBounds;
+        return this.mergeBounds(appBounds, { minX, maxX, minY, maxY });
+    },
+
+    getCatalogLevelBounds(level) {
+        const app = document.getElementById('app');
+        const appBounds = this.getAppBounds();
+        if (!app || !appBounds) return appBounds;
+
+        const layout = CatalogState?.catalogLayout;
+        if (layout?.bounds && layout.mode === 'catalog') {
+            const rect = app.getBoundingClientRect();
+            const scrollX = window.pageXOffset;
+            const scrollY = window.pageYOffset;
+            return {
+                minX: rect.left + scrollX,
+                maxX: rect.left + scrollX + layout.bounds.width,
+                minY: rect.top + scrollY,
+                maxY: rect.top + scrollY + layout.bounds.height
+            };
+        }
+
+        return appBounds;
+    },
+
+    getContentBoundsForLevel(level) {
+        if (level === 1) {
+            return this.getMacroContentBounds();
+        }
+
+        if (level >= 2) {
+            if (DepthController.currentLevel === level) {
+                if (DepthController.currentLevel >= 2 && CatalogLayoutEngine.isCatalogLayoutActive()) {
+                    return this.getCatalogLevelBounds(level);
+                }
+                if (MacroMesoBridge.isAnimating() && MacroMesoBridge.anchors.length > 0) {
+                    const half = (parseFloat(
+                        getComputedStyle(document.documentElement).getPropertyValue('--meso-anchor-size')
+                    ) || scale(108)) / 2;
+                    let minX = Infinity;
+                    let maxX = -Infinity;
+                    let minY = Infinity;
+                    let maxY = -Infinity;
+
+                    MacroMesoBridge.anchors.forEach(({ pageX, pageY }) => {
+                        minX = Math.min(minX, pageX - half);
+                        maxX = Math.max(maxX, pageX + half);
+                        minY = Math.min(minY, pageY - half);
+                        maxY = Math.max(maxY, pageY + half);
+                    });
+
+                    if (Number.isFinite(minX)) {
+                        return this.mergeBounds(this.getAppBounds(), { minX, maxX, minY, maxY });
+                    }
+                }
+            }
+            return this.getAppBounds();
+        }
+
+        return this.getAppBounds();
+    },
+
+    getContentMarkersForLevel(level) {
+        const markers = [];
+
+        if (level === 1 && typeof PhysicsEngine !== 'undefined' && PhysicsEngine.bodiesData?.length > 0) {
+            const groups = new Map();
+            PhysicsEngine.bodiesData.forEach(item => {
+                if (item.isFiltered) return;
+                if (!groups.has(item.noteIndex)) groups.set(item.noteIndex, []);
+                groups.get(item.noteIndex).push(item);
+            });
+            groups.forEach((dots) => {
+                let cx = 0;
+                let cy = 0;
+                dots.forEach(item => {
+                    cx += item.body.position.x;
+                    cy += item.body.position.y;
+                });
+                markers.push({ x: cx / dots.length, y: cy / dots.length });
+            });
+            return markers;
+        }
+
+        const app = document.getElementById('app');
+        if (!app) return markers;
+
+        const appRect = app.getBoundingClientRect();
+        const originX = appRect.left + window.pageXOffset;
+        const originY = appRect.top + window.pageYOffset;
+
+        const layout = CatalogState?.catalogLayout;
+        if (layout?.entries && layout.mode === 'catalog' && level >= 2) {
+            layout.entries.forEach((entry) => {
+                if (entry.localX != null && entry.localY != null) {
+                    markers.push({ x: originX + entry.localX, y: originY + entry.localY });
+                }
+            });
+            if (markers.length > 0) return markers;
+        }
+
+        if (DepthController.currentLevel === level) {
+            document.querySelectorAll('.note-wrapper').forEach((wrapper) => {
+                const rect = wrapper.getBoundingClientRect();
+                if (rect.width < 1 || rect.height < 1) return;
+                markers.push({
+                    x: rect.left + rect.width / 2 + window.pageXOffset,
+                    y: rect.top + rect.height / 2 + window.pageYOffset
+                });
+            });
+        }
+
+        return markers;
+    },
+
     // Live content bounding box in page coords — physics hull + full #app canvas
     getContentBounds() {
         const appBounds = this.getAppBounds();
@@ -7607,7 +7630,9 @@ const SpatialNavigation = {
             }
         }
 
-        if (DepthController.currentLevel === 1 && PhysicsEngine.bodiesData.length > 0) {
+        if (DepthController.currentLevel === 1 &&
+            typeof PhysicsEngine !== 'undefined' &&
+            PhysicsEngine.bodiesData?.length > 0) {
             const orbitCfg = CONFIG.warehouse.orbit;
             const bodiesData = PhysicsEngine.bodiesData;
             const groups = new Map();
@@ -7658,6 +7683,312 @@ const SpatialNavigation = {
     }
 };
 
+/* ==========================================================================
+   05b. NAVIGATION MAP — layer titles (right) + single active minimap (3×2 grid)
+   ========================================================================== */
+const NavigationMap = {
+    layersPanel: null,
+    mapsPanel: null,
+    titles: new Map(),
+    canvas: null,
+    mapWrap: null,
+    ctx: null,
+    _lastTransform: null,
+    _renderScheduled: false,
+    _rafId: null,
+    _resizeObserver: null,
+    _activeLevel: 1,
+
+    init() {
+        const cfg = CONFIG.navigationMap;
+        if (!cfg) return;
+
+        const root = document.documentElement;
+        if (cfg.layerGap) {
+            root.style.setProperty('--nav-layer-gap', siteGridCssLength(cfg.layerGap));
+        }
+
+        const layersPanel = document.createElement('nav');
+        layersPanel.id = 'site-navigation-layers';
+        layersPanel.className = 'site-navigation-layers';
+        layersPanel.dataset.siteLayer = 'navigationLayers';
+        layersPanel.setAttribute('dir', 'rtl');
+        layersPanel.setAttribute('aria-label', 'שכבות עומק');
+
+        const mapsPanel = document.createElement('aside');
+        mapsPanel.id = 'site-navigation-maps';
+        mapsPanel.className = 'site-navigation-maps';
+        mapsPanel.dataset.siteLayer = 'navigationMaps';
+        mapsPanel.setAttribute('aria-label', 'מפת ניווט');
+
+        const mapWrap = document.createElement('div');
+        mapWrap.className = 'site-navigation-maps__map-wrap';
+
+        const canvas = document.createElement('canvas');
+        canvas.className = 'site-navigation-maps__map';
+        canvas.setAttribute('aria-hidden', 'true');
+        mapWrap.appendChild(canvas);
+        mapsPanel.appendChild(mapWrap);
+
+        [1, 2, 3].forEach((level) => {
+            const title = document.createElement('span');
+            title.className = 'site-navigation-layers__title';
+            title.dataset.level = String(level);
+            title.textContent = cfg.labels?.[level] || `L${level}`;
+            layersPanel.appendChild(title);
+            this.titles.set(level, title);
+        });
+
+        canvas.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
+
+        document.body.appendChild(layersPanel);
+        document.body.appendChild(mapsPanel);
+        document.body.classList.add('has-site-navigation');
+
+        this.layersPanel = layersPanel;
+        this.mapsPanel = mapsPanel;
+        this.mapWrap = mapWrap;
+        this.canvas = canvas;
+        this._activeLevel = DepthController.currentLevel;
+
+        window.addEventListener('scroll', () => this.scheduleRender(), { passive: true });
+        window.addEventListener('resize', () => this.scheduleRender());
+
+        this._resizeObserver = new ResizeObserver(() => {
+            this.resizeCanvas();
+            this.scheduleRender();
+        });
+        this._resizeObserver.observe(mapsPanel);
+
+        this.syncActiveState(this._activeLevel);
+        this.resizeCanvas();
+        this.scheduleRender();
+        this.startMacroLoop();
+    },
+
+    onLevelChange(level) {
+        this._activeLevel = level;
+        this.syncActiveState(level);
+        this.scheduleRender();
+    },
+
+    syncActiveState(level) {
+        const blocked = this.isInteractionBlocked();
+        this.layersPanel?.classList.toggle('is-dimmed', blocked);
+        this.mapsPanel?.classList.toggle('is-dimmed', blocked);
+
+        this.titles.forEach((title, rowLevel) => {
+            const isActive = rowLevel === level;
+            title.classList.toggle('is-active', isActive);
+            title.classList.toggle('is-inactive', !isActive);
+        });
+
+        if (this.canvas) {
+            this.canvas.style.cursor = blocked ? 'default' : 'crosshair';
+        }
+    },
+
+    isInteractionBlocked() {
+        return SpatialNavigation.isPaused ||
+            ArtifactInspector.isActive ||
+            DepthController.isAnyTransitionActive();
+    },
+
+    scheduleRender() {
+        if (this._renderScheduled) return;
+        this._renderScheduled = true;
+        requestAnimationFrame(() => {
+            this._renderScheduled = false;
+            this.render();
+        });
+    },
+
+    startMacroLoop() {
+        let lastTick = 0;
+        const intervalMs = CONFIG.navigationMap?.macroRefreshMs ?? 120;
+
+        const tick = (now) => {
+            if (
+                this._activeLevel === 1 &&
+                !this.isInteractionBlocked() &&
+                now - lastTick >= intervalMs
+            ) {
+                lastTick = now;
+                try {
+                    this.render();
+                } catch (err) {
+                    console.warn('NavigationMap.render failed:', err);
+                }
+            }
+            this._rafId = requestAnimationFrame(tick);
+        };
+        this._rafId = requestAnimationFrame(tick);
+    },
+
+    resizeCanvas() {
+        if (!this.canvas || !this.mapWrap) return;
+
+        const dpr = window.devicePixelRatio || 1;
+        const w = Math.max(1, Math.floor(this.mapWrap.clientWidth));
+        const h = Math.max(1, Math.floor(this.mapWrap.clientHeight));
+        const bw = Math.floor(w * dpr);
+        const bh = Math.floor(h * dpr);
+
+        if (this.canvas.width !== bw || this.canvas.height !== bh) {
+            this.canvas.width = bw;
+            this.canvas.height = bh;
+        }
+
+        this.ctx = this.canvas.getContext('2d');
+        if (this.ctx) {
+            this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+    },
+
+    computeTransform(contentBounds, viewport, canvasW, canvasH) {
+        const inset = CONFIG.navigationMap?.frameInset ?? 2;
+        const innerW = Math.max(1, canvasW - inset * 2);
+        const innerH = Math.max(1, canvasH - inset * 2);
+        const worldW = Math.max(1, contentBounds.maxX - contentBounds.minX);
+        const worldH = Math.max(1, contentBounds.maxY - contentBounds.minY);
+
+        // Cover — world fills frame on two sides; excess clips at edges
+        const scale = Math.max(innerW / worldW, innerH / worldH);
+        const drawW = worldW * scale;
+        const drawH = worldH * scale;
+
+        let offsetX = inset + (innerW - drawW) / 2;
+        let offsetY = inset + (innerH - drawH) / 2;
+
+        const vpLeft = offsetX + (viewport.left - contentBounds.minX) * scale;
+        const vpTop = offsetY + (viewport.top - contentBounds.minY) * scale;
+        const vpRight = offsetX + (viewport.left + viewport.width - contentBounds.minX) * scale;
+        const vpBottom = offsetY + (viewport.top + viewport.height - contentBounds.minY) * scale;
+
+        let panX = 0;
+        let panY = 0;
+
+        if (vpLeft < inset) panX = inset - vpLeft;
+        else if (vpRight > canvasW - inset) panX = (canvasW - inset) - vpRight;
+
+        if (vpTop < inset) panY = inset - vpTop;
+        else if (vpBottom > canvasH - inset) panY = (canvasH - inset) - vpBottom;
+
+        offsetX += panX;
+        offsetY += panY;
+
+        const minOffX = inset + innerW - drawW;
+        const minOffY = inset + innerH - drawH;
+        offsetX = Math.max(minOffX, Math.min(inset, offsetX));
+        offsetY = Math.max(minOffY, Math.min(inset, offsetY));
+
+        const toMap = (pageX, pageY) => ({
+            x: offsetX + (pageX - contentBounds.minX) * scale,
+            y: offsetY + (pageY - contentBounds.minY) * scale
+        });
+
+        return {
+            scale,
+            offsetX,
+            offsetY,
+            drawW,
+            drawH,
+            toMap,
+            contentBounds
+        };
+    },
+
+    render() {
+        if (!this.canvas || !this.ctx) return;
+
+        try {
+            this.syncActiveState(this._activeLevel);
+            const level = this._activeLevel;
+
+            const cssW = this.canvas.clientWidth;
+            const cssH = this.canvas.clientHeight;
+            if (cssW < 1 || cssH < 1) return;
+
+            const contentBounds = SpatialNavigation.getContentBoundsForLevel(level);
+            if (!contentBounds) return;
+
+            const vp = SpatialNavigation.getViewportPageRect(level);
+            const t = this.computeTransform(contentBounds, vp, cssW, cssH);
+            const { ctx } = this;
+
+            ctx.clearRect(0, 0, cssW, cssH);
+            ctx.fillStyle = '#e8e8e8';
+            ctx.fillRect(0, 0, cssW, cssH);
+
+            ctx.save();
+            ctx.beginPath();
+            ctx.rect(0, 0, cssW, cssH);
+            ctx.clip();
+
+            const worldTl = t.toMap(t.contentBounds.minX, t.contentBounds.minY);
+            const worldBr = t.toMap(t.contentBounds.maxX, t.contentBounds.maxY);
+            ctx.fillStyle = '#fafafa';
+            ctx.fillRect(
+                worldTl.x,
+                worldTl.y,
+                worldBr.x - worldTl.x,
+                worldBr.y - worldTl.y
+            );
+
+            const markers = SpatialNavigation.getContentMarkersForLevel(level);
+            ctx.fillStyle = 'rgba(16, 16, 16, 0.4)';
+            markers.forEach(({ x, y }) => {
+                const p = t.toMap(x, y);
+                ctx.beginPath();
+                ctx.arc(p.x, p.y, 1.5, 0, Math.PI * 2);
+                ctx.fill();
+            });
+
+            const vpTl = t.toMap(vp.left, vp.top);
+            const vpBr = t.toMap(vp.left + vp.width, vp.top + vp.height);
+
+            ctx.strokeStyle = '#101010';
+            ctx.lineWidth = 1.25;
+            ctx.strokeRect(vpTl.x, vpTl.y, vpBr.x - vpTl.x, vpBr.y - vpTl.y);
+
+            ctx.restore();
+
+            this._lastTransform = { contentBounds, t, level, vp };
+        } catch (err) {
+            console.warn('NavigationMap.render failed:', err);
+        }
+    },
+
+    handlePointerDown(e) {
+        if (this.isInteractionBlocked()) return;
+        if (SpatialNavigation.pan.active || ActionWarehouse.dragState) return;
+        if (!this._lastTransform) return;
+
+        const level = this._activeLevel;
+        const { t } = this._lastTransform;
+        const { contentBounds } = t;
+
+        const rect = this.canvas.getBoundingClientRect();
+        const mx = e.clientX - rect.left;
+        const my = e.clientY - rect.top;
+
+        const nx = (mx - t.offsetX) / t.scale + contentBounds.minX;
+        const ny = (my - t.offsetY) / t.scale + contentBounds.minY;
+
+        const vp = SpatialNavigation.getViewportPageRect(level);
+        const targetLeft = nx - vp.width / 2;
+        const targetTop = ny - vp.height / 2;
+
+        SpatialNavigation.bypassScrollClamp(80);
+        window.scrollBy({
+            left: targetLeft - window.pageXOffset,
+            top: targetTop - window.pageYOffset,
+            behavior: 'auto'
+        });
+        IdleRefresh.touch();
+        this.scheduleRender();
+    }
+};
 /* ==========================================================================
    06. ARTIFACT INSPECTOR (FOCUS/ISOLATION)
    ========================================================================== */
@@ -13611,13 +13942,20 @@ document.addEventListener('DOMContentLoaded', () => {
     SpatialNavigation.init();
     ArtifactInspector.init();
     ActionWarehouse.init();
-    applySiteGridTokens();
 
     try {
         PhysicsEngine.init();
     } catch (err) {
         console.error('PhysicsEngine.init failed:', err);
     }
+
+    try {
+        NavigationMap.init();
+    } catch (err) {
+        console.error('NavigationMap.init failed:', err);
+    }
+
+    applySiteGridTokens();
 
     IdleRefresh.init();
 
