@@ -29,6 +29,18 @@ Read before physics/navigation changes.
 
 ---
 
+## Layout & boot (working reference)
+
+**Verified 25 June 2026 — site loads, warehouse visible, sheet data + physics**
+
+```
+docs/REFERENCE-2026-06-25-layout-boot.md
+```
+
+Restore point for scaling, boot order, `index.html` structure, and blank-screen fixes. Pair with `CHECKPOINT.md` for physics.
+
+---
+
 ## Depth architecture
 
 **Active engine (V2)**

@@ -8,6 +8,35 @@ const scale = (px) => Math.round(px * VISUAL_SCALE);
 const CONFIG = {
     visualScale: VISUAL_SCALE,
 
+    /* --- Site shell grid (viewport reference — separate from #app canvas grids) --- */
+    siteGrid: {
+        columns: 18,
+        rows: 10,
+        padding: { value: 2.5, unit: 'rem' },  // design ref: 40px @ 16px root
+        gap: { value: 1.25, unit: 'rem' },      // design ref: 20px @ 16px root
+        debug: false,
+        // Reference regions in grid coordinates (colEnd/rowEnd exclusive).
+        // Scale/anchor tokens only — layers stay free (scroll, drag, overflow).
+        regions: {
+            nav:          { colStart: 1, colEnd: 19, rowStart: 1, rowEnd: 11 },
+            canvas:       { colStart: 1, colEnd: 19, rowStart: 1, rowEnd: 9  },
+            warehouse:    { colStart: 4, colEnd: 16, rowStart: 9, rowEnd: 11 },
+            blockBar:       { colStart: 4, colEnd: 16, rowStart: 8, rowEnd: 9  },
+            inspector:    { colStart: 6, colEnd: 14, rowStart: 5, rowEnd: 9  },
+            filterFringe: { colStart: 17, colEnd: 19, rowStart: 1, rowEnd: 9  },
+            resetButton:  { colStart: 3, colEnd: 4,  rowStart: 9, rowEnd: 10 }
+        },
+        regionsByLevel: {
+            2: { inspector: { colStart: 5, colEnd: 15, rowStart: 4, rowEnd: 8 } },
+            3: { inspector: { colStart: 6, colEnd: 14, rowStart: 3, rowEnd: 8 } }
+        },
+        // Site columns each content column spans (width reference only — not total column count)
+        contentColumns: { 1: 1, 2: 3, 3: 6 },
+        contentColumnScale: { 3: 1.0 },
+        contentGapScale: 0.88,
+        macroCanvasScrollFactor: 1.5
+    },
+
     /* --- Data Sources (published Google Sheets, CSV format) --- */
     data: {
         urls: {
@@ -28,6 +57,8 @@ const CONFIG = {
     /* --- Boot Sequence --- */
     boot: {
         physicsBuildDelay: 350,     // ms to wait after render before building the physics world
+        fetchTimeoutMs: 15000,      // abort sheet fetch if network stalls (campus WiFi, etc.)
+        safetyRevealMs: 10000,      // show #app even if async boot never completes
         idleRefreshMs: 0 // 0 = disabled; set e.g. 3 * 60 * 1000 for kiosk idle reload
     },
 
@@ -38,6 +69,7 @@ const CONFIG = {
         maxLevel: 3,
         cooldownDelay: 1200,        // ms between accepted wheel gestures
         wheelThreshold: 15,         // minimal |deltaY| to register a zoom intent
+        wheelAccumWindow: 120,      // ms - merge trackpad micro-deltas into one gesture
         cameraLockDuration: 650,
         macroMesoRevealDuration: 640,
         macroMesoStagger: 12,
@@ -470,6 +502,12 @@ const CONFIG = {
                 cssColorVariable: '--main-text',
                 width: 0.2 * (96 / 72),
                 maxVisibleDistance: scale(90)
+            },
+            blockNote: {
+                visible: true,
+                width: 0.2 * (96 / 72),
+                opacity: 0.48,
+                maxVisibleDistance: scale(1800)
             }
         },
 
@@ -575,6 +613,190 @@ function applyCatalogCellTokens(root = document.documentElement) {
     root.style.setProperty('--catalog-cell-h-meso', `${Math.round(cellH * mesoRatio)}px`);
 }
 
+function siteGridCssLength({ value, unit }) {
+    return `${value}${unit}`;
+}
+
+function getSiteGridColumnSpan(level = 1) {
+    const spans = CONFIG.siteGrid?.contentColumns || { 1: 1, 2: 3, 3: 6 };
+    return spans[level] ?? spans[1] ?? 1;
+}
+
+function getSiteGridContentColCount(level = 1) {
+    const cols = CONFIG.siteGrid?.columns || 18;
+    const span = getSiteGridColumnSpan(level);
+    return Math.max(1, Math.floor(cols / span));
+}
+
+function siteGridSpanWidth(span) {
+    if (span <= 1) return 'var(--site-grid-cell-w)';
+    return `calc(${span} * var(--site-grid-cell-w) + ${span - 1} * var(--site-grid-gap))`;
+}
+
+function getSiteGridViewportColCount(level = 1) {
+    return getSiteGridContentColCount(level);
+}
+
+function siteGridContentColumnWidth(level) {
+    const span = getSiteGridColumnSpan(level);
+    const viewportCols = getSiteGridViewportColCount(level);
+    const scale = CONFIG.siteGrid?.contentColumnScale?.[level] ?? 1;
+    if (level === 3) {
+        return `calc(${siteGridSpanWidth(span)} * ${scale})`;
+    }
+    const gapScale = CONFIG.siteGrid?.contentGapScale ?? 1;
+    const gapVar = gapScale === 1 ? 'var(--site-grid-gap)' : 'var(--site-content-gap)';
+    if (level === 2) {
+        const gaps = Math.max(0, viewportCols - 1);
+        return `calc(((var(--site-grid-content-w) - ${gaps} * ${gapVar}) / ${viewportCols}) * ${scale})`;
+    }
+    return siteGridSpanWidth(span);
+}
+
+function applySiteGridContentScale(root = document.documentElement) {
+    const g = CONFIG.siteGrid;
+    if (!g?.contentColumns) return;
+
+    const span1 = getSiteGridColumnSpan(1);
+    const span2 = getSiteGridColumnSpan(2);
+    const span3 = getSiteGridColumnSpan(3);
+    const macroCols = getSiteGridContentColCount(1);
+    const viewportMesoCols = getSiteGridViewportColCount(2);
+    const viewportMicroCols = getSiteGridViewportColCount(3);
+    const canvasRegion = g.regions?.canvas;
+    const macroRows = canvasRegion
+        ? canvasRegion.rowEnd - canvasRegion.rowStart
+        : (g.rows || 10) - 1;
+    const scrollFactor = g.macroCanvasScrollFactor ?? 1.5;
+    const gapScale = g.contentGapScale ?? 1;
+    if (gapScale !== 1) {
+        root.style.setProperty('--site-content-gap', `calc(var(--site-grid-gap) * ${gapScale})`);
+        root.style.setProperty('--site-micro-row-gap', 'var(--site-content-gap)');
+    } else {
+        root.style.removeProperty('--site-content-gap');
+        root.style.setProperty('--site-micro-row-gap', 'var(--site-grid-gap)');
+    }
+
+    root.style.setProperty('--site-content-col-span-l1', String(span1));
+    root.style.setProperty('--site-content-col-span-l2', String(span2));
+    root.style.setProperty('--site-content-col-span-l3', String(span3));
+    root.style.setProperty('--site-macro-col-count', String(macroCols));
+    root.style.setProperty('--site-macro-row-count', String(macroRows));
+    root.style.setProperty('--site-meso-viewport-cols', String(viewportMesoCols));
+    root.style.setProperty('--site-micro-viewport-cols', String(viewportMicroCols));
+    root.style.setProperty('--site-macro-cell-width', siteGridSpanWidth(span1));
+    root.style.setProperty('--site-macro-row-height', 'var(--site-grid-cell-h)');
+    root.style.setProperty('--site-meso-col-width', siteGridContentColumnWidth(2));
+    root.style.setProperty('--site-micro-col-width', siteGridContentColumnWidth(3));
+    root.style.setProperty(
+        '--site-micro-note-min-height',
+        'calc(var(--site-micro-col-width) * 21 / 20)'
+    );
+    root.style.setProperty(
+        '--site-macro-canvas-width',
+        `calc((${siteGridSpanWidth(span1)} * ${macroCols} + ${Math.max(0, macroCols - 1)} * var(--site-grid-gap) + 2 * var(--site-grid-padding)) * ${scrollFactor})`
+    );
+}
+
+function siteGridRegionRect(placement) {
+    const colSpan = placement.colEnd - placement.colStart;
+    const rowSpan = placement.rowEnd - placement.rowStart;
+    const colOffset = placement.colStart - 1;
+    const rowOffset = placement.rowStart - 1;
+    const cellStepW = 'calc(var(--site-grid-cell-w) + var(--site-grid-gap))';
+    const cellStepH = 'calc(var(--site-grid-cell-h) + var(--site-grid-gap))';
+
+    return {
+        left: `calc(var(--site-grid-padding) + ${colOffset} * (${cellStepW}))`,
+        top: `calc(var(--site-grid-padding) + ${rowOffset} * (${cellStepH}))`,
+        width: `calc(${colSpan} * var(--site-grid-cell-w) + ${Math.max(0, colSpan - 1)} * var(--site-grid-gap))`,
+        height: `calc(${rowSpan} * var(--site-grid-cell-h) + ${Math.max(0, rowSpan - 1)} * var(--site-grid-gap))`
+    };
+}
+
+function getSiteGridLevel() {
+    if (typeof DepthController !== 'undefined' && DepthController.currentLevel) {
+        return DepthController.currentLevel;
+    }
+    const body = document.body;
+    if (body?.classList.contains('view-level-3')) return 3;
+    if (body?.classList.contains('view-level-2')) return 2;
+    return 1;
+}
+
+function getSiteGridActiveRegions(level = null) {
+    const g = CONFIG.siteGrid;
+    if (!g) return {};
+    const base = { ...(g.regions || g.layers || {}) };
+    const resolvedLevel = level ?? getSiteGridLevel();
+    const overrides = g.regionsByLevel?.[resolvedLevel] || {};
+    return { ...base, ...overrides };
+}
+
+function updateSiteGridDebugRegions(regionNames) {
+    const enabled = !!CONFIG.siteGrid?.debug;
+    let layer = document.getElementById('site-grid-debug-regions');
+    if (!enabled) {
+        layer?.remove();
+        return;
+    }
+    if (!layer) {
+        layer = document.createElement('div');
+        layer.id = 'site-grid-debug-regions';
+        layer.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(layer);
+    }
+    layer.replaceChildren();
+    regionNames.forEach((name) => {
+        const div = document.createElement('div');
+        div.className = 'site-grid-debug-region';
+        div.dataset.siteRegion = name;
+        div.style.left = `var(--site-layer-${name}-left)`;
+        div.style.top = `var(--site-layer-${name}-top)`;
+        div.style.width = `var(--site-layer-${name}-width)`;
+        div.style.height = `var(--site-layer-${name}-height)`;
+        div.textContent = name;
+        layer.appendChild(div);
+    });
+}
+
+function applySiteGridTokens(root = document.documentElement, level = null) {
+    const g = CONFIG.siteGrid;
+    if (!g) return;
+
+    root.style.setProperty('--site-grid-cols', String(g.columns));
+    root.style.setProperty('--site-grid-rows', String(g.rows));
+    root.style.setProperty('--site-grid-padding', siteGridCssLength(g.padding));
+    root.style.setProperty('--site-grid-gap', siteGridCssLength(g.gap));
+
+    const regions = getSiteGridActiveRegions(level);
+    for (const [name, placement] of Object.entries(regions)) {
+        const rect = siteGridRegionRect(placement);
+        root.style.setProperty(`--site-layer-${name}-left`, rect.left);
+        root.style.setProperty(`--site-layer-${name}-top`, rect.top);
+        root.style.setProperty(`--site-layer-${name}-width`, rect.width);
+        root.style.setProperty(`--site-layer-${name}-height`, rect.height);
+    }
+
+    if (regions.canvas) {
+        root.style.setProperty('--scroll-breathing-room', 'var(--site-layer-canvas-top)');
+        root.style.setProperty('--site-canvas-page-padding-x', 'var(--site-grid-padding)');
+    }
+
+    if (regions.filterFringe) {
+        root.style.setProperty('--v2-fringe-width', 'var(--site-layer-filterFringe-width)');
+    }
+
+    updateSiteGridDebugRegions(Object.keys(regions));
+
+    applySiteGridContentScale(root);
+
+    if (document.body) {
+        document.body.classList.add('site-grid');
+        document.body.classList.toggle('is-site-grid-debug', !!g.debug);
+    }
+}
+
 function applyVisualScaleTokens() {
     const root = document.documentElement;
     const mesoTags = CONFIG.meso.tagMarkers;
@@ -585,7 +807,9 @@ function applyVisualScaleTokens() {
     root.style.setProperty('--warehouse-block-dot', '10px');
     root.style.setProperty('--tag-dot-size', `${scale(8)}px`);
     root.style.setProperty('--meso-tag-gap', `${mesoTags.gap}px`);
-    root.style.setProperty('--scroll-breathing-room', `${CONFIG.navigation.contentPadding}px`);
+    if (!CONFIG.siteGrid?.regions?.canvas) {
+        root.style.setProperty('--scroll-breathing-room', `${CONFIG.navigation.contentPadding}px`);
+    }
     root.style.setProperty(
         '--catalog-block-anchor-opacity',
         String(CONFIG.depth.catalogBlockAnchorOpacity ?? 0.42)

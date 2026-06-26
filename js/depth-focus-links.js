@@ -1,7 +1,112 @@
 /* ==========================================================================
-   DEPTH FOCUS LINKS — L2 block ↔ note lines (hive / column focus)
+   FOCUS LINKS — block ↔ note lines (L1 macro capture, L2 depth focus)
    ========================================================================== */
 const DepthFocusLinks = {
+    getLinkColor() {
+        return PhysicsEngine.linkColor ||
+            getComputedStyle(document.documentElement)
+                .getPropertyValue('--main-text').trim() || '#101010';
+    },
+
+    /* --- L1 macro --- */
+
+    shouldDrawMacro() {
+        const cfg = CONFIG.warehouse?.linkage?.blockNote;
+        if (cfg?.visible === false) return false;
+        if (DepthController.currentLevel !== 1) return false;
+        if (!document.body.classList.contains('is-block-focus')) return false;
+        if (typeof ActionWarehouse === 'undefined') return false;
+        return ActionWarehouse.getActiveCaptureBlocks().length > 0;
+    },
+
+    getMacroLineConfig() {
+        const cfg = CONFIG.warehouse?.linkage?.blockNote || {};
+        const macroLine = CONFIG.warehouse?.linkage?.line || {};
+        return {
+            width: cfg.width ?? macroLine.width ?? 0.27,
+            opacity: cfg.opacity ?? 0.48,
+            maxDistance: cfg.maxVisibleDistance ?? scale(1800)
+        };
+    },
+
+    pickMacroAnchorDot(block, dots) {
+        const matching = dots.filter(d => ActionWarehouse.dotMatchesBlock(block, d));
+        if (!matching.length) return null;
+
+        const captured = matching.find(d => d.overrideTarget);
+        if (captured) return captured;
+
+        let best = null;
+        let bestDist = Infinity;
+        matching.forEach(dot => {
+            const dist = Math.hypot(
+                dot.body.position.x - block.bodyX,
+                dot.body.position.y - block.bodyY
+            );
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = dot;
+            }
+        });
+        return best;
+    },
+
+    drawMacro(ctx, bodiesData) {
+        if (!ctx || !this.shouldDrawMacro() || !bodiesData?.length) return;
+
+        const blocks = ActionWarehouse.getActiveCaptureBlocks();
+        if (!blocks.length) return;
+
+        const noteDots = new Map();
+        bodiesData.forEach(dot => {
+            if (dot.isFiltered || dot.isFilterExiting) return;
+            if (!noteDots.has(dot.noteIndex)) noteDots.set(dot.noteIndex, []);
+            noteDots.get(dot.noteIndex).push(dot);
+        });
+        if (!noteDots.size) return;
+
+        const { width, opacity, maxDistance } = this.getMacroLineConfig();
+        const maxDistSq = maxDistance * maxDistance;
+        const scrollX = window.pageXOffset;
+        const scrollY = window.pageYOffset;
+        const stretched = ActionWarehouse.stretchedNotes;
+
+        ctx.save();
+        ctx.strokeStyle = this.getLinkColor();
+        ctx.lineWidth = width;
+        ctx.globalAlpha = opacity;
+        ctx.beginPath();
+
+        blocks.forEach(block => {
+            if (!Number.isFinite(block.bodyX) || !Number.isFinite(block.bodyY)) return;
+
+            const bx = block.bodyX - scrollX;
+            const by = block.bodyY - scrollY;
+
+            noteDots.forEach((dots, noteIndex) => {
+                if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
+
+                const anchor = this.pickMacroAnchorDot(block, dots);
+                if (!anchor?.body) return;
+
+                const tx = anchor.body.position.x - scrollX;
+                const ty = anchor.body.position.y - scrollY;
+                const relax = stretched.has(noteIndex) || !!anchor.overrideTarget;
+                const dx = tx - bx;
+                const dy = ty - by;
+                if (!relax && dx * dx + dy * dy > maxDistSq) return;
+
+                ctx.moveTo(bx, by);
+                ctx.lineTo(tx, ty);
+            });
+        });
+
+        ctx.stroke();
+        ctx.restore();
+    },
+
+    /* --- L2 depth --- */
+
     shouldDraw() {
         const cfg = CONFIG.depth?.v2?.focusLinks;
         if (cfg?.visible === false) return false;
@@ -111,12 +216,9 @@ const DepthFocusLinks = {
         const maxDistSq = maxDistance * maxDistance;
         const scrollX = window.pageXOffset;
         const scrollY = window.pageYOffset;
-        const color = PhysicsEngine.linkColor ||
-            getComputedStyle(document.documentElement)
-                .getPropertyValue('--main-text').trim() || '#101010';
 
         ctx.save();
-        ctx.strokeStyle = color;
+        ctx.strokeStyle = this.getLinkColor();
         ctx.lineWidth = width;
         ctx.globalAlpha = opacity;
         ctx.beginPath();

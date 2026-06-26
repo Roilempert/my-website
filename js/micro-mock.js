@@ -68,7 +68,7 @@ const MicroMock = {
         if (typeof DepthController !== 'undefined' && DepthController.currentLevel !== 3) return 0;
 
         let applied = 0;
-        [...document.querySelectorAll('#app > .note-wrapper')].forEach(wrapper => {
+        [...document.querySelectorAll('#app .note-wrapper:not(.is-layout-excluded)')].forEach(wrapper => {
             try {
                 if (this.applyToWrapper(wrapper)) applied++;
             } catch (err) {

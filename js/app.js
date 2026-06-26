@@ -40,35 +40,65 @@ const AppState = {
 
     async init() {
         this.appContainer = document.getElementById('app');
-        await this.buildDataPipeline();
-        this.render();
-        ActionWarehouse.populate();
-        setTimeout(() => {
-            try {
-                this.centerViewport();
-                PhysicsEngine.buildWorld();
-            } catch (err) {
-                console.error('Boot physics failed', err);
-            }
-            requestAnimationFrame(() => {
-                this.appContainer.classList.add('is-ready');
-                this.appContainer.style.opacity = '1';
-            });
-        }, CONFIG.boot.physicsBuildDelay);
-    },
-
-    async buildDataPipeline() {
         try {
-            const tagsResponse = await fetch(CONFIG.data.urls.tags);
-            const tagsCsv = await tagsResponse.text();
-            this.parseTagsDictionary(tagsCsv);
-
-            const mainResponse = await fetch(CONFIG.data.urls.main);
-            const mainCsv = await mainResponse.text();
-            this.items = this.parseMainNotes(mainCsv);
+            await this.buildDataPipeline();
+            this.render();
         } catch (error) {
             console.error('Data pipeline error:', error);
         }
+    },
+
+    finishBoot() {
+        try {
+            if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.populate) {
+                ActionWarehouse.populate();
+            }
+        } catch (err) {
+            console.error('Warehouse populate failed', err);
+        }
+
+        this.revealApp();
+
+        setTimeout(() => {
+            try {
+                this.centerViewport();
+                if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.buildWorld) {
+                    PhysicsEngine.buildWorld();
+                }
+            } catch (err) {
+                console.error('Boot physics failed', err);
+            }
+        }, CONFIG.boot.physicsBuildDelay);
+    },
+
+    revealApp() {
+        if (!this.appContainer) this.appContainer = document.getElementById('app');
+        if (!this.appContainer || this.appContainer.classList.contains('is-ready')) return;
+        requestAnimationFrame(() => {
+            this.appContainer.classList.add('is-ready');
+            this.appContainer.style.opacity = '1';
+        });
+    },
+
+    async fetchText(url) {
+        const timeoutMs = CONFIG.boot.fetchTimeoutMs ?? 15000;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(url, { signal: controller.signal });
+            if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+            return await response.text();
+        } finally {
+            clearTimeout(timer);
+        }
+    },
+
+    async buildDataPipeline() {
+        const tagsCsv = await this.fetchText(CONFIG.data.urls.tags);
+        this.parseTagsDictionary(tagsCsv);
+
+        const mainCsv = await this.fetchText(CONFIG.data.urls.main);
+        this.items = this.parseMainNotes(mainCsv);
     },
 
     normalizeString(str) {
@@ -201,7 +231,8 @@ const AppState = {
 
         if (DepthController.currentLevel >= 2 &&
             (appElement.classList.contains('is-meso-column-layout') ||
-             appElement.classList.contains('is-meso-hive-layout'))) {
+             appElement.classList.contains('is-meso-hive-layout') ||
+             appElement.classList.contains('is-micro-grid-layout'))) {
             this.centerMesoViewport(options);
             return;
         }
@@ -317,6 +348,117 @@ const AppState = {
                 : 300
         );
 
+        const centerOnColumnContent = () => {
+            const columns = [...app.querySelectorAll(':scope > .meso-grid-column, :scope > .micro-grid-column')];
+            if (!columns.length) return false;
+
+            let minL = Infinity;
+            let minT = Infinity;
+            let maxR = -Infinity;
+            let maxB = -Infinity;
+
+            columns.forEach((col) => {
+                const rect = col.getBoundingClientRect();
+                if (rect.width < 1 && rect.height < 1) return;
+                minL = Math.min(minL, rect.left);
+                minT = Math.min(minT, rect.top);
+                maxR = Math.max(maxR, rect.right);
+                maxB = Math.max(maxB, rect.bottom);
+            });
+
+            if (!Number.isFinite(minL)) return false;
+
+            const reserve = typeof ActionWarehouse !== 'undefined'
+                ? ActionWarehouse.getScrollReserve()
+                : 0;
+            const viewMidY = (window.innerHeight - reserve) / 2;
+            const cx = (minL + maxR) / 2;
+            const cy = (minT + maxB) / 2;
+            const dX = cx - window.innerWidth / 2;
+            const dY = cy - viewMidY;
+
+            if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return true;
+
+            window.scrollBy({
+                left: dX,
+                top: dY,
+                behavior: options.smooth ? 'smooth' : 'auto'
+            });
+            return true;
+        };
+
+        const centerOnMicroGridViewport = () => {
+            if (!app.classList.contains('is-micro-grid-layout')) return false;
+
+            const root = document.documentElement;
+            const viewportCols = parseInt(
+                getComputedStyle(root).getPropertyValue('--site-micro-viewport-cols')
+                || getComputedStyle(root).getPropertyValue('--v2-micro-viewport-cols'),
+                10
+            ) || 3;
+
+            const columns = [...app.querySelectorAll(':scope > .micro-grid-column')].slice(0, viewportCols);
+            if (!columns.length) return false;
+
+            let minL = Infinity;
+            let minT = Infinity;
+            let maxR = -Infinity;
+            let maxB = -Infinity;
+
+            columns.forEach((col) => {
+                const rect = col.getBoundingClientRect();
+                if (rect.width < 1 && rect.height < 1) return;
+                minL = Math.min(minL, rect.left);
+                minT = Math.min(minT, rect.top);
+                maxR = Math.max(maxR, rect.right);
+                maxB = Math.max(maxB, rect.bottom);
+            });
+
+            if (!Number.isFinite(minL)) return false;
+
+            const appStyle = getComputedStyle(app);
+            const rootStyle = getComputedStyle(document.documentElement);
+            const paddingLeft = parseFloat(appStyle.paddingLeft) || 0;
+            const breathing = parseFloat(rootStyle.getPropertyValue('--scroll-breathing-room')) || 120;
+            const dX = minL - paddingLeft;
+            const dY = minT - breathing;
+
+            // #region agent log
+            fetch('http://127.0.0.1:7699/ingest/ba1e7923-43c5-435b-9e85-9bf447e897b8', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b92927' },
+                body: JSON.stringify({
+                    sessionId: 'b92927',
+                    runId: 'canvas-origin',
+                    hypothesisId: 'H17-H18',
+                    location: 'app-state.js:centerOnMicroGridViewport',
+                    message: 'L3 canvas-origin alignment',
+                    data: {
+                        viewportCols,
+                        clusterLeft: Math.round(minL),
+                        clusterRight: Math.round(maxR),
+                        clusterWidth: Math.round(maxR - minL),
+                        paddingLeft,
+                        breathing,
+                        dX: Math.round(dX),
+                        dY: Math.round(dY),
+                        windowWidth: window.innerWidth
+                    },
+                    timestamp: Date.now()
+                })
+            }).catch(() => {});
+            // #endregion
+
+            if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return true;
+
+            window.scrollBy({
+                left: dX,
+                top: dY,
+                behavior: options.smooth ? 'smooth' : 'auto'
+            });
+            return true;
+        };
+
         const centerOnCanvas = () => {
             const rect = app.getBoundingClientRect();
             const dX = rect.left + rect.width / 2 - window.innerWidth / 2;
@@ -331,11 +473,23 @@ const AppState = {
             });
         };
 
+        if (app.classList.contains('is-micro-grid-layout')) {
+            requestAnimationFrame(() => {
+                if (!centerOnMicroGridViewport()) centerOnCanvas();
+                requestAnimationFrame(() => {
+                    if (!centerOnMicroGridViewport()) centerOnCanvas();
+                });
+            });
+            return;
+        }
+
         if (app.classList.contains('is-meso-column-layout') ||
             app.classList.contains('is-meso-hive-layout')) {
             requestAnimationFrame(() => {
-                centerOnCanvas();
-                requestAnimationFrame(centerOnCanvas);
+                if (!centerOnColumnContent()) centerOnCanvas();
+                requestAnimationFrame(() => {
+                    if (!centerOnColumnContent()) centerOnCanvas();
+                });
             });
             return;
         }
@@ -3733,7 +3887,7 @@ const MicroMock = {
         if (typeof DepthController !== 'undefined' && DepthController.currentLevel !== 3) return 0;
 
         let applied = 0;
-        [...document.querySelectorAll('#app > .note-wrapper')].forEach(wrapper => {
+        [...document.querySelectorAll('#app .note-wrapper:not(.is-layout-excluded)')].forEach(wrapper => {
             try {
                 if (this.applyToWrapper(wrapper)) applied++;
             } catch (err) {
@@ -5486,7 +5640,10 @@ const DepthV2 = {
     applyFringeTokens() {
         const cfg = CONFIG.depth.v2?.fringe || {};
         const root = document.documentElement;
-        root.style.setProperty('--v2-fringe-width', cfg.width || '12vw');
+        const width = CONFIG.siteGrid?.regions?.filterFringe
+            ? 'var(--site-layer-filterFringe-width)'
+            : (cfg.width || '12vw');
+        root.style.setProperty('--v2-fringe-width', width);
         root.style.setProperty('--v2-fringe-opacity', String(cfg.opacity ?? 0.42));
         root.style.setProperty('--v2-fringe-cell-scale', String(cfg.cellScale ?? 0.72));
     },
@@ -5521,6 +5678,7 @@ const DepthV2 = {
             fringe = document.createElement('div');
             fringe.id = 'filter-fringe-zone';
             fringe.className = 'filter-fringe-zone';
+            fringe.dataset.siteLayer = 'filterFringe';
             fringe.setAttribute('aria-hidden', 'true');
             app.appendChild(fringe);
         }
@@ -5629,7 +5787,7 @@ const DepthV2 = {
             wrapper.classList.remove('is-layout-excluded');
         });
 
-        const columns = [...app.querySelectorAll(':scope > .meso-grid-column')];
+        const columns = [...app.querySelectorAll(':scope > .meso-grid-column, :scope > .micro-grid-column')];
         const ordered = [];
 
         if (columns.length) {
@@ -5837,7 +5995,8 @@ const DepthV2 = {
         if (DepthController.currentLevel !== 3) return;
 
         const app = document.getElementById('app');
-        if (!app) return;
+        const grid = this.getGrid(3);
+        if (!app || !grid) return;
 
         const force = options.force === true;
         if (app.classList.contains('is-micro-grid-layout') && !force) return;
@@ -5849,18 +6008,43 @@ const DepthV2 = {
         this.restoreMesoColumnLayout();
         this.clearFringeZone();
 
+        const colCount = grid.colCount || 12;
         const allWrappers = this.collectAllNoteWrappers(app);
         const { layout, hidden } = this.partitionWrappersForLayout(allWrappers);
 
-        layout.forEach(wrapper => {
-            wrapper.classList.remove('is-layout-excluded');
-            wrapper.style.removeProperty('--meso-mock-row-span');
-            wrapper.style.minHeight = '';
-            const stage = wrapper.querySelector('.note-stage');
-            if (stage) stage.style.minHeight = '';
-            app.appendChild(wrapper);
+        const columns = Array.from({ length: colCount }, () => {
+            const col = document.createElement('div');
+            col.className = 'micro-grid-column';
+            return col;
         });
 
+        layout.forEach((wrapper, index) => {
+            wrapper.classList.remove('is-layout-excluded', 'is-catalog-anchored', 'is-meso-anchored', 'is-centered');
+            wrapper.style.removeProperty('--meso-mock-row-span');
+            wrapper.style.removeProperty('--micro-mock-row-span');
+            wrapper.style.gridColumn = '';
+            wrapper.style.gridRow = '';
+            wrapper.style.marginTop = '';
+            wrapper.style.minHeight = '';
+            wrapper.style.left = '';
+            wrapper.style.top = '';
+            wrapper.style.transform = '';
+            wrapper.style.removeProperty('--meso-frame-w');
+            wrapper.style.removeProperty('--meso-frame-h');
+            delete wrapper.dataset.mesoFrameReady;
+            const stage = wrapper.querySelector('.note-stage');
+            if (stage) {
+                stage.style.minHeight = '';
+                stage.style.transform = '';
+                stage.style.width = '';
+                stage.style.maxWidth = '';
+                stage.style.display = '';
+                delete stage.dataset.layoutAnchor;
+            }
+            columns[index % colCount].appendChild(wrapper);
+        });
+
+        columns.forEach(col => app.appendChild(col));
         this.stashHiddenWrappers(app, hidden);
 
         app.classList.add('is-micro-grid-layout');
@@ -5878,6 +6062,7 @@ const DepthV2 = {
             }
         } else if (level === 3) {
             this.layoutMicroGrid(options);
+            if (typeof MicroMock !== 'undefined') MicroMock.applyAll();
         }
     },
 
@@ -5900,17 +6085,26 @@ const DepthV2 = {
         const rowGap = scale(grid.rowGap || 16);
         const colGap = scale(grid.colGap || grid.rowGap || 16);
         const colItemGap = scale(grid.colItemGap ?? 14);
-        const pagePaddingX = scale(grid.pagePaddingX ?? 48);
+        const pagePaddingX = CONFIG.siteGrid?.regions?.canvas
+            ? 'var(--site-canvas-page-padding-x, var(--site-grid-padding))'
+            : `${scale(grid.pagePaddingX ?? 48)}px`;
         const colMinWidth = grid.colMinWidth ? scale(grid.colMinWidth) : null;
 
-        root.style.setProperty('--v2-col-count', String(grid.colCount || 10));
+        const mesoColCount = grid.colCount || 9;
+        const microViewportCols = CONFIG.siteGrid?.contentColumns
+            ? getSiteGridViewportColCount(3)
+            : (grid.viewportCols ?? 3);
+
+        root.style.setProperty('--v2-col-count', String(level === 3 ? (grid.colCount || 12) : mesoColCount));
         root.style.setProperty('--v2-row-gap', `${rowGap}px`);
         root.style.setProperty('--v2-col-gap', `${colGap}px`);
         root.style.setProperty('--v2-meso-item-gap', `${colItemGap}px`);
-        root.style.setProperty('--v2-meso-page-padding-x', `${pagePaddingX}px`);
+        root.style.setProperty('--v2-meso-page-padding-x', pagePaddingX);
 
         if (colMinWidth) {
             root.style.setProperty('--v2-col-min-width', `${colMinWidth}px`);
+        } else if (CONFIG.siteGrid?.contentColumns && level === 2) {
+            root.style.setProperty('--v2-col-min-width', 'var(--site-meso-col-width)');
         } else {
             root.style.removeProperty('--v2-col-min-width');
         }
@@ -5921,7 +6115,12 @@ const DepthV2 = {
         }
 
         if (level === 3) {
-            root.style.setProperty('--v2-micro-viewport-cols', String(grid.viewportCols ?? 3));
+            root.style.setProperty('--v2-micro-viewport-cols', String(microViewportCols));
+            if (CONFIG.siteGrid?.contentColumns) {
+                root.style.setProperty('--v2-micro-col-width', 'var(--site-micro-col-width)');
+                root.style.setProperty('--v2-col-gap', 'var(--site-content-gap, var(--site-grid-gap))');
+                root.style.setProperty('--v2-row-gap', 'var(--site-content-gap, var(--site-grid-gap))');
+            }
             root.style.removeProperty('--v2-cell-height');
             root.style.removeProperty('--v2-canvas-width');
         } else {
@@ -6134,6 +6333,79 @@ const DepthV2 = {
         return this._mesoLayoutReadyPromise;
     },
 
+    // #region agent log
+    debugMicroColumnAlign(runId = 'top-right') {
+        const app = document.getElementById('app');
+        if (!app?.classList.contains('is-micro-grid-layout')) return;
+
+        const col = app.querySelector(':scope > .micro-grid-column');
+        if (!col) return;
+
+        const colRect = col.getBoundingClientRect();
+        const rootStyle = getComputedStyle(document.documentElement);
+        const siteMicroColToken = rootStyle.getPropertyValue('--site-micro-col-width').trim();
+        const siteCellW = rootStyle.getPropertyValue('--site-grid-cell-w').trim();
+        const siteSpan6Token = `calc(6 * ${siteCellW} + 5 * var(--site-grid-gap))`;
+        const notes = [...col.querySelectorAll(':scope > .note-wrapper:not(.is-layout-excluded)')].slice(0, 6);
+        const entries = notes.map((wrapper, i) => {
+            const card = wrapper.querySelector('.micro-mock__card');
+            const stage = wrapper.querySelector('.note-stage');
+            const glyph = wrapper.querySelector('.depth-v2-glyph--micro');
+            const layerSmall = wrapper.querySelector('.note-stage .layer-small');
+            const wRect = wrapper.getBoundingClientRect();
+            const sRect = stage?.getBoundingClientRect();
+            const gRect = glyph?.getBoundingClientRect();
+            const cRect = card?.getBoundingClientRect();
+            const wStyle = getComputedStyle(wrapper);
+            const stageStyle = stage ? getComputedStyle(stage) : null;
+            const layerSmallStyle = layerSmall ? getComputedStyle(layerSmall) : null;
+            return {
+                index: i,
+                noteId: wrapper.dataset.noteId,
+                wrapperLeft: Math.round(wRect.left),
+                wrapperRight: Math.round(wRect.right),
+                wrapperWidth: Math.round(wRect.width),
+                stageLeft: Math.round(sRect?.left ?? 0),
+                stageWidth: Math.round(sRect?.width ?? 0),
+                stageDisplay: stageStyle?.display,
+                layerSmallDisplay: layerSmallStyle?.display,
+                glyphLeft: Math.round(gRect?.left ?? 0),
+                glyphWidth: Math.round(gRect?.width ?? 0),
+                cardLeft: Math.round(cRect?.left ?? 0),
+                cardRight: Math.round(cRect?.right ?? 0),
+                cardWidth: Math.round(cRect?.width ?? 0),
+                colLeft: Math.round(colRect.left),
+                colRight: Math.round(colRect.right),
+                colWidth: Math.round(colRect.width),
+                rightDrift: Math.round(colRect.right - (cRect?.right ?? wRect.right)),
+                leftDrift: Math.round((cRect?.left ?? wRect.left) - colRect.left),
+                widthDrift: Math.round((cRect?.width ?? wRect.width) - colRect.width),
+                wrapperTransform: wStyle.transform,
+                stageTransform: stageStyle?.transform
+            };
+        });
+
+        fetch('http://127.0.0.1:7699/ingest/ba1e7923-43c5-435b-9e85-9bf447e897b8', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b92927' },
+            body: JSON.stringify({
+                sessionId: 'b92927',
+                runId,
+                hypothesisId: 'H19-H22',
+                location: 'depth-v2.js:debugMicroColumnAlign',
+                message: 'L3 column width + card inset',
+                data: {
+                    siteMicroColToken,
+                    siteSpan6Token,
+                    colWidth: Math.round(colRect.width),
+                    entries
+                },
+                timestamp: Date.now()
+            })
+        }).catch(() => {});
+    },
+    // #endregion
+
     prepareMicroGrid() {
         if (DepthController.currentLevel !== 3) return;
 
@@ -6147,6 +6419,11 @@ const DepthV2 = {
             if (typeof MicroMock !== 'undefined') {
                 MicroMock.applyAll();
             }
+            // #region agent log
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => this.debugMicroColumnAlign('top-right'));
+            });
+            // #endregion
             if (typeof AppState !== 'undefined') {
                 requestAnimationFrame(() => {
                     AppState.centerViewport();
@@ -6229,9 +6506,114 @@ const DepthV2 = {
     }
 };
 /* ==========================================================================
-   DEPTH FOCUS LINKS — L2 block ↔ note lines (hive / column focus)
+   FOCUS LINKS — block ↔ note lines (L1 macro capture, L2 depth focus)
    ========================================================================== */
 const DepthFocusLinks = {
+    getLinkColor() {
+        return PhysicsEngine.linkColor ||
+            getComputedStyle(document.documentElement)
+                .getPropertyValue('--main-text').trim() || '#101010';
+    },
+
+    /* --- L1 macro --- */
+
+    shouldDrawMacro() {
+        const cfg = CONFIG.warehouse?.linkage?.blockNote;
+        if (cfg?.visible === false) return false;
+        if (DepthController.currentLevel !== 1) return false;
+        if (!document.body.classList.contains('is-block-focus')) return false;
+        if (typeof ActionWarehouse === 'undefined') return false;
+        return ActionWarehouse.getActiveCaptureBlocks().length > 0;
+    },
+
+    getMacroLineConfig() {
+        const cfg = CONFIG.warehouse?.linkage?.blockNote || {};
+        const macroLine = CONFIG.warehouse?.linkage?.line || {};
+        return {
+            width: cfg.width ?? macroLine.width ?? 0.27,
+            opacity: cfg.opacity ?? 0.48,
+            maxDistance: cfg.maxVisibleDistance ?? scale(1800)
+        };
+    },
+
+    pickMacroAnchorDot(block, dots) {
+        const matching = dots.filter(d => ActionWarehouse.dotMatchesBlock(block, d));
+        if (!matching.length) return null;
+
+        const captured = matching.find(d => d.overrideTarget);
+        if (captured) return captured;
+
+        let best = null;
+        let bestDist = Infinity;
+        matching.forEach(dot => {
+            const dist = Math.hypot(
+                dot.body.position.x - block.bodyX,
+                dot.body.position.y - block.bodyY
+            );
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = dot;
+            }
+        });
+        return best;
+    },
+
+    drawMacro(ctx, bodiesData) {
+        if (!ctx || !this.shouldDrawMacro() || !bodiesData?.length) return;
+
+        const blocks = ActionWarehouse.getActiveCaptureBlocks();
+        if (!blocks.length) return;
+
+        const noteDots = new Map();
+        bodiesData.forEach(dot => {
+            if (dot.isFiltered || dot.isFilterExiting) return;
+            if (!noteDots.has(dot.noteIndex)) noteDots.set(dot.noteIndex, []);
+            noteDots.get(dot.noteIndex).push(dot);
+        });
+        if (!noteDots.size) return;
+
+        const { width, opacity, maxDistance } = this.getMacroLineConfig();
+        const maxDistSq = maxDistance * maxDistance;
+        const scrollX = window.pageXOffset;
+        const scrollY = window.pageYOffset;
+        const stretched = ActionWarehouse.stretchedNotes;
+
+        ctx.save();
+        ctx.strokeStyle = this.getLinkColor();
+        ctx.lineWidth = width;
+        ctx.globalAlpha = opacity;
+        ctx.beginPath();
+
+        blocks.forEach(block => {
+            if (!Number.isFinite(block.bodyX) || !Number.isFinite(block.bodyY)) return;
+
+            const bx = block.bodyX - scrollX;
+            const by = block.bodyY - scrollY;
+
+            noteDots.forEach((dots, noteIndex) => {
+                if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
+
+                const anchor = this.pickMacroAnchorDot(block, dots);
+                if (!anchor?.body) return;
+
+                const tx = anchor.body.position.x - scrollX;
+                const ty = anchor.body.position.y - scrollY;
+                const relax = stretched.has(noteIndex) || !!anchor.overrideTarget;
+                const dx = tx - bx;
+                const dy = ty - by;
+                if (!relax && dx * dx + dy * dy > maxDistSq) return;
+
+                ctx.moveTo(bx, by);
+                ctx.lineTo(tx, ty);
+            });
+        });
+
+        ctx.stroke();
+        ctx.restore();
+    },
+
+    /* --- L2 depth --- */
+
     shouldDraw() {
         const cfg = CONFIG.depth?.v2?.focusLinks;
         if (cfg?.visible === false) return false;
@@ -6341,12 +6723,9 @@ const DepthFocusLinks = {
         const maxDistSq = maxDistance * maxDistance;
         const scrollX = window.pageXOffset;
         const scrollY = window.pageYOffset;
-        const color = PhysicsEngine.linkColor ||
-            getComputedStyle(document.documentElement)
-                .getPropertyValue('--main-text').trim() || '#101010';
 
         ctx.save();
-        ctx.strokeStyle = color;
+        ctx.strokeStyle = this.getLinkColor();
         ctx.lineWidth = width;
         ctx.globalAlpha = opacity;
         ctx.beginPath();
@@ -6389,6 +6768,9 @@ const DepthController = {
     lastScrollTime: 0,
     cooldownDelay: CONFIG.depth.cooldownDelay,
     _wheelLockUntil: 0,
+    _wheelDelta: 0,
+    _wheelDeltaTimer: null,
+    _levelChangeActive: false,
     _microRevealRaf: null,
     _microTransitionFrom: null,
     _microTransitionTo: null,
@@ -6411,7 +6793,13 @@ const DepthController = {
     },
 
     isWheelLocked() {
-        return this.isAnyTransitionActive() || Date.now() < this._wheelLockUntil;
+        return this._levelChangeActive ||
+            this.isAnyTransitionActive() ||
+            Date.now() < this._wheelLockUntil ||
+            (this.currentLevel === 2 &&
+                typeof DepthV2 !== 'undefined' &&
+                DepthV2.isActive() &&
+                !!DepthV2._prepareMesoPromise);
     },
 
     lockWheelAfterTransition() {
@@ -6419,9 +6807,46 @@ const DepthController = {
         this.lastScrollTime = Date.now();
     },
 
+    beginLevelChange() {
+        this._levelChangeActive = true;
+        this.lockWheelAfterTransition();
+    },
+
+    endLevelChange() {
+        this._levelChangeActive = false;
+        this.lockWheelAfterTransition();
+    },
+
+    _accumulateWheelDelta(deltaY) {
+        const windowMs = CONFIG.depth.wheelAccumWindow ?? 120;
+        this._wheelDelta += deltaY;
+
+        if (this._wheelDeltaTimer) clearTimeout(this._wheelDeltaTimer);
+        this._wheelDeltaTimer = setTimeout(() => {
+            this._wheelDelta = 0;
+            this._wheelDeltaTimer = null;
+        }, windowMs);
+    },
+
+    _consumeWheelIntent(deltaY) {
+        const threshold = CONFIG.depth.wheelThreshold;
+        this._accumulateWheelDelta(deltaY);
+
+        if (Math.abs(this._wheelDelta) < threshold) return 0;
+
+        const direction = this._wheelDelta > 0 ? 1 : -1;
+        this._wheelDelta = 0;
+        if (this._wheelDeltaTimer) {
+            clearTimeout(this._wheelDeltaTimer);
+            this._wheelDeltaTimer = null;
+        }
+        return direction;
+    },
+
     syncViewLevelClass(level = this.currentLevel) {
         [1, 2, 3].forEach(l => document.body.classList.remove(`view-level-${l}`));
         document.body.classList.add(`view-level-${level}`);
+        applySiteGridTokens(document.documentElement, level);
         if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
             DepthV2.onLevelChange(level);
             return;
@@ -6453,8 +6878,12 @@ const DepthController = {
 
     init() {
         document.body.classList.add(`view-level-${this.currentLevel}`);
-        if (typeof DepthV2 !== 'undefined') {
-            DepthV2.init();
+        try {
+            if (typeof DepthV2 !== 'undefined') {
+                DepthV2.init();
+            }
+        } catch (err) {
+            console.error('DepthV2.init failed:', err);
         }
 
         window.addEventListener('wheel', (e) => {
@@ -6462,28 +6891,22 @@ const DepthController = {
                 e.preventDefault();
                 return;
             }
-            e.preventDefault(); 
+            e.preventDefault();
             if (ArtifactInspector.isActive) {
                 if (Math.abs(e.deltaY) > CONFIG.depth.wheelThreshold && e.deltaY > 0) {
                     ArtifactInspector.close();
-                } else {
-                    return;
                 }
+                return;
             }
             if (this.isWheelLocked()) return;
 
-            const currentTime = new Date().getTime();
-            if (currentTime - this.lastScrollTime < this.cooldownDelay) return;
-
-            if (Math.abs(e.deltaY) > CONFIG.depth.wheelThreshold) {
-                if (e.deltaY > 0) {
-                    this.zoomOut(); 
-                } else if (e.deltaY < 0) {
-                    this.zoomIn();  
-                }
-                this.lastScrollTime = currentTime;
+            const intent = this._consumeWheelIntent(e.deltaY);
+            if (intent > 0) {
+                this.zoomOut();
+            } else if (intent < 0) {
+                this.zoomIn();
             }
-        }, { passive: false }); 
+        }, { passive: false });
 
         window.addEventListener('keydown', (e) => {
             const keysToBlock = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'];
@@ -6492,41 +6915,40 @@ const DepthController = {
     },
 
     zoomIn() {
-        if (this.currentLevel >= this.maxLevel || this.isWheelLocked()) return;
+        if (this.currentLevel >= this.maxLevel || this.isWheelLocked()) return false;
         if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
             ArtifactInspector.close();
         }
         const next = this.currentLevel + 1;
         if (typeof DepthTransitionOrchestrator !== 'undefined' &&
             DepthTransitionOrchestrator.runWheelZoom(next)) {
-            return;
+            return false;
         }
-        this.changeLevel(next);
+        return this.changeLevel(next);
     },
 
     zoomOut() {
-        if (this.currentLevel <= this.minLevel || this.isWheelLocked()) return;
+        if (this.currentLevel <= this.minLevel || this.isWheelLocked()) return false;
         if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
             ArtifactInspector.close();
         }
         const next = this.currentLevel - 1;
         if (typeof DepthTransitionOrchestrator !== 'undefined' &&
             DepthTransitionOrchestrator.runWheelZoom(next)) {
-            return;
+            return false;
         }
-        this.changeLevel(next);
+        return this.changeLevel(next);
     },
 
     changeLevel(newLevel) {
-        if (this.currentLevel === newLevel) return;
+        if (this.currentLevel === newLevel) return false;
 
         const prevLevel = this.currentLevel;
         const isMacroMesoTransition =
             (prevLevel === 1 && newLevel === 2) || (prevLevel === 2 && newLevel === 1);
 
         if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
-            this.changeLevelV2(newLevel);
-            return;
+            return this.changeLevelV2(newLevel);
         }
 
         if (this.isAnyTransitionActive()) {
@@ -6535,15 +6957,16 @@ const DepthController = {
                 SpatialNavigation.resume();
             } else if (typeof DepthTransitionOrchestrator !== 'undefined' &&
                 DepthTransitionOrchestrator.isRunning()) {
-                return;
+                return false;
             } else {
-                return;
+                return false;
             }
         }
 
         const isMicroTransition =
             (prevLevel === 2 && newLevel === 3) || (prevLevel === 3 && newLevel === 2);
 
+        this.beginLevelChange();
         SpatialNavigation.pause();
 
         if (isMicroTransition) {
@@ -6575,7 +6998,7 @@ const DepthController = {
                         SilhouetteEngine.onLevelEnter(newLevel);
                         ActionWarehouse.updateScrollReserve();
                         ActionWarehouse.updateDotFocusFilter();
-                        this.lockWheelAfterTransition();
+                        this.endLevelChange();
                         SpatialNavigation.resume();
                     });
                 });
@@ -6593,7 +7016,7 @@ const DepthController = {
                     SilhouetteEngine.onLevelEnter(targetLevel);
                     ActionWarehouse.updateScrollReserve();
                     ActionWarehouse.updateDotFocusFilter();
-                    this.lockWheelAfterTransition();
+                    this.endLevelChange();
 
                     AppState.centerViewport();
                     SpatialNavigation.resume();
@@ -6610,6 +7033,10 @@ const DepthController = {
                 prepMeso().then(() => {
                     document.body.classList.remove('is-silhouette-micro-measure');
                     requestAnimationFrame(() => beginBridge());
+                }).catch((err) => {
+                    console.error('Macro-meso prep failed:', err);
+                    this.endLevelChange();
+                    SpatialNavigation.resume();
                 });
             } else {
                 beginBridge();
@@ -6637,10 +7064,13 @@ const DepthController = {
                 } else {
                     if (this.currentLevel === 1) PhysicsEngine.buildWorld();
                     SpatialNavigation.resume();
+                    this.endLevelChange();
                 }
             };
             requestAnimationFrame(lockCameraToCenter);
         }
+
+        return true;
     },
 
     // Phase 1: silhouette ↔ text crossfade at fixed scale
@@ -6717,7 +7147,20 @@ const DepthController = {
     changeLevelV2(newLevel) {
         const prevLevel = this.currentLevel;
 
+        this.beginLevelChange();
         SpatialNavigation.pause();
+
+        try {
+            return this._changeLevelV2Core(newLevel, prevLevel);
+        } catch (err) {
+            console.error('changeLevelV2 failed:', err);
+            this.endLevelChange();
+            SpatialNavigation.resume();
+            return false;
+        }
+    },
+
+    _changeLevelV2Core(newLevel, prevLevel) {
 
         document.body.classList.remove(
             'is-macro-to-meso',
@@ -6748,7 +7191,7 @@ const DepthController = {
                 AppState.centerMesoViewport();
                 requestAnimationFrame(() => {
                     PhysicsEngine.setTransitionFrozen(false);
-                    this.lockWheelAfterTransition();
+                    this.endLevelChange();
                     if (typeof SpatialNavigation !== 'undefined') {
                         SpatialNavigation.resume();
                     }
@@ -6758,7 +7201,23 @@ const DepthController = {
                     }
                 });
             });
-            return;
+            return true;
+        }
+
+        if (prevLevel === 2 && newLevel === 3) {
+            this.currentLevel = newLevel;
+            this.syncViewLevelClass(newLevel);
+            ActionWarehouse.updateScrollReserve();
+            ActionWarehouse.syncDeployedBlocksForDepth?.();
+            ActionWarehouse.updateDotFocusFilter();
+            requestAnimationFrame(() => {
+                AppState.centerViewport();
+                if (typeof SpatialNavigation !== 'undefined') {
+                    SpatialNavigation.resume();
+                }
+                this.endLevelChange();
+            });
+            return true;
         }
 
         if (prevLevel === 3 && newLevel === 2) {
@@ -6775,9 +7234,9 @@ const DepthController = {
                 if (typeof SpatialNavigation !== 'undefined') {
                     SpatialNavigation.resume();
                 }
-                this.lockWheelAfterTransition();
+                this.endLevelChange();
             });
-            return;
+            return true;
         }
 
         if (newLevel === 1 && prevLevel >= 2) {
@@ -6808,9 +7267,9 @@ const DepthController = {
                 ActionWarehouse.updateDotFocusFilter();
                 AppState.centerViewport();
                 SpatialNavigation.resume();
-                this.lockWheelAfterTransition();
+                this.endLevelChange();
             });
-            return;
+            return true;
         }
 
         this.currentLevel = newLevel;
@@ -6819,7 +7278,8 @@ const DepthController = {
         ActionWarehouse.updateDotFocusFilter();
         AppState.centerViewport();
         SpatialNavigation.resume();
-        this.lockWheelAfterTransition();
+        this.endLevelChange();
+        return true;
     }
 };
 
@@ -7050,18 +7510,19 @@ const SpatialNavigation = {
         let dy = 0;
         const width = window.innerWidth;
         const height = window.innerHeight;
+        const threshold = this.threshold;
+        const bottomThreshold = CONFIG.navigation.bottomEdgeThreshold;
 
-        if (this.mouseX < this.threshold) {
-            dx = -this.maxSpeed * (1 - this.mouseX / this.threshold);
-        } else if (this.mouseX > width - this.threshold) {
-            dx = this.maxSpeed * (1 - (width - this.mouseX) / this.threshold);
+        if (this.mouseX < threshold) {
+            dx = -this.maxSpeed * (1 - this.mouseX / threshold);
+        } else if (this.mouseX > width - threshold) {
+            dx = this.maxSpeed * (1 - (width - this.mouseX) / threshold);
         }
 
-        const bottomThreshold = CONFIG.navigation.bottomEdgeThreshold;
         const bottomSpeed = CONFIG.navigation.bottomMaxSpeed;
 
-        if (this.mouseY < this.threshold) {
-            dy = -this.maxSpeed * (1 - this.mouseY / this.threshold);
+        if (this.mouseY < threshold) {
+            dy = -this.maxSpeed * (1 - this.mouseY / threshold);
         } else if (this.mouseY > height - bottomThreshold) {
             // Narrow, slow bottom zone; fully suppressed while hovering the warehouse
             if (!ActionWarehouse.isPointOverDock(this.mouseX, this.mouseY)) {
@@ -7215,6 +7676,7 @@ const ArtifactInspector = {
 
         this.panel = document.createElement('div');
         this.panel.classList.add('artifact-inspector-panel');
+        this.panel.dataset.siteLayer = 'inspector';
         this.panel.setAttribute('role', 'dialog');
         this.panel.setAttribute('aria-modal', 'true');
         this.panel.setAttribute('aria-hidden', 'true');
@@ -7376,6 +7838,13 @@ const PhysicsEngine = {
     },
 
     init() {
+        if (typeof Matter === 'undefined') {
+            console.error(
+                'Matter.js did not load (CDN blocked or offline). Physics is disabled — serve over HTTP and check network.'
+            );
+            return;
+        }
+
         this.engine = Matter.Engine.create();
         this.engine.world.gravity.x = CONFIG.physics.gravity.x;
         this.engine.world.gravity.y = CONFIG.physics.gravity.y;
@@ -8385,6 +8854,8 @@ const PhysicsEngine = {
     },
 
     buildWorld() {
+        if (!this.engine || typeof Matter === 'undefined') return;
+
         this.bodiesData.forEach(item => Matter.World.remove(this.engine.world, item.body));
         
         const allConstraints = Matter.Composite.allConstraints(this.engine.world);
@@ -8565,6 +9036,9 @@ const PhysicsEngine = {
 
         if (macroVisualActive) {
             this.drawSiblingLinks();
+            if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
+                DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
+            }
             this.drawNoteOutlines();
             this.updateMoleculeHoverId();
         }
@@ -8578,6 +9052,9 @@ const PhysicsEngine = {
         if (!this.linkCtx) return;
         this.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
         this.drawSiblingLinks();
+        if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
+            DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
+        }
         this.drawNoteOutlines();
     },
 
@@ -8775,33 +9252,11 @@ const ActionWarehouse = {
         this.ensurePhysicsMaps();
         const dockCfg = CONFIG.warehouse.dock;
 
-        // Set on <body> so blocks keep their size after being re-parented out of the dock
-        document.body.style.setProperty('--block-height', `${CONFIG.warehouse.blockHeight}px`);
-        document.body.style.setProperty('--block-glyph-size', `${CONFIG.warehouse.blockGlyphSize}px`);
-        const frameCfg = CONFIG.warehouse.frame.filter;
-        const frameHeight = CONFIG.warehouse.blockHeight + frameCfg.paddingY * 2;
-        const frameAlignOffset = (frameHeight - CONFIG.warehouse.blockHeight) / 2;
-        const frameShellWidth = this.computeFrameShellWidth(frameCfg.slotMinWidth);
-        document.body.style.setProperty('--frame-height', `${frameHeight}px`);
-        document.body.style.setProperty('--frame-radius', `${frameCfg.borderRadius}px`);
-        document.body.style.setProperty('--frame-slot-min-width', `${frameCfg.slotMinWidth}px`);
-        document.body.style.setProperty('--frame-padding-x', `${frameCfg.paddingX}px`);
-        document.body.style.setProperty('--frame-padding-y', `${frameCfg.paddingY}px`);
-        document.body.style.setProperty('--frame-padding-left', `${frameCfg.paddingLeft}px`);
-        document.body.style.setProperty('--frame-nested-gap', `${frameCfg.nestedGap}px`);
-        document.body.style.setProperty('--frame-align-offset', `${frameAlignOffset}px`);
-        document.body.style.setProperty('--frame-shell-width', `${frameShellWidth}px`);
-        document.documentElement.style.setProperty('--warehouse-width', `${dockCfg.widthRatio * 100}%`);
-        document.documentElement.style.setProperty('--warehouse-radius', `${dockCfg.borderRadius}px`);
-        document.documentElement.style.setProperty('--warehouse-outline', `${dockCfg.outlineWidth}pt`);
-        document.documentElement.style.setProperty('--warehouse-bottom-offset', `${dockCfg.bottomOffset}px`);
-        document.documentElement.style.setProperty(
-            '--warehouse-tray-max-height',
-            `calc(var(--block-height) * ${dockCfg.visibleRows} + ${(dockCfg.visibleRows - 1) * dockCfg.rowGap}px)`
-        );
+        this.refreshDisplayTokens();
 
         this.shellElement = document.createElement('div');
         this.shellElement.classList.add('warehouse-shell', 'site-type');
+        this.shellElement.dataset.siteLayer = 'warehouse';
         this.shellElement.innerHTML = `
             <button type="button" class="warehouse-reset" aria-label="Reset">×</button>
             <div class="depth-block-bar" aria-hidden="true"></div>
@@ -8818,18 +9273,53 @@ const ActionWarehouse = {
         `;
         this.dockElement = this.shellElement.querySelector('.action-warehouse');
         this.depthBlockBarElement = this.shellElement.querySelector('.depth-block-bar');
+        if (this.depthBlockBarElement) {
+            this.depthBlockBarElement.dataset.siteLayer = 'blockBar';
+        }
         this.trayScrollElement = this.shellElement.querySelector('.warehouse-scroll');
         this.trayFramesElement = this.shellElement.querySelector('.warehouse-tray-section--frames');
         this.trayBlocksElement = this.shellElement.querySelector('.warehouse-tray-section--blocks');
         this.trayScrollElement.addEventListener('wheel', (e) => this.onTrayWheel(e), { passive: false, capture: true });
         this.shellElement.querySelector('.warehouse-reset')
             .addEventListener('click', () => this.resetAll());
+        const resetBtn = this.shellElement.querySelector('.warehouse-reset');
+        if (resetBtn) resetBtn.dataset.siteLayer = 'resetButton';
         document.body.appendChild(this.shellElement);
 
         this.resizeObserver = new ResizeObserver(() => this.updateScrollReserve());
         this.resizeObserver.observe(this.shellElement);
         window.addEventListener('resize', () => this.updateScrollReserve());
         this.updateScrollReserve();
+    },
+
+    refreshDisplayTokens() {
+        const dockCfg = CONFIG.warehouse.dock;
+        const frameCfg = CONFIG.warehouse.frame.filter;
+        const blockH = scale(CONFIG.warehouse.blockHeight);
+        const blockGlyph = scale(CONFIG.warehouse.blockGlyphSize);
+        const frameHeight = blockH + frameCfg.paddingY * 2;
+        const frameAlignOffset = (frameHeight - blockH) / 2;
+        const frameShellWidth = this.computeFrameShellWidth(frameCfg.slotMinWidth);
+
+        document.body.style.setProperty('--block-height', `${blockH}px`);
+        document.body.style.setProperty('--block-glyph-size', `${blockGlyph}px`);
+        document.body.style.setProperty('--frame-height', `${frameHeight}px`);
+        document.body.style.setProperty('--frame-radius', `${frameCfg.borderRadius}px`);
+        document.body.style.setProperty('--frame-slot-min-width', `${frameCfg.slotMinWidth}px`);
+        document.body.style.setProperty('--frame-padding-x', `${frameCfg.paddingX}px`);
+        document.body.style.setProperty('--frame-padding-y', `${frameCfg.paddingY}px`);
+        document.body.style.setProperty('--frame-padding-left', `${frameCfg.paddingLeft}px`);
+        document.body.style.setProperty('--frame-nested-gap', `${frameCfg.nestedGap}px`);
+        document.body.style.setProperty('--frame-align-offset', `${frameAlignOffset}px`);
+        document.body.style.setProperty('--frame-shell-width', `${frameShellWidth}px`);
+        document.documentElement.style.setProperty('--warehouse-width', `${dockCfg.widthRatio * 100}%`);
+        document.documentElement.style.setProperty('--warehouse-radius', `${scale(dockCfg.borderRadius)}px`);
+        document.documentElement.style.setProperty('--warehouse-outline', `${dockCfg.outlineWidth}pt`);
+        document.documentElement.style.setProperty('--warehouse-bottom-offset', `${scale(dockCfg.bottomOffset)}px`);
+        document.documentElement.style.setProperty(
+            '--warehouse-tray-max-height',
+            `calc(var(--block-height) * ${dockCfg.visibleRows} + ${(dockCfg.visibleRows - 1) * scale(dockCfg.rowGap)}px)`
+        );
     },
 
     // Footprint of the dock: extends #app scroll range so dots can clear the overlay
@@ -9086,12 +9576,12 @@ const ActionWarehouse = {
         const cfg = CONFIG.warehouse.frame.filter;
         const gap = scale(6);
         const leftPad = cfg.paddingX + (cfg.paddingLeft || 0);
-        return leftPad + CONFIG.warehouse.blockGlyphSize + gap + slotWidth + cfg.paddingX;
+        return leftPad + scale(CONFIG.warehouse.blockGlyphSize) + gap + slotWidth + cfg.paddingX;
     },
 
     getFrameNestedDimensions(frame) {
         const cfg = CONFIG.warehouse.frame.filter;
-        const blockH = CONFIG.warehouse.blockHeight;
+        const blockH = scale(CONFIG.warehouse.blockHeight);
         const nested = frame.nestedBlocks || [];
         if (nested.length === 0) {
             return { width: cfg.slotMinWidth, height: blockH };
@@ -9113,7 +9603,7 @@ const ActionWarehouse = {
     getFrameMetrics(block) {
         const cfg = CONFIG.warehouse.frame.filter;
         const slot = this.getFrameNestedDimensions(block);
-        const minShellH = CONFIG.warehouse.blockHeight + cfg.paddingY * 2;
+        const minShellH = scale(CONFIG.warehouse.blockHeight) + cfg.paddingY * 2;
         const height = Math.max(minShellH, slot.height + cfg.paddingY * 2);
         return {
             width: this.computeFrameShellWidth(slot.width),
@@ -9154,8 +9644,8 @@ const ActionWarehouse = {
         } else {
             slotEl.style.width = `${cfg.slotMinWidth}px`;
             slotEl.style.minWidth = `${cfg.slotMinWidth}px`;
-            slotEl.style.height = `${CONFIG.warehouse.blockHeight}px`;
-            slotEl.style.minHeight = `${CONFIG.warehouse.blockHeight}px`;
+            slotEl.style.height = `${scale(CONFIG.warehouse.blockHeight)}px`;
+            slotEl.style.minHeight = `${scale(CONFIG.warehouse.blockHeight)}px`;
         }
     },
 
@@ -9801,7 +10291,7 @@ const ActionWarehouse = {
     /* --- Physics integration --- */
 
     attachBody(block) {
-        const radius = CONFIG.warehouse.blockHeight / 2;
+        const radius = scale(CONFIG.warehouse.blockHeight) / 2;
         block.body = Matter.Bodies.circle(0, 0, radius, { isStatic: true });
         this.syncBody(block);
         Matter.World.add(PhysicsEngine.engine.world, block.body);
@@ -9927,15 +10417,17 @@ const ActionWarehouse = {
 
     // Pill half-diagonal — wider labels need a larger exclusion zone than blockHeight/2
     getBlockCollisionRadius(block) {
-        const w = block.collisionW || CONFIG.warehouse.blockHeight;
-        const h = block.collisionH || CONFIG.warehouse.blockHeight;
+        const blockH = scale(CONFIG.warehouse.blockHeight);
+        const w = block.collisionW || blockH;
+        const h = block.collisionH || blockH;
         return Math.hypot(w / 2, h / 2);
     },
 
     // Push a point outside the block pill (axis-aligned) by pad px
     pushPointOutOfBlockAabb(block, x, y, pad) {
-        const w = block.collisionW || CONFIG.warehouse.blockHeight;
-        const h = block.collisionH || CONFIG.warehouse.blockHeight;
+        const blockH = scale(CONFIG.warehouse.blockHeight);
+        const w = block.collisionW || blockH;
+        const h = block.collisionH || blockH;
         const cx = block.bodyX;
         const cy = block.bodyY;
         const hw = w / 2 + pad;
@@ -12153,7 +12645,7 @@ Object.assign(ActionWarehouse, {
         const dotR = CONFIG.physics.body.radius;
         const blockR = block
             ? this.getBlockCollisionRadius(block)
-            : CONFIG.warehouse.blockHeight / 2;
+            : scale(CONFIG.warehouse.blockHeight) / 2;
         const clearance = cfg.orbitCaptureClearance ?? cfg.blockClearance;
         return blockR + dotR + clearance;
     },
@@ -12194,7 +12686,7 @@ Object.assign(ActionWarehouse, {
         const activeBlocks = this.getActiveCaptureBlocks();
         if (activeBlocks.length === 0) return;
 
-        const blockBodyR = CONFIG.warehouse.blockHeight / 2;
+        const blockBodyR = scale(CONFIG.warehouse.blockHeight) / 2;
         const blockCount = activeBlocks.length;
         let foreignPushScale = 1;
         let maxPush = scale(14);
@@ -13107,12 +13599,39 @@ Object.assign(ActionWarehouse, {
 });
 document.addEventListener('DOMContentLoaded', () => {
     applyVisualScaleTokens();
-    AppState.init();
-    DepthController.init();
+    applySiteGridTokens();
+
+    try {
+        DepthController.init();
+    } catch (err) {
+        console.error('DepthController.init failed:', err);
+    }
+
     SilhouetteEngine.init();
     SpatialNavigation.init();
     ArtifactInspector.init();
     ActionWarehouse.init();
-    PhysicsEngine.init();
+    applySiteGridTokens();
+
+    try {
+        PhysicsEngine.init();
+    } catch (err) {
+        console.error('PhysicsEngine.init failed:', err);
+    }
+
     IdleRefresh.init();
+
+    const safetyMs = CONFIG.boot.safetyRevealMs ?? 5000;
+    const safetyTimer = setTimeout(() => {
+        console.warn('Boot safety reveal — data pipeline did not finish in time');
+        AppState.revealApp();
+    }, safetyMs);
+
+    AppState.init()
+        .then(() => AppState.finishBoot())
+        .catch((err) => {
+            console.error('AppState.init failed:', err);
+            AppState.revealApp();
+        })
+        .finally(() => clearTimeout(safetyTimer));
 });

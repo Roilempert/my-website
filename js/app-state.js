@@ -7,35 +7,65 @@ const AppState = {
 
     async init() {
         this.appContainer = document.getElementById('app');
-        await this.buildDataPipeline();
-        this.render();
-        ActionWarehouse.populate();
-        setTimeout(() => {
-            try {
-                this.centerViewport();
-                PhysicsEngine.buildWorld();
-            } catch (err) {
-                console.error('Boot physics failed', err);
-            }
-            requestAnimationFrame(() => {
-                this.appContainer.classList.add('is-ready');
-                this.appContainer.style.opacity = '1';
-            });
-        }, CONFIG.boot.physicsBuildDelay);
-    },
-
-    async buildDataPipeline() {
         try {
-            const tagsResponse = await fetch(CONFIG.data.urls.tags);
-            const tagsCsv = await tagsResponse.text();
-            this.parseTagsDictionary(tagsCsv);
-
-            const mainResponse = await fetch(CONFIG.data.urls.main);
-            const mainCsv = await mainResponse.text();
-            this.items = this.parseMainNotes(mainCsv);
+            await this.buildDataPipeline();
+            this.render();
         } catch (error) {
             console.error('Data pipeline error:', error);
         }
+    },
+
+    finishBoot() {
+        try {
+            if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.populate) {
+                ActionWarehouse.populate();
+            }
+        } catch (err) {
+            console.error('Warehouse populate failed', err);
+        }
+
+        this.revealApp();
+
+        setTimeout(() => {
+            try {
+                this.centerViewport();
+                if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.buildWorld) {
+                    PhysicsEngine.buildWorld();
+                }
+            } catch (err) {
+                console.error('Boot physics failed', err);
+            }
+        }, CONFIG.boot.physicsBuildDelay);
+    },
+
+    revealApp() {
+        if (!this.appContainer) this.appContainer = document.getElementById('app');
+        if (!this.appContainer || this.appContainer.classList.contains('is-ready')) return;
+        requestAnimationFrame(() => {
+            this.appContainer.classList.add('is-ready');
+            this.appContainer.style.opacity = '1';
+        });
+    },
+
+    async fetchText(url) {
+        const timeoutMs = CONFIG.boot.fetchTimeoutMs ?? 15000;
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), timeoutMs);
+        try {
+            const response = await fetch(url, { signal: controller.signal });
+            if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+            return await response.text();
+        } finally {
+            clearTimeout(timer);
+        }
+    },
+
+    async buildDataPipeline() {
+        const tagsCsv = await this.fetchText(CONFIG.data.urls.tags);
+        this.parseTagsDictionary(tagsCsv);
+
+        const mainCsv = await this.fetchText(CONFIG.data.urls.main);
+        this.items = this.parseMainNotes(mainCsv);
     },
 
     normalizeString(str) {
@@ -168,7 +198,8 @@ const AppState = {
 
         if (DepthController.currentLevel >= 2 &&
             (appElement.classList.contains('is-meso-column-layout') ||
-             appElement.classList.contains('is-meso-hive-layout'))) {
+             appElement.classList.contains('is-meso-hive-layout') ||
+             appElement.classList.contains('is-micro-grid-layout'))) {
             this.centerMesoViewport(options);
             return;
         }
@@ -284,6 +315,117 @@ const AppState = {
                 : 300
         );
 
+        const centerOnColumnContent = () => {
+            const columns = [...app.querySelectorAll(':scope > .meso-grid-column, :scope > .micro-grid-column')];
+            if (!columns.length) return false;
+
+            let minL = Infinity;
+            let minT = Infinity;
+            let maxR = -Infinity;
+            let maxB = -Infinity;
+
+            columns.forEach((col) => {
+                const rect = col.getBoundingClientRect();
+                if (rect.width < 1 && rect.height < 1) return;
+                minL = Math.min(minL, rect.left);
+                minT = Math.min(minT, rect.top);
+                maxR = Math.max(maxR, rect.right);
+                maxB = Math.max(maxB, rect.bottom);
+            });
+
+            if (!Number.isFinite(minL)) return false;
+
+            const reserve = typeof ActionWarehouse !== 'undefined'
+                ? ActionWarehouse.getScrollReserve()
+                : 0;
+            const viewMidY = (window.innerHeight - reserve) / 2;
+            const cx = (minL + maxR) / 2;
+            const cy = (minT + maxB) / 2;
+            const dX = cx - window.innerWidth / 2;
+            const dY = cy - viewMidY;
+
+            if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return true;
+
+            window.scrollBy({
+                left: dX,
+                top: dY,
+                behavior: options.smooth ? 'smooth' : 'auto'
+            });
+            return true;
+        };
+
+        const centerOnMicroGridViewport = () => {
+            if (!app.classList.contains('is-micro-grid-layout')) return false;
+
+            const root = document.documentElement;
+            const viewportCols = parseInt(
+                getComputedStyle(root).getPropertyValue('--site-micro-viewport-cols')
+                || getComputedStyle(root).getPropertyValue('--v2-micro-viewport-cols'),
+                10
+            ) || 3;
+
+            const columns = [...app.querySelectorAll(':scope > .micro-grid-column')].slice(0, viewportCols);
+            if (!columns.length) return false;
+
+            let minL = Infinity;
+            let minT = Infinity;
+            let maxR = -Infinity;
+            let maxB = -Infinity;
+
+            columns.forEach((col) => {
+                const rect = col.getBoundingClientRect();
+                if (rect.width < 1 && rect.height < 1) return;
+                minL = Math.min(minL, rect.left);
+                minT = Math.min(minT, rect.top);
+                maxR = Math.max(maxR, rect.right);
+                maxB = Math.max(maxB, rect.bottom);
+            });
+
+            if (!Number.isFinite(minL)) return false;
+
+            const appStyle = getComputedStyle(app);
+            const rootStyle = getComputedStyle(document.documentElement);
+            const paddingLeft = parseFloat(appStyle.paddingLeft) || 0;
+            const breathing = parseFloat(rootStyle.getPropertyValue('--scroll-breathing-room')) || 120;
+            const dX = minL - paddingLeft;
+            const dY = minT - breathing;
+
+            // #region agent log
+            fetch('http://127.0.0.1:7699/ingest/ba1e7923-43c5-435b-9e85-9bf447e897b8', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b92927' },
+                body: JSON.stringify({
+                    sessionId: 'b92927',
+                    runId: 'canvas-origin',
+                    hypothesisId: 'H17-H18',
+                    location: 'app-state.js:centerOnMicroGridViewport',
+                    message: 'L3 canvas-origin alignment',
+                    data: {
+                        viewportCols,
+                        clusterLeft: Math.round(minL),
+                        clusterRight: Math.round(maxR),
+                        clusterWidth: Math.round(maxR - minL),
+                        paddingLeft,
+                        breathing,
+                        dX: Math.round(dX),
+                        dY: Math.round(dY),
+                        windowWidth: window.innerWidth
+                    },
+                    timestamp: Date.now()
+                })
+            }).catch(() => {});
+            // #endregion
+
+            if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return true;
+
+            window.scrollBy({
+                left: dX,
+                top: dY,
+                behavior: options.smooth ? 'smooth' : 'auto'
+            });
+            return true;
+        };
+
         const centerOnCanvas = () => {
             const rect = app.getBoundingClientRect();
             const dX = rect.left + rect.width / 2 - window.innerWidth / 2;
@@ -298,11 +440,23 @@ const AppState = {
             });
         };
 
+        if (app.classList.contains('is-micro-grid-layout')) {
+            requestAnimationFrame(() => {
+                if (!centerOnMicroGridViewport()) centerOnCanvas();
+                requestAnimationFrame(() => {
+                    if (!centerOnMicroGridViewport()) centerOnCanvas();
+                });
+            });
+            return;
+        }
+
         if (app.classList.contains('is-meso-column-layout') ||
             app.classList.contains('is-meso-hive-layout')) {
             requestAnimationFrame(() => {
-                centerOnCanvas();
-                requestAnimationFrame(centerOnCanvas);
+                if (!centerOnColumnContent()) centerOnCanvas();
+                requestAnimationFrame(() => {
+                    if (!centerOnColumnContent()) centerOnCanvas();
+                });
             });
             return;
         }

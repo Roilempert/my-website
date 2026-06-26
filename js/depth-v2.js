@@ -74,7 +74,10 @@ const DepthV2 = {
     applyFringeTokens() {
         const cfg = CONFIG.depth.v2?.fringe || {};
         const root = document.documentElement;
-        root.style.setProperty('--v2-fringe-width', cfg.width || '12vw');
+        const width = CONFIG.siteGrid?.regions?.filterFringe
+            ? 'var(--site-layer-filterFringe-width)'
+            : (cfg.width || '12vw');
+        root.style.setProperty('--v2-fringe-width', width);
         root.style.setProperty('--v2-fringe-opacity', String(cfg.opacity ?? 0.42));
         root.style.setProperty('--v2-fringe-cell-scale', String(cfg.cellScale ?? 0.72));
     },
@@ -109,6 +112,7 @@ const DepthV2 = {
             fringe = document.createElement('div');
             fringe.id = 'filter-fringe-zone';
             fringe.className = 'filter-fringe-zone';
+            fringe.dataset.siteLayer = 'filterFringe';
             fringe.setAttribute('aria-hidden', 'true');
             app.appendChild(fringe);
         }
@@ -217,7 +221,7 @@ const DepthV2 = {
             wrapper.classList.remove('is-layout-excluded');
         });
 
-        const columns = [...app.querySelectorAll(':scope > .meso-grid-column')];
+        const columns = [...app.querySelectorAll(':scope > .meso-grid-column, :scope > .micro-grid-column')];
         const ordered = [];
 
         if (columns.length) {
@@ -425,7 +429,8 @@ const DepthV2 = {
         if (DepthController.currentLevel !== 3) return;
 
         const app = document.getElementById('app');
-        if (!app) return;
+        const grid = this.getGrid(3);
+        if (!app || !grid) return;
 
         const force = options.force === true;
         if (app.classList.contains('is-micro-grid-layout') && !force) return;
@@ -437,18 +442,43 @@ const DepthV2 = {
         this.restoreMesoColumnLayout();
         this.clearFringeZone();
 
+        const colCount = grid.colCount || 12;
         const allWrappers = this.collectAllNoteWrappers(app);
         const { layout, hidden } = this.partitionWrappersForLayout(allWrappers);
 
-        layout.forEach(wrapper => {
-            wrapper.classList.remove('is-layout-excluded');
-            wrapper.style.removeProperty('--meso-mock-row-span');
-            wrapper.style.minHeight = '';
-            const stage = wrapper.querySelector('.note-stage');
-            if (stage) stage.style.minHeight = '';
-            app.appendChild(wrapper);
+        const columns = Array.from({ length: colCount }, () => {
+            const col = document.createElement('div');
+            col.className = 'micro-grid-column';
+            return col;
         });
 
+        layout.forEach((wrapper, index) => {
+            wrapper.classList.remove('is-layout-excluded', 'is-catalog-anchored', 'is-meso-anchored', 'is-centered');
+            wrapper.style.removeProperty('--meso-mock-row-span');
+            wrapper.style.removeProperty('--micro-mock-row-span');
+            wrapper.style.gridColumn = '';
+            wrapper.style.gridRow = '';
+            wrapper.style.marginTop = '';
+            wrapper.style.minHeight = '';
+            wrapper.style.left = '';
+            wrapper.style.top = '';
+            wrapper.style.transform = '';
+            wrapper.style.removeProperty('--meso-frame-w');
+            wrapper.style.removeProperty('--meso-frame-h');
+            delete wrapper.dataset.mesoFrameReady;
+            const stage = wrapper.querySelector('.note-stage');
+            if (stage) {
+                stage.style.minHeight = '';
+                stage.style.transform = '';
+                stage.style.width = '';
+                stage.style.maxWidth = '';
+                stage.style.display = '';
+                delete stage.dataset.layoutAnchor;
+            }
+            columns[index % colCount].appendChild(wrapper);
+        });
+
+        columns.forEach(col => app.appendChild(col));
         this.stashHiddenWrappers(app, hidden);
 
         app.classList.add('is-micro-grid-layout');
@@ -466,6 +496,7 @@ const DepthV2 = {
             }
         } else if (level === 3) {
             this.layoutMicroGrid(options);
+            if (typeof MicroMock !== 'undefined') MicroMock.applyAll();
         }
     },
 
@@ -488,17 +519,26 @@ const DepthV2 = {
         const rowGap = scale(grid.rowGap || 16);
         const colGap = scale(grid.colGap || grid.rowGap || 16);
         const colItemGap = scale(grid.colItemGap ?? 14);
-        const pagePaddingX = scale(grid.pagePaddingX ?? 48);
+        const pagePaddingX = CONFIG.siteGrid?.regions?.canvas
+            ? 'var(--site-canvas-page-padding-x, var(--site-grid-padding))'
+            : `${scale(grid.pagePaddingX ?? 48)}px`;
         const colMinWidth = grid.colMinWidth ? scale(grid.colMinWidth) : null;
 
-        root.style.setProperty('--v2-col-count', String(grid.colCount || 10));
+        const mesoColCount = grid.colCount || 9;
+        const microViewportCols = CONFIG.siteGrid?.contentColumns
+            ? getSiteGridViewportColCount(3)
+            : (grid.viewportCols ?? 3);
+
+        root.style.setProperty('--v2-col-count', String(level === 3 ? (grid.colCount || 12) : mesoColCount));
         root.style.setProperty('--v2-row-gap', `${rowGap}px`);
         root.style.setProperty('--v2-col-gap', `${colGap}px`);
         root.style.setProperty('--v2-meso-item-gap', `${colItemGap}px`);
-        root.style.setProperty('--v2-meso-page-padding-x', `${pagePaddingX}px`);
+        root.style.setProperty('--v2-meso-page-padding-x', pagePaddingX);
 
         if (colMinWidth) {
             root.style.setProperty('--v2-col-min-width', `${colMinWidth}px`);
+        } else if (CONFIG.siteGrid?.contentColumns && level === 2) {
+            root.style.setProperty('--v2-col-min-width', 'var(--site-meso-col-width)');
         } else {
             root.style.removeProperty('--v2-col-min-width');
         }
@@ -509,7 +549,12 @@ const DepthV2 = {
         }
 
         if (level === 3) {
-            root.style.setProperty('--v2-micro-viewport-cols', String(grid.viewportCols ?? 3));
+            root.style.setProperty('--v2-micro-viewport-cols', String(microViewportCols));
+            if (CONFIG.siteGrid?.contentColumns) {
+                root.style.setProperty('--v2-micro-col-width', 'var(--site-micro-col-width)');
+                root.style.setProperty('--v2-col-gap', 'var(--site-content-gap, var(--site-grid-gap))');
+                root.style.setProperty('--v2-row-gap', 'var(--site-content-gap, var(--site-grid-gap))');
+            }
             root.style.removeProperty('--v2-cell-height');
             root.style.removeProperty('--v2-canvas-width');
         } else {
@@ -722,6 +767,79 @@ const DepthV2 = {
         return this._mesoLayoutReadyPromise;
     },
 
+    // #region agent log
+    debugMicroColumnAlign(runId = 'top-right') {
+        const app = document.getElementById('app');
+        if (!app?.classList.contains('is-micro-grid-layout')) return;
+
+        const col = app.querySelector(':scope > .micro-grid-column');
+        if (!col) return;
+
+        const colRect = col.getBoundingClientRect();
+        const rootStyle = getComputedStyle(document.documentElement);
+        const siteMicroColToken = rootStyle.getPropertyValue('--site-micro-col-width').trim();
+        const siteCellW = rootStyle.getPropertyValue('--site-grid-cell-w').trim();
+        const siteSpan6Token = `calc(6 * ${siteCellW} + 5 * var(--site-grid-gap))`;
+        const notes = [...col.querySelectorAll(':scope > .note-wrapper:not(.is-layout-excluded)')].slice(0, 6);
+        const entries = notes.map((wrapper, i) => {
+            const card = wrapper.querySelector('.micro-mock__card');
+            const stage = wrapper.querySelector('.note-stage');
+            const glyph = wrapper.querySelector('.depth-v2-glyph--micro');
+            const layerSmall = wrapper.querySelector('.note-stage .layer-small');
+            const wRect = wrapper.getBoundingClientRect();
+            const sRect = stage?.getBoundingClientRect();
+            const gRect = glyph?.getBoundingClientRect();
+            const cRect = card?.getBoundingClientRect();
+            const wStyle = getComputedStyle(wrapper);
+            const stageStyle = stage ? getComputedStyle(stage) : null;
+            const layerSmallStyle = layerSmall ? getComputedStyle(layerSmall) : null;
+            return {
+                index: i,
+                noteId: wrapper.dataset.noteId,
+                wrapperLeft: Math.round(wRect.left),
+                wrapperRight: Math.round(wRect.right),
+                wrapperWidth: Math.round(wRect.width),
+                stageLeft: Math.round(sRect?.left ?? 0),
+                stageWidth: Math.round(sRect?.width ?? 0),
+                stageDisplay: stageStyle?.display,
+                layerSmallDisplay: layerSmallStyle?.display,
+                glyphLeft: Math.round(gRect?.left ?? 0),
+                glyphWidth: Math.round(gRect?.width ?? 0),
+                cardLeft: Math.round(cRect?.left ?? 0),
+                cardRight: Math.round(cRect?.right ?? 0),
+                cardWidth: Math.round(cRect?.width ?? 0),
+                colLeft: Math.round(colRect.left),
+                colRight: Math.round(colRect.right),
+                colWidth: Math.round(colRect.width),
+                rightDrift: Math.round(colRect.right - (cRect?.right ?? wRect.right)),
+                leftDrift: Math.round((cRect?.left ?? wRect.left) - colRect.left),
+                widthDrift: Math.round((cRect?.width ?? wRect.width) - colRect.width),
+                wrapperTransform: wStyle.transform,
+                stageTransform: stageStyle?.transform
+            };
+        });
+
+        fetch('http://127.0.0.1:7699/ingest/ba1e7923-43c5-435b-9e85-9bf447e897b8', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'b92927' },
+            body: JSON.stringify({
+                sessionId: 'b92927',
+                runId,
+                hypothesisId: 'H19-H22',
+                location: 'depth-v2.js:debugMicroColumnAlign',
+                message: 'L3 column width + card inset',
+                data: {
+                    siteMicroColToken,
+                    siteSpan6Token,
+                    colWidth: Math.round(colRect.width),
+                    entries
+                },
+                timestamp: Date.now()
+            })
+        }).catch(() => {});
+    },
+    // #endregion
+
     prepareMicroGrid() {
         if (DepthController.currentLevel !== 3) return;
 
@@ -735,6 +853,11 @@ const DepthV2 = {
             if (typeof MicroMock !== 'undefined') {
                 MicroMock.applyAll();
             }
+            // #region agent log
+            requestAnimationFrame(() => {
+                requestAnimationFrame(() => this.debugMicroColumnAlign('top-right'));
+            });
+            // #endregion
             if (typeof AppState !== 'undefined') {
                 requestAnimationFrame(() => {
                     AppState.centerViewport();

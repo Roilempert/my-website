@@ -34,33 +34,11 @@ const ActionWarehouse = {
         this.ensurePhysicsMaps();
         const dockCfg = CONFIG.warehouse.dock;
 
-        // Set on <body> so blocks keep their size after being re-parented out of the dock
-        document.body.style.setProperty('--block-height', `${CONFIG.warehouse.blockHeight}px`);
-        document.body.style.setProperty('--block-glyph-size', `${CONFIG.warehouse.blockGlyphSize}px`);
-        const frameCfg = CONFIG.warehouse.frame.filter;
-        const frameHeight = CONFIG.warehouse.blockHeight + frameCfg.paddingY * 2;
-        const frameAlignOffset = (frameHeight - CONFIG.warehouse.blockHeight) / 2;
-        const frameShellWidth = this.computeFrameShellWidth(frameCfg.slotMinWidth);
-        document.body.style.setProperty('--frame-height', `${frameHeight}px`);
-        document.body.style.setProperty('--frame-radius', `${frameCfg.borderRadius}px`);
-        document.body.style.setProperty('--frame-slot-min-width', `${frameCfg.slotMinWidth}px`);
-        document.body.style.setProperty('--frame-padding-x', `${frameCfg.paddingX}px`);
-        document.body.style.setProperty('--frame-padding-y', `${frameCfg.paddingY}px`);
-        document.body.style.setProperty('--frame-padding-left', `${frameCfg.paddingLeft}px`);
-        document.body.style.setProperty('--frame-nested-gap', `${frameCfg.nestedGap}px`);
-        document.body.style.setProperty('--frame-align-offset', `${frameAlignOffset}px`);
-        document.body.style.setProperty('--frame-shell-width', `${frameShellWidth}px`);
-        document.documentElement.style.setProperty('--warehouse-width', `${dockCfg.widthRatio * 100}%`);
-        document.documentElement.style.setProperty('--warehouse-radius', `${dockCfg.borderRadius}px`);
-        document.documentElement.style.setProperty('--warehouse-outline', `${dockCfg.outlineWidth}pt`);
-        document.documentElement.style.setProperty('--warehouse-bottom-offset', `${dockCfg.bottomOffset}px`);
-        document.documentElement.style.setProperty(
-            '--warehouse-tray-max-height',
-            `calc(var(--block-height) * ${dockCfg.visibleRows} + ${(dockCfg.visibleRows - 1) * dockCfg.rowGap}px)`
-        );
+        this.refreshDisplayTokens();
 
         this.shellElement = document.createElement('div');
         this.shellElement.classList.add('warehouse-shell', 'site-type');
+        this.shellElement.dataset.siteLayer = 'warehouse';
         this.shellElement.innerHTML = `
             <button type="button" class="warehouse-reset" aria-label="Reset">×</button>
             <div class="depth-block-bar" aria-hidden="true"></div>
@@ -77,18 +55,53 @@ const ActionWarehouse = {
         `;
         this.dockElement = this.shellElement.querySelector('.action-warehouse');
         this.depthBlockBarElement = this.shellElement.querySelector('.depth-block-bar');
+        if (this.depthBlockBarElement) {
+            this.depthBlockBarElement.dataset.siteLayer = 'blockBar';
+        }
         this.trayScrollElement = this.shellElement.querySelector('.warehouse-scroll');
         this.trayFramesElement = this.shellElement.querySelector('.warehouse-tray-section--frames');
         this.trayBlocksElement = this.shellElement.querySelector('.warehouse-tray-section--blocks');
         this.trayScrollElement.addEventListener('wheel', (e) => this.onTrayWheel(e), { passive: false, capture: true });
         this.shellElement.querySelector('.warehouse-reset')
             .addEventListener('click', () => this.resetAll());
+        const resetBtn = this.shellElement.querySelector('.warehouse-reset');
+        if (resetBtn) resetBtn.dataset.siteLayer = 'resetButton';
         document.body.appendChild(this.shellElement);
 
         this.resizeObserver = new ResizeObserver(() => this.updateScrollReserve());
         this.resizeObserver.observe(this.shellElement);
         window.addEventListener('resize', () => this.updateScrollReserve());
         this.updateScrollReserve();
+    },
+
+    refreshDisplayTokens() {
+        const dockCfg = CONFIG.warehouse.dock;
+        const frameCfg = CONFIG.warehouse.frame.filter;
+        const blockH = scale(CONFIG.warehouse.blockHeight);
+        const blockGlyph = scale(CONFIG.warehouse.blockGlyphSize);
+        const frameHeight = blockH + frameCfg.paddingY * 2;
+        const frameAlignOffset = (frameHeight - blockH) / 2;
+        const frameShellWidth = this.computeFrameShellWidth(frameCfg.slotMinWidth);
+
+        document.body.style.setProperty('--block-height', `${blockH}px`);
+        document.body.style.setProperty('--block-glyph-size', `${blockGlyph}px`);
+        document.body.style.setProperty('--frame-height', `${frameHeight}px`);
+        document.body.style.setProperty('--frame-radius', `${frameCfg.borderRadius}px`);
+        document.body.style.setProperty('--frame-slot-min-width', `${frameCfg.slotMinWidth}px`);
+        document.body.style.setProperty('--frame-padding-x', `${frameCfg.paddingX}px`);
+        document.body.style.setProperty('--frame-padding-y', `${frameCfg.paddingY}px`);
+        document.body.style.setProperty('--frame-padding-left', `${frameCfg.paddingLeft}px`);
+        document.body.style.setProperty('--frame-nested-gap', `${frameCfg.nestedGap}px`);
+        document.body.style.setProperty('--frame-align-offset', `${frameAlignOffset}px`);
+        document.body.style.setProperty('--frame-shell-width', `${frameShellWidth}px`);
+        document.documentElement.style.setProperty('--warehouse-width', `${dockCfg.widthRatio * 100}%`);
+        document.documentElement.style.setProperty('--warehouse-radius', `${scale(dockCfg.borderRadius)}px`);
+        document.documentElement.style.setProperty('--warehouse-outline', `${dockCfg.outlineWidth}pt`);
+        document.documentElement.style.setProperty('--warehouse-bottom-offset', `${scale(dockCfg.bottomOffset)}px`);
+        document.documentElement.style.setProperty(
+            '--warehouse-tray-max-height',
+            `calc(var(--block-height) * ${dockCfg.visibleRows} + ${(dockCfg.visibleRows - 1) * scale(dockCfg.rowGap)}px)`
+        );
     },
 
     // Footprint of the dock: extends #app scroll range so dots can clear the overlay
@@ -345,12 +358,12 @@ const ActionWarehouse = {
         const cfg = CONFIG.warehouse.frame.filter;
         const gap = scale(6);
         const leftPad = cfg.paddingX + (cfg.paddingLeft || 0);
-        return leftPad + CONFIG.warehouse.blockGlyphSize + gap + slotWidth + cfg.paddingX;
+        return leftPad + scale(CONFIG.warehouse.blockGlyphSize) + gap + slotWidth + cfg.paddingX;
     },
 
     getFrameNestedDimensions(frame) {
         const cfg = CONFIG.warehouse.frame.filter;
-        const blockH = CONFIG.warehouse.blockHeight;
+        const blockH = scale(CONFIG.warehouse.blockHeight);
         const nested = frame.nestedBlocks || [];
         if (nested.length === 0) {
             return { width: cfg.slotMinWidth, height: blockH };
@@ -372,7 +385,7 @@ const ActionWarehouse = {
     getFrameMetrics(block) {
         const cfg = CONFIG.warehouse.frame.filter;
         const slot = this.getFrameNestedDimensions(block);
-        const minShellH = CONFIG.warehouse.blockHeight + cfg.paddingY * 2;
+        const minShellH = scale(CONFIG.warehouse.blockHeight) + cfg.paddingY * 2;
         const height = Math.max(minShellH, slot.height + cfg.paddingY * 2);
         return {
             width: this.computeFrameShellWidth(slot.width),
@@ -413,8 +426,8 @@ const ActionWarehouse = {
         } else {
             slotEl.style.width = `${cfg.slotMinWidth}px`;
             slotEl.style.minWidth = `${cfg.slotMinWidth}px`;
-            slotEl.style.height = `${CONFIG.warehouse.blockHeight}px`;
-            slotEl.style.minHeight = `${CONFIG.warehouse.blockHeight}px`;
+            slotEl.style.height = `${scale(CONFIG.warehouse.blockHeight)}px`;
+            slotEl.style.minHeight = `${scale(CONFIG.warehouse.blockHeight)}px`;
         }
     },
 
@@ -1060,7 +1073,7 @@ const ActionWarehouse = {
     /* --- Physics integration --- */
 
     attachBody(block) {
-        const radius = CONFIG.warehouse.blockHeight / 2;
+        const radius = scale(CONFIG.warehouse.blockHeight) / 2;
         block.body = Matter.Bodies.circle(0, 0, radius, { isStatic: true });
         this.syncBody(block);
         Matter.World.add(PhysicsEngine.engine.world, block.body);
@@ -1186,15 +1199,17 @@ const ActionWarehouse = {
 
     // Pill half-diagonal — wider labels need a larger exclusion zone than blockHeight/2
     getBlockCollisionRadius(block) {
-        const w = block.collisionW || CONFIG.warehouse.blockHeight;
-        const h = block.collisionH || CONFIG.warehouse.blockHeight;
+        const blockH = scale(CONFIG.warehouse.blockHeight);
+        const w = block.collisionW || blockH;
+        const h = block.collisionH || blockH;
         return Math.hypot(w / 2, h / 2);
     },
 
     // Push a point outside the block pill (axis-aligned) by pad px
     pushPointOutOfBlockAabb(block, x, y, pad) {
-        const w = block.collisionW || CONFIG.warehouse.blockHeight;
-        const h = block.collisionH || CONFIG.warehouse.blockHeight;
+        const blockH = scale(CONFIG.warehouse.blockHeight);
+        const w = block.collisionW || blockH;
+        const h = block.collisionH || blockH;
         const cx = block.bodyX;
         const cy = block.bodyY;
         const hw = w / 2 + pad;

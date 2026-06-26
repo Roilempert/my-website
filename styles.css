@@ -26,8 +26,7 @@
 }
 
 html {
-    scroll-padding: 40px;
-    font-size: 16px;
+    scroll-padding: var(--scroll-padding, 40px);
     scrollbar-width: none;
 }
 
@@ -45,6 +44,23 @@ body {
     -ms-overflow-style: none;
 }
 
+/* ==========================================================================
+   00b. SITE SHELL GRID (viewport reference — CONFIG.siteGrid)
+   Reference metrics only; layers stay free (scroll, drag, overflow).
+   ========================================================================== */
+:root {
+    --site-grid-content-w: calc(100vw - 2 * var(--site-grid-padding, 2.5rem));
+    --site-grid-content-h: calc(100vh - 2 * var(--site-grid-padding, 2.5rem));
+    --site-grid-cell-w: calc(
+        (var(--site-grid-content-w) - (var(--site-grid-cols, 18) - 1) * var(--site-grid-gap, 1.25rem))
+        / var(--site-grid-cols, 18)
+    );
+    --site-grid-cell-h: calc(
+        (var(--site-grid-content-h) - (var(--site-grid-rows, 10) - 1) * var(--site-grid-gap, 1.25rem))
+        / var(--site-grid-rows, 10)
+    );
+}
+
 /* Full-viewport pan layer — sits beneath #app; receives clicks through transparent grid cells */
 #nav-surface {
     position: fixed;
@@ -52,6 +68,55 @@ body {
     z-index: 1;
     cursor: grab;
     touch-action: none;
+}
+
+body.is-site-grid-debug::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    pointer-events: none;
+    opacity: 0.35;
+    background-image:
+        repeating-linear-gradient(
+            to right,
+            rgba(16, 16, 16, 0.12) 0,
+            rgba(16, 16, 16, 0.12) 1px,
+            transparent 1px,
+            transparent calc((100vw - 2 * var(--site-grid-padding, 2.5rem) - (var(--site-grid-cols, 18) - 1) * var(--site-grid-gap, 1.25rem)) / var(--site-grid-cols, 18) + var(--site-grid-gap, 1.25rem))
+        ),
+        repeating-linear-gradient(
+            to bottom,
+            rgba(16, 16, 16, 0.12) 0,
+            rgba(16, 16, 16, 0.12) 1px,
+            transparent 1px,
+            transparent calc((100vh - 2 * var(--site-grid-padding, 2.5rem) - (var(--site-grid-rows, 10) - 1) * var(--site-grid-gap, 1.25rem)) / var(--site-grid-rows, 10) + var(--site-grid-gap, 1.25rem))
+        );
+    background-position: var(--site-grid-padding, 2.5rem) var(--site-grid-padding, 2.5rem);
+    background-origin: content-box;
+    background-clip: content-box;
+    padding: var(--site-grid-padding, 2.5rem);
+    box-sizing: border-box;
+}
+
+#site-grid-debug-regions {
+    position: fixed;
+    inset: 0;
+    z-index: 9998;
+    pointer-events: none;
+}
+
+.site-grid-debug-region {
+    position: fixed;
+    box-sizing: border-box;
+    border: 1px dashed rgba(106, 110, 0, 0.55);
+    color: rgba(16, 16, 16, 0.45);
+    font-family: var(--site-type-family, sans-serif);
+    font-size: 9px;
+    letter-spacing: 0.08em;
+    text-transform: lowercase;
+    padding: 2px 4px;
+    direction: ltr;
 }
 
 /* Film Grain */
@@ -84,6 +149,25 @@ body.view-level-1 {
     --col-count: 30; 
 }
 
+body.site-grid.view-level-1 {
+    --col-count: var(--site-macro-col-count, 18);
+    --canvas-width: var(--site-macro-canvas-width, 180vw);
+    --grid-gap: var(--site-grid-gap);
+    --grid-padding: var(--site-grid-padding);
+}
+
+body.site-grid.view-level-1 #app {
+    gap: var(--site-grid-gap);
+    padding: var(--site-grid-padding);
+}
+
+body.site-grid.view-level-1 .note-wrapper {
+    aspect-ratio: auto;
+    min-height: var(--site-macro-row-height, var(--site-grid-cell-h));
+    align-items: center;
+    justify-content: center;
+}
+
 body.view-level-2,
 body.view-level-3 {
     /* Micro-authoritative grid — L2 silhouettes share L3 note positions */
@@ -100,7 +184,7 @@ body.view-level-3 {
     padding: var(--grid-padding);
     width: var(--canvas-width); 
     min-height: 100vh;
-    opacity: 0;
+    opacity: 1;
     position: relative;
     z-index: 2;
     direction: ltr;
@@ -781,14 +865,14 @@ body.view-level-3 .layer-dot {
 .note-title {
     font-family: Neoklass, serif;
     font-style: italic;
-    font-size: 66px;
+    font-size: 4.125rem;
     font-weight: 600;
     line-height: 0.9;
 }
 
 .note-body {
     font-family: NarkissTam, serif;
-    font-size: 16px;
+    font-size: 1rem;
     line-height: 1.2;
     max-width: 55ch;
     padding: 0 0.5rem;
@@ -797,7 +881,7 @@ body.view-level-3 .layer-dot {
 
 .note-idcode {
     font-family: ratzif22, sans-serif;
-    font-size: 14px;
+    font-size: 0.875rem;
     position: absolute;
     left: 0.5rem;
     top: 50%;
@@ -837,8 +921,7 @@ body.view-level-3 .layer-dot {
 
 .tag {
     font-family: ratzif22, sans-serif;
-    font-size: 14px;
-    padding: 0.3rem 0.6rem;
+    font-size: 0.875rem;
     border-radius: 50px;
     background-color: var(--bg-main);
     display: inline-flex;
@@ -913,6 +996,25 @@ body.view-level-3 .layer-dot {
     visibility: visible;
     pointer-events: auto;
     transform: translateX(-50%) scale(1);
+}
+
+body.site-grid .artifact-inspector-panel {
+    left: var(--site-layer-inspector-left);
+    width: var(--site-layer-inspector-width);
+    max-height: var(--site-layer-inspector-height);
+    top: var(--site-layer-inspector-top);
+    bottom: auto;
+    --inspector-card-width: var(--site-layer-inspector-width);
+    transform: scale(0.96);
+}
+
+body.site-grid.view-level-3 .artifact-inspector-panel {
+    --inspector-card-width: var(--site-micro-col-width);
+    width: var(--site-micro-col-width);
+}
+
+body.site-grid .artifact-inspector-panel.is-open {
+    transform: scale(1);
 }
 
 .artifact-inspector-panel .micro-mock__card.note-card {
@@ -1008,10 +1110,23 @@ body.is-depth-v2.view-level-2.is-depth-workspace-active .link-canvas {
     transition: transform 0.5s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
+/* Default dock: horizontal size/position from grid region tokens (still fixed — blocks drag freely) */
+body.site-grid .warehouse-shell {
+    left: var(--site-layer-warehouse-left);
+    width: var(--site-layer-warehouse-width);
+    transform: none;
+}
+
 /* Warehouse — visible on all depth levels */
 body.view-level-2 .warehouse-shell,
 body.view-level-3 .warehouse-shell {
     transform: translateX(-50%);
+    pointer-events: auto;
+}
+
+body.site-grid.view-level-2 .warehouse-shell,
+body.site-grid.view-level-3 .warehouse-shell {
+    transform: none;
     pointer-events: auto;
 }
 
@@ -1042,6 +1157,18 @@ body.view-level-3 .depth-block-bar.is-drop-active {
     outline: 1px dashed rgba(16, 16, 16, 0.18);
     outline-offset: -1px;
     background: rgba(243, 243, 243, 0.72);
+}
+
+body.site-grid.view-level-2 .depth-block-bar.has-blocks,
+body.site-grid.view-level-3 .depth-block-bar.has-blocks,
+body.site-grid.view-level-2 .depth-block-bar.is-drop-active,
+body.site-grid.view-level-3 .depth-block-bar.is-drop-active {
+    position: fixed;
+    left: var(--site-layer-blockBar-left);
+    width: var(--site-layer-blockBar-width);
+    top: var(--site-layer-blockBar-top);
+    height: var(--site-layer-blockBar-height);
+    z-index: 901;
 }
 
 body.view-level-2 .depth-block-bar .action-block.is-depth-ui-mounted,
@@ -1113,6 +1240,16 @@ body.view-level-3 .action-block--frame.is-drop-target {
     opacity: 0;
     pointer-events: none;
     transition: opacity 0.3s ease, background-color var(--transition-fast), color var(--transition-fast);
+}
+
+body.site-grid .warehouse-reset {
+    position: fixed;
+    left: var(--site-layer-resetButton-left);
+    top: var(--site-layer-resetButton-top);
+    width: max(24px, var(--site-layer-resetButton-width));
+    height: max(24px, var(--site-layer-resetButton-height));
+    transform: none;
+    z-index: 902;
 }
 
 .warehouse-shell.is-workspace-active .warehouse-reset {
@@ -1510,6 +1647,16 @@ body.is-depth-v2.view-level-2 #app.is-meso-column-layout {
     visibility: visible !important;
 }
 
+body.site-grid.is-depth-v2.view-level-2 #app.is-meso-column-layout {
+    gap: var(--site-grid-gap);
+    width: calc(
+        var(--v2-col-count) * var(--site-meso-col-width)
+        + max(0, var(--v2-col-count) - 1) * var(--site-grid-gap)
+        + 2 * var(--v2-meso-page-padding-x)
+    ) !important;
+    max-width: none;
+}
+
 body.is-depth-v2.view-level-2 #app.is-meso-column-layout .meso-grid-column {
     flex: 1 1 0;
     min-width: var(--v2-col-min-width, 0);
@@ -1519,6 +1666,12 @@ body.is-depth-v2.view-level-2 #app.is-meso-column-layout .meso-grid-column {
     gap: 0;
     align-items: stretch;
     justify-content: flex-start;
+}
+
+body.site-grid.is-depth-v2.view-level-2 #app.is-meso-column-layout .meso-grid-column {
+    flex: 0 0 var(--site-meso-col-width);
+    min-width: var(--site-meso-col-width);
+    max-width: var(--site-meso-col-width);
 }
 
 body.is-depth-v2.view-level-2 #app.is-meso-column-layout .note-wrapper {
@@ -1644,7 +1797,7 @@ body.is-depth-v2.view-level-3 #app.is-workspace-lens-layout {
     width: var(--canvas-width, var(--v2-canvas-width, 175vw)) !important;
     min-height: 100vh;
     padding-top: var(--scroll-breathing-room, 120px);
-    padding-inline: var(--v2-meso-page-padding-x, 2.25rem);
+    padding-inline: var(--v2-meso-page-padding-x, var(--site-canvas-page-padding-x, 2.25rem));
     box-sizing: border-box;
     pointer-events: none;
 }
@@ -1682,11 +1835,11 @@ body.is-depth-v2.view-level-3 #app.is-workspace-lens-layout .depth-v2-glyph--mic
 
 body.is-depth-v2 #app .filter-fringe-zone {
     position: absolute;
-    top: var(--scroll-breathing-room, 120px);
-    inset-inline-end: var(--v2-meso-page-padding-x, 2.25rem);
-    width: var(--v2-fringe-width, 12vw);
+    top: var(--site-layer-filterFringe-top, var(--scroll-breathing-room, 120px));
+    inset-inline-end: var(--v2-meso-page-padding-x, var(--site-canvas-page-padding-x, 2.25rem));
+    width: var(--v2-fringe-width, var(--site-layer-filterFringe-width, 12vw));
     min-width: 72px;
-    max-height: calc(100vh - var(--scroll-breathing-room, 120px) - 2rem);
+    max-height: var(--site-layer-filterFringe-height, calc(100vh - var(--scroll-breathing-room, 120px) - 2rem));
     overflow-y: auto;
     overflow-x: hidden;
     display: flex;
@@ -1789,23 +1942,101 @@ body.is-depth-v2.view-level-3 #app.is-micro-grid-layout {
         (100vw - 2 * var(--v2-meso-page-padding-x) - (var(--v2-micro-viewport-cols, 3) - 1) * var(--v2-col-gap))
         / var(--v2-micro-viewport-cols, 3)
     );
-    display: grid !important;
-    grid-template-columns: repeat(var(--col-count), minmax(0, var(--v2-micro-col-width)));
-    grid-auto-rows: min-content;
-    row-gap: var(--v2-row-gap, 10px);
-    column-gap: var(--v2-col-gap, 12px);
+    display: flex !important;
+    flex-direction: row;
+    align-items: flex-start;
+    gap: var(--v2-col-gap, 12px);
+    grid-template-columns: unset;
+    grid-auto-rows: unset;
     width: calc(
         var(--col-count) * var(--v2-micro-col-width)
         + max(0, var(--col-count) - 1) * var(--v2-col-gap)
         + 2 * var(--v2-meso-page-padding-x)
     ) !important;
     max-width: none;
-    padding-inline: var(--v2-meso-page-padding-x, 2.25rem);
+    padding-inline: var(--site-canvas-page-padding-x, var(--v2-meso-page-padding-x, 2.25rem));
     padding-top: var(--scroll-breathing-room, 120px);
     box-sizing: border-box;
     opacity: 1 !important;
     visibility: visible !important;
     pointer-events: none;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-grid-column {
+    flex: 0 0 var(--v2-micro-col-width);
+    min-width: var(--v2-micro-col-width);
+    max-width: var(--v2-micro-col-width);
+    display: flex;
+    flex-direction: column;
+    gap: var(--site-micro-row-gap, var(--v2-row-gap, 10px));
+    align-items: stretch;
+    justify-content: flex-start;
+    overflow-x: clip;
+    box-sizing: border-box;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper {
+    position: relative;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    flex-shrink: 0;
+    height: auto;
+    aspect-ratio: auto;
+    margin: 0;
+    padding: 0;
+    transform: none;
+    display: block;
+    overflow-x: clip;
+    box-sizing: border-box;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper > .layer-dot,
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper > .depth-v2-glyph--meso {
+    display: none !important;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-stage {
+    position: relative !important;
+    inset: auto !important;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    height: auto;
+    display: block;
+    transform: none !important;
+    transform-origin: top right;
+    overflow-x: clip;
+    box-sizing: border-box;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .depth-v2-glyph--micro {
+    display: block !important;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    transform: none;
+    transform-origin: top right;
+    overflow-x: clip;
+    box-sizing: border-box;
+}
+
+body.site-grid.is-depth-v2.view-level-3 #app.is-micro-grid-layout {
+    --v2-micro-col-width: var(--site-micro-col-width);
+    gap: var(--site-grid-gap);
+    width: calc(
+        var(--col-count) * var(--site-micro-col-width)
+        + max(0, var(--col-count) - 1) * var(--site-grid-gap)
+        + 2 * var(--site-canvas-page-padding-x, var(--site-grid-padding))
+    ) !important;
+    padding-inline: var(--site-canvas-page-padding-x, var(--site-grid-padding));
+}
+
+body.site-grid.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-grid-column {
+    flex: 0 0 var(--site-micro-col-width);
+    min-width: var(--site-micro-col-width);
+    max-width: var(--site-micro-col-width);
+    gap: var(--site-micro-row-gap, var(--site-content-gap, var(--site-grid-gap)));
 }
 
 body.is-depth-v2.view-level-2 .note-wrapper,
@@ -1860,7 +2091,10 @@ body.is-depth-v2.view-level-3 .note-stage {
     position: relative;
     width: 100%;
     height: auto;
-    display: block;
+    display: flex;
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
     background: transparent;
     overflow: visible;
     pointer-events: auto;
@@ -2237,11 +2471,38 @@ body.is-depth-v2.view-level-3 .depth-v2-glyph--micro {
 
 body.is-depth-v2.view-level-3 .micro-mock__card.note-card {
     display: flex !important;
+    flex-direction: column;
     width: 100%;
+    max-width: 100%;
+    min-width: 0;
     height: auto;
-    aspect-ratio: 20 / 21;
+    aspect-ratio: auto;
+    min-height: 0;
     max-height: none;
-    overflow: hidden;
+    overflow-x: clip;
+    overflow-y: visible;
+    justify-content: flex-start;
+    align-items: stretch;
+    transform: none;
+    transform-origin: top right;
+    box-sizing: border-box;
+}
+
+body.is-depth-v2.view-level-3 .micro-mock__card .note-title {
+    flex-shrink: 0;
+    overflow: visible;
+    overflow-wrap: anywhere;
+    word-break: break-word;
+    max-width: 100%;
+    min-width: 0;
+}
+
+body.is-depth-v2.view-level-3 .micro-mock__card .note-body {
+    flex: 0 1 auto;
+    overflow: visible;
+    max-width: 100%;
+    min-width: 0;
+    overflow-wrap: anywhere;
 }
 
 /* תגיות L3 — pills כמו בלוקים במחסן (.action-block) */
@@ -2253,7 +2514,7 @@ body.is-depth-v2.view-level-3 .micro-mock__tags {
     justify-content: flex-start;
     align-items: center;
     flex-shrink: 0;
-    margin-top: auto;
+    margin-top: 0;
     padding-top: 0.5rem;
     direction: rtl;
 }
@@ -2300,4 +2561,49 @@ body.is-depth-v2.view-level-1 .depth-v2-glyph {
 body.is-depth-v2.view-level-1 .note-stage {
     opacity: 0;
     visibility: hidden;
+}
+
+/* L3 micro grid — final layout authority (after general L3 flex rules above) */
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper {
+    display: block !important;
+    align-items: stretch !important;
+    direction: ltr;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-stage {
+    display: block !important;
+    position: relative !important;
+    inset: auto !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    transform: none !important;
+    overflow-x: clip;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-stage .layer-small,
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-stage .layer-full {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+    overflow: hidden !important;
+    position: absolute !important;
+    pointer-events: none !important;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .depth-v2-glyph--micro {
+    display: block !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    transform: none !important;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-mock__card.note-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
+    margin: 0 !important;
+    transform: none !important;
 }

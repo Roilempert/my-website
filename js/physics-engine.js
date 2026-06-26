@@ -27,6 +27,13 @@ const PhysicsEngine = {
     },
 
     init() {
+        if (typeof Matter === 'undefined') {
+            console.error(
+                'Matter.js did not load (CDN blocked or offline). Physics is disabled — serve over HTTP and check network.'
+            );
+            return;
+        }
+
         this.engine = Matter.Engine.create();
         this.engine.world.gravity.x = CONFIG.physics.gravity.x;
         this.engine.world.gravity.y = CONFIG.physics.gravity.y;
@@ -1036,6 +1043,8 @@ const PhysicsEngine = {
     },
 
     buildWorld() {
+        if (!this.engine || typeof Matter === 'undefined') return;
+
         this.bodiesData.forEach(item => Matter.World.remove(this.engine.world, item.body));
         
         const allConstraints = Matter.Composite.allConstraints(this.engine.world);
@@ -1216,6 +1225,9 @@ const PhysicsEngine = {
 
         if (macroVisualActive) {
             this.drawSiblingLinks();
+            if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
+                DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
+            }
             this.drawNoteOutlines();
             this.updateMoleculeHoverId();
         }
@@ -1229,6 +1241,9 @@ const PhysicsEngine = {
         if (!this.linkCtx) return;
         this.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
         this.drawSiblingLinks();
+        if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
+            DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
+        }
         this.drawNoteOutlines();
     },
 

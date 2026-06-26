@@ -8,6 +8,9 @@ const DepthController = {
     lastScrollTime: 0,
     cooldownDelay: CONFIG.depth.cooldownDelay,
     _wheelLockUntil: 0,
+    _wheelDelta: 0,
+    _wheelDeltaTimer: null,
+    _levelChangeActive: false,
     _microRevealRaf: null,
     _microTransitionFrom: null,
     _microTransitionTo: null,
@@ -30,7 +33,13 @@ const DepthController = {
     },
 
     isWheelLocked() {
-        return this.isAnyTransitionActive() || Date.now() < this._wheelLockUntil;
+        return this._levelChangeActive ||
+            this.isAnyTransitionActive() ||
+            Date.now() < this._wheelLockUntil ||
+            (this.currentLevel === 2 &&
+                typeof DepthV2 !== 'undefined' &&
+                DepthV2.isActive() &&
+                !!DepthV2._prepareMesoPromise);
     },
 
     lockWheelAfterTransition() {
@@ -38,9 +47,46 @@ const DepthController = {
         this.lastScrollTime = Date.now();
     },
 
+    beginLevelChange() {
+        this._levelChangeActive = true;
+        this.lockWheelAfterTransition();
+    },
+
+    endLevelChange() {
+        this._levelChangeActive = false;
+        this.lockWheelAfterTransition();
+    },
+
+    _accumulateWheelDelta(deltaY) {
+        const windowMs = CONFIG.depth.wheelAccumWindow ?? 120;
+        this._wheelDelta += deltaY;
+
+        if (this._wheelDeltaTimer) clearTimeout(this._wheelDeltaTimer);
+        this._wheelDeltaTimer = setTimeout(() => {
+            this._wheelDelta = 0;
+            this._wheelDeltaTimer = null;
+        }, windowMs);
+    },
+
+    _consumeWheelIntent(deltaY) {
+        const threshold = CONFIG.depth.wheelThreshold;
+        this._accumulateWheelDelta(deltaY);
+
+        if (Math.abs(this._wheelDelta) < threshold) return 0;
+
+        const direction = this._wheelDelta > 0 ? 1 : -1;
+        this._wheelDelta = 0;
+        if (this._wheelDeltaTimer) {
+            clearTimeout(this._wheelDeltaTimer);
+            this._wheelDeltaTimer = null;
+        }
+        return direction;
+    },
+
     syncViewLevelClass(level = this.currentLevel) {
         [1, 2, 3].forEach(l => document.body.classList.remove(`view-level-${l}`));
         document.body.classList.add(`view-level-${level}`);
+        applySiteGridTokens(document.documentElement, level);
         if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
             DepthV2.onLevelChange(level);
             return;
@@ -72,8 +118,12 @@ const DepthController = {
 
     init() {
         document.body.classList.add(`view-level-${this.currentLevel}`);
-        if (typeof DepthV2 !== 'undefined') {
-            DepthV2.init();
+        try {
+            if (typeof DepthV2 !== 'undefined') {
+                DepthV2.init();
+            }
+        } catch (err) {
+            console.error('DepthV2.init failed:', err);
         }
 
         window.addEventListener('wheel', (e) => {
@@ -81,28 +131,22 @@ const DepthController = {
                 e.preventDefault();
                 return;
             }
-            e.preventDefault(); 
+            e.preventDefault();
             if (ArtifactInspector.isActive) {
                 if (Math.abs(e.deltaY) > CONFIG.depth.wheelThreshold && e.deltaY > 0) {
                     ArtifactInspector.close();
-                } else {
-                    return;
                 }
+                return;
             }
             if (this.isWheelLocked()) return;
 
-            const currentTime = new Date().getTime();
-            if (currentTime - this.lastScrollTime < this.cooldownDelay) return;
-
-            if (Math.abs(e.deltaY) > CONFIG.depth.wheelThreshold) {
-                if (e.deltaY > 0) {
-                    this.zoomOut(); 
-                } else if (e.deltaY < 0) {
-                    this.zoomIn();  
-                }
-                this.lastScrollTime = currentTime;
+            const intent = this._consumeWheelIntent(e.deltaY);
+            if (intent > 0) {
+                this.zoomOut();
+            } else if (intent < 0) {
+                this.zoomIn();
             }
-        }, { passive: false }); 
+        }, { passive: false });
 
         window.addEventListener('keydown', (e) => {
             const keysToBlock = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'];
@@ -111,41 +155,40 @@ const DepthController = {
     },
 
     zoomIn() {
-        if (this.currentLevel >= this.maxLevel || this.isWheelLocked()) return;
+        if (this.currentLevel >= this.maxLevel || this.isWheelLocked()) return false;
         if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
             ArtifactInspector.close();
         }
         const next = this.currentLevel + 1;
         if (typeof DepthTransitionOrchestrator !== 'undefined' &&
             DepthTransitionOrchestrator.runWheelZoom(next)) {
-            return;
+            return false;
         }
-        this.changeLevel(next);
+        return this.changeLevel(next);
     },
 
     zoomOut() {
-        if (this.currentLevel <= this.minLevel || this.isWheelLocked()) return;
+        if (this.currentLevel <= this.minLevel || this.isWheelLocked()) return false;
         if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
             ArtifactInspector.close();
         }
         const next = this.currentLevel - 1;
         if (typeof DepthTransitionOrchestrator !== 'undefined' &&
             DepthTransitionOrchestrator.runWheelZoom(next)) {
-            return;
+            return false;
         }
-        this.changeLevel(next);
+        return this.changeLevel(next);
     },
 
     changeLevel(newLevel) {
-        if (this.currentLevel === newLevel) return;
+        if (this.currentLevel === newLevel) return false;
 
         const prevLevel = this.currentLevel;
         const isMacroMesoTransition =
             (prevLevel === 1 && newLevel === 2) || (prevLevel === 2 && newLevel === 1);
 
         if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
-            this.changeLevelV2(newLevel);
-            return;
+            return this.changeLevelV2(newLevel);
         }
 
         if (this.isAnyTransitionActive()) {
@@ -154,15 +197,16 @@ const DepthController = {
                 SpatialNavigation.resume();
             } else if (typeof DepthTransitionOrchestrator !== 'undefined' &&
                 DepthTransitionOrchestrator.isRunning()) {
-                return;
+                return false;
             } else {
-                return;
+                return false;
             }
         }
 
         const isMicroTransition =
             (prevLevel === 2 && newLevel === 3) || (prevLevel === 3 && newLevel === 2);
 
+        this.beginLevelChange();
         SpatialNavigation.pause();
 
         if (isMicroTransition) {
@@ -194,7 +238,7 @@ const DepthController = {
                         SilhouetteEngine.onLevelEnter(newLevel);
                         ActionWarehouse.updateScrollReserve();
                         ActionWarehouse.updateDotFocusFilter();
-                        this.lockWheelAfterTransition();
+                        this.endLevelChange();
                         SpatialNavigation.resume();
                     });
                 });
@@ -212,7 +256,7 @@ const DepthController = {
                     SilhouetteEngine.onLevelEnter(targetLevel);
                     ActionWarehouse.updateScrollReserve();
                     ActionWarehouse.updateDotFocusFilter();
-                    this.lockWheelAfterTransition();
+                    this.endLevelChange();
 
                     AppState.centerViewport();
                     SpatialNavigation.resume();
@@ -229,6 +273,10 @@ const DepthController = {
                 prepMeso().then(() => {
                     document.body.classList.remove('is-silhouette-micro-measure');
                     requestAnimationFrame(() => beginBridge());
+                }).catch((err) => {
+                    console.error('Macro-meso prep failed:', err);
+                    this.endLevelChange();
+                    SpatialNavigation.resume();
                 });
             } else {
                 beginBridge();
@@ -256,10 +304,13 @@ const DepthController = {
                 } else {
                     if (this.currentLevel === 1) PhysicsEngine.buildWorld();
                     SpatialNavigation.resume();
+                    this.endLevelChange();
                 }
             };
             requestAnimationFrame(lockCameraToCenter);
         }
+
+        return true;
     },
 
     // Phase 1: silhouette ↔ text crossfade at fixed scale
@@ -336,7 +387,20 @@ const DepthController = {
     changeLevelV2(newLevel) {
         const prevLevel = this.currentLevel;
 
+        this.beginLevelChange();
         SpatialNavigation.pause();
+
+        try {
+            return this._changeLevelV2Core(newLevel, prevLevel);
+        } catch (err) {
+            console.error('changeLevelV2 failed:', err);
+            this.endLevelChange();
+            SpatialNavigation.resume();
+            return false;
+        }
+    },
+
+    _changeLevelV2Core(newLevel, prevLevel) {
 
         document.body.classList.remove(
             'is-macro-to-meso',
@@ -367,7 +431,7 @@ const DepthController = {
                 AppState.centerMesoViewport();
                 requestAnimationFrame(() => {
                     PhysicsEngine.setTransitionFrozen(false);
-                    this.lockWheelAfterTransition();
+                    this.endLevelChange();
                     if (typeof SpatialNavigation !== 'undefined') {
                         SpatialNavigation.resume();
                     }
@@ -377,7 +441,23 @@ const DepthController = {
                     }
                 });
             });
-            return;
+            return true;
+        }
+
+        if (prevLevel === 2 && newLevel === 3) {
+            this.currentLevel = newLevel;
+            this.syncViewLevelClass(newLevel);
+            ActionWarehouse.updateScrollReserve();
+            ActionWarehouse.syncDeployedBlocksForDepth?.();
+            ActionWarehouse.updateDotFocusFilter();
+            requestAnimationFrame(() => {
+                AppState.centerViewport();
+                if (typeof SpatialNavigation !== 'undefined') {
+                    SpatialNavigation.resume();
+                }
+                this.endLevelChange();
+            });
+            return true;
         }
 
         if (prevLevel === 3 && newLevel === 2) {
@@ -394,9 +474,9 @@ const DepthController = {
                 if (typeof SpatialNavigation !== 'undefined') {
                     SpatialNavigation.resume();
                 }
-                this.lockWheelAfterTransition();
+                this.endLevelChange();
             });
-            return;
+            return true;
         }
 
         if (newLevel === 1 && prevLevel >= 2) {
@@ -427,9 +507,9 @@ const DepthController = {
                 ActionWarehouse.updateDotFocusFilter();
                 AppState.centerViewport();
                 SpatialNavigation.resume();
-                this.lockWheelAfterTransition();
+                this.endLevelChange();
             });
-            return;
+            return true;
         }
 
         this.currentLevel = newLevel;
@@ -438,7 +518,8 @@ const DepthController = {
         ActionWarehouse.updateDotFocusFilter();
         AppState.centerViewport();
         SpatialNavigation.resume();
-        this.lockWheelAfterTransition();
+        this.endLevelChange();
+        return true;
     }
 };
 

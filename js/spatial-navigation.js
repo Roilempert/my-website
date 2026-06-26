@@ -225,18 +225,19 @@ const SpatialNavigation = {
         let dy = 0;
         const width = window.innerWidth;
         const height = window.innerHeight;
+        const threshold = this.threshold;
+        const bottomThreshold = CONFIG.navigation.bottomEdgeThreshold;
 
-        if (this.mouseX < this.threshold) {
-            dx = -this.maxSpeed * (1 - this.mouseX / this.threshold);
-        } else if (this.mouseX > width - this.threshold) {
-            dx = this.maxSpeed * (1 - (width - this.mouseX) / this.threshold);
+        if (this.mouseX < threshold) {
+            dx = -this.maxSpeed * (1 - this.mouseX / threshold);
+        } else if (this.mouseX > width - threshold) {
+            dx = this.maxSpeed * (1 - (width - this.mouseX) / threshold);
         }
 
-        const bottomThreshold = CONFIG.navigation.bottomEdgeThreshold;
         const bottomSpeed = CONFIG.navigation.bottomMaxSpeed;
 
-        if (this.mouseY < this.threshold) {
-            dy = -this.maxSpeed * (1 - this.mouseY / this.threshold);
+        if (this.mouseY < threshold) {
+            dy = -this.maxSpeed * (1 - this.mouseY / threshold);
         } else if (this.mouseY > height - bottomThreshold) {
             // Narrow, slow bottom zone; fully suppressed while hovering the warehouse
             if (!ActionWarehouse.isPointOverDock(this.mouseX, this.mouseY)) {

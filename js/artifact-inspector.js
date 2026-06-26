@@ -16,6 +16,7 @@ const ArtifactInspector = {
 
         this.panel = document.createElement('div');
         this.panel.classList.add('artifact-inspector-panel');
+        this.panel.dataset.siteLayer = 'inspector';
         this.panel.setAttribute('role', 'dialog');
         this.panel.setAttribute('aria-modal', 'true');
         this.panel.setAttribute('aria-hidden', 'true');

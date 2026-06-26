@@ -711,7 +711,7 @@ Object.assign(ActionWarehouse, {
         const dotR = CONFIG.physics.body.radius;
         const blockR = block
             ? this.getBlockCollisionRadius(block)
-            : CONFIG.warehouse.blockHeight / 2;
+            : scale(CONFIG.warehouse.blockHeight) / 2;
         const clearance = cfg.orbitCaptureClearance ?? cfg.blockClearance;
         return blockR + dotR + clearance;
     },
@@ -752,7 +752,7 @@ Object.assign(ActionWarehouse, {
         const activeBlocks = this.getActiveCaptureBlocks();
         if (activeBlocks.length === 0) return;
 
-        const blockBodyR = CONFIG.warehouse.blockHeight / 2;
+        const blockBodyR = scale(CONFIG.warehouse.blockHeight) / 2;
         const blockCount = activeBlocks.length;
         let foreignPushScale = 1;
         let maxPush = scale(14);
