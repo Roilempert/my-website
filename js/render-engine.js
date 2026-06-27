@@ -2,12 +2,40 @@
    03. RENDER ENGINE (DOM GENERATION)
    ========================================================================== */
 const RenderEngine = {
+    getStableMicroHoverRotationDeg(item, noteIndex = 0) {
+        const cfg = CONFIG.depth?.microNoteHoverRotation ?? {};
+        const negMin = cfg.negativeMin ?? -10;
+        const negMax = cfg.negativeMax ?? -5;
+        const posMin = cfg.positiveMin ?? 5;
+        const posMax = cfg.positiveMax ?? 10;
+        const idx = Number(noteIndex) || 0;
+        const payload = `${String(item?.id ?? '')}\0${String(item?.authorCode ?? '')}\0${idx}`;
+
+        let h = 2166136261;
+        for (let i = 0; i < payload.length; i++) {
+            h ^= payload.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+
+        const signPick = ((h >>> 0) % 10000) / 10000;
+        const magPick = (((h >>> 12) & 0xffff) % 10000) / 10000;
+        const positive = signPick >= 0.5;
+
+        if (positive) {
+            return Math.round((posMin + magPick * (posMax - posMin)) * 100) / 100;
+        }
+        return Math.round((negMin + magPick * (negMax - negMin)) * 100) / 100;
+    },
+
     createNoteDOM(item, noteIndex = -1) {
         const wrapper = document.createElement('div');
         wrapper.classList.add('note-wrapper', 'snap-point');
         wrapper.dataset.noteId = item.id;
         if (noteIndex >= 0) wrapper.dataset.noteIndex = String(noteIndex);
         if (item.authorCode) wrapper.dataset.authorCode = item.authorCode;
+
+        const hoverDeg = this.getStableMicroHoverRotationDeg(item, noteIndex >= 0 ? noteIndex : 0);
+        wrapper.style.setProperty('--note-micro-hover-rotation', `${hoverDeg}deg`);
 
         let tagsHTML = '';
         if (item.tags && item.tags.length > 0) {

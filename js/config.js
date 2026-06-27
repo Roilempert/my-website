@@ -5,8 +5,25 @@
 const VISUAL_SCALE = 0.72;
 const scale = (px) => Math.round(px * VISUAL_SCALE);
 
+/* Canonical type scale — keep in sync with :root --type-* in styles.css */
+const TYPE_SCALE = {
+    display: { sizeRem: 4.125, sizePx: 66, line: 0.9, weight: 600, style: 'italic' },
+    body:    { sizeRem: 1, sizePx: 16, line: 1.2, weight: 400, maxCh: 55 },
+    meta:    { sizeRem: 0.875, sizePx: 14, line: 1.2, weight: 400 },
+    ui:      { sizePt: 10, line: 1.2, weight: 400 },
+    nav:     { sizeRem: 3, line: 1.15, weight: 600, weightActive: 700 },
+    debug:   { sizePx: 9 }
+};
+
 const CONFIG = {
     visualScale: VISUAL_SCALE,
+
+    typography: TYPE_SCALE,
+
+    /* --- Experimental UI — pill frames on draggable/clickable text only; false = revert --- */
+    experimental: {
+        interactivePillChrome: true
+    },
 
     /* --- Site shell grid (viewport reference — separate from #app canvas grids) --- */
     siteGrid: {
@@ -90,6 +107,7 @@ const CONFIG = {
         },
         noteZoomMeso: null,             // null → midpoint from unitScale (meso / micro)
         noteZoomMicro: 1,
+        microNoteHoverRotation: { negativeMin: -10, negativeMax: -5, positiveMin: 5, positiveMax: 10 },
         depthEngine: 'v2',              // 'v2' = גרידים פשוטים חדשים | 'legacy' = מנוע קטלוג/מעברים
         layoutMode: 'legacy-grid',       // פעיל רק כש-depthEngine === 'legacy'
         noteClickPath: 'direct-l3',      // 'direct-l3' | 'l2-preview-then-l3'
@@ -255,10 +273,15 @@ const CONFIG = {
             padding: 0
         },
         typography: (() => {
-            // Single uniform scale derived from micro (.note-title / .note-body) ratios
+            // Single uniform scale derived from micro type scale (display / body)
             const uniformScale = 0.18;
             const titleSizeBoost = 1.65;
-            const micro = { titleSize: 66, titleLine: 0.9, bodySize: 16, bodyLine: 1.2 };
+            const micro = {
+                titleSize: TYPE_SCALE.display.sizePx,
+                titleLine: TYPE_SCALE.display.line,
+                bodySize: TYPE_SCALE.body.sizePx,
+                bodyLine: TYPE_SCALE.body.line
+            };
             return {
                 direction: 'rtl',
                 microRef: micro,
@@ -302,10 +325,10 @@ const CONFIG = {
     /* --- Layer navigation — depth labels (מאקרו / מזו / מיקרו), top-right --- */
     layerNavigation: {
         labels: { 1: 'מאקרו', 2: 'מזו', 3: 'מיקרו' },
-        typeSize: { value: 3, unit: 'rem' },
-        typeLine: 1.15,
-        typeWeight: 600,
-        typeWeightActive: 700,
+        typeSize: { value: TYPE_SCALE.nav.sizeRem, unit: 'rem' },
+        typeLine: TYPE_SCALE.nav.line,
+        typeWeight: TYPE_SCALE.nav.weight,
+        typeWeightActive: TYPE_SCALE.nav.weightActive,
         gap: { value: 1, unit: 'rem' },
         rowGap: { value: 0.08, unit: 'rem' },
         slotMoveDuration: 0.34,
@@ -886,10 +909,32 @@ function applySiteGridTokens(root = document.documentElement, level = null) {
     if (document.body) {
         document.body.classList.add('site-grid');
         document.body.classList.toggle('is-site-grid-debug', !!g.debug);
+        applyExperimentalChrome();
     }
 }
 
+function applyExperimentalChrome() {
+    if (!document.body) return;
+    document.body.classList.toggle(
+        'is-interactive-pill-chrome',
+        !!CONFIG.experimental?.interactivePillChrome
+    );
+}
+
+function applyTypographyTokens() {
+    const root = document.documentElement;
+    const t = TYPE_SCALE;
+    root.style.setProperty('--type-display-size', `${t.display.sizeRem}rem`);
+    root.style.setProperty('--type-body-size', `${t.body.sizeRem}rem`);
+    root.style.setProperty('--type-meta-size', `${t.meta.sizeRem}rem`);
+    root.style.setProperty('--type-ui-size', `${t.ui.sizePt}pt`);
+    root.style.setProperty('--type-nav-size', `${t.nav.sizeRem}rem`);
+    root.style.setProperty('--type-debug-size', `${t.debug.sizePx}px`);
+}
+
 function applyVisualScaleTokens() {
+    applyTypographyTokens();
+    applyExperimentalChrome();
     const root = document.documentElement;
     const mesoTags = CONFIG.meso.tagMarkers;
     const { meso, micro } = getDepthUnitScales();

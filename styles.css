@@ -14,13 +14,47 @@
     --transition-fast: 0.2s ease;
     --outline-weight: 0.2pt;
     --capsule-radius: 9999px;
-    --site-type-size: 10pt;
-    --site-type-family: NarkissYair, sans-serif;
-    --site-type-line: 1.2;
-    --layer-nav-type-size: 3rem;
-    --layer-nav-type-line: 1.15;
-    --layer-nav-type-weight: 600;
-    --layer-nav-type-weight-active: 700;
+
+    /* --- Type scale (canonical hierarchy) --- */
+    /* Display — note headlines (.note-title) */
+    --type-family-display: Neoklass, serif;
+    --type-display-size: 4.125rem;
+    --type-display-line: 0.9;
+    --type-display-weight: 600;
+    --type-display-style: italic;
+    /* Body — note prose (.note-body) */
+    --type-family-body: NarkissTam, HelveticaNeue, serif;
+    --type-body-size: 1rem;
+    --type-body-line: 1.2;
+    --type-body-weight: 400;
+    --type-body-max-ch: 55ch;
+    /* Meta — in-note catalog labels (.note-idcode, .tag) */
+    --type-family-meta: ratzif22, sans-serif;
+    --type-meta-size: 0.875rem;
+    --type-meta-line: 1.2;
+    --type-meta-weight: 400;
+    /* UI — site chrome (.site-type: warehouse, blocks, hover ID, L3 tag pills) */
+    --type-family-ui: NarkissYair, sans-serif;
+    --type-ui-size: 10pt;
+    --type-ui-line: 1.2;
+    --type-ui-weight: 400;
+    /* Nav — depth layer labels (מאקרו / מזו / מיקרו) */
+    --type-family-nav: var(--type-family-ui);
+    --type-nav-size: 3rem;
+    --type-nav-line: 1.15;
+    --type-nav-weight: 600;
+    --type-nav-weight-active: 700;
+    /* Debug — grid region overlays (dev only) */
+    --type-debug-size: 9px;
+
+    /* Legacy aliases — prefer --type-* tokens in new rules */
+    --site-type-family: var(--type-family-ui);
+    --site-type-size: var(--type-ui-size);
+    --site-type-line: var(--type-ui-line);
+    --layer-nav-type-size: var(--type-nav-size);
+    --layer-nav-type-line: var(--type-nav-line);
+    --layer-nav-type-weight: var(--type-nav-weight);
+    --layer-nav-type-weight-active: var(--type-nav-weight-active);
     --layer-nav-gap: 1rem;
     --layer-nav-inactive-opacity: 0.35;
     --layer-nav-anchor-top: var(--site-grid-cell-h);
@@ -861,7 +895,7 @@ body.view-level-3 .layer-dot {
 }
 
 @font-face {
-    font-family: "Ratzif22";
+    font-family: "ratzif22";
     font-weight: 500;
     src: url("../assets/fonts/ratzif22-medium.woff2") format("woff2");
 }
@@ -886,36 +920,63 @@ body.view-level-3 .layer-dot {
 }
 
 /*
-   .site-type — טיפוגרפיית שאר האתר (מחוץ ל-.note-card).
-   מחסן, בלוקים, תוויות hover. בתוך פתקים: .note-title / .note-body / .note-idcode / .tag
+   Typography roles (see :root --type-* tokens):
+   Display  → .note-title          Neoklass italic — note headline
+   Body     → .note-body           NarkissTam — note prose
+   Meta     → .note-idcode, .tag   ratzif22 — in-note catalog (ID + tag pills)
+   UI       → .site-type           NarkissYair — warehouse, blocks, hover ID, L3 tag pills
+   Nav      → .site-navigation-layers__label — depth labels (מאקרו / מזו / מיקרו)
+
+   Tag dual system (intentional): legacy .note-card uses Meta (.tag);
+   depth-v2 L3 + inspector reuse UI (.action-block.site-type) to match warehouse chrome.
 */
-.site-type {
-    font-family: var(--site-type-family);
-    font-size: var(--site-type-size);
-    line-height: var(--site-type-line);
-}
 
-/* Text Layout Properties */
+.type-display,
 .note-title {
-    font-family: Neoklass, serif;
-    font-style: italic;
-    font-size: 4.125rem;
-    font-weight: 600;
-    line-height: 0.9;
+    font-family: var(--type-family-display);
+    font-size: var(--type-display-size);
+    font-weight: var(--type-display-weight);
+    font-style: var(--type-display-style);
+    line-height: var(--type-display-line);
 }
 
+.type-body,
 .note-body {
-    font-family: NarkissTam, HelveticaNeue, serif;
-    font-size: 1rem;
-    line-height: 1.2;
-    max-width: 55ch;
+    font-family: var(--type-family-body);
+    font-size: var(--type-body-size);
+    font-weight: var(--type-body-weight);
+    line-height: var(--type-body-line);
+    max-width: var(--type-body-max-ch);
     padding: 0 0.5rem;
     white-space: pre-wrap;
 }
 
+.type-meta,
+.note-idcode,
+.tag {
+    font-family: var(--type-family-meta);
+    font-size: var(--type-meta-size);
+    font-weight: var(--type-meta-weight);
+    line-height: var(--type-meta-line);
+}
+
+.type-ui,
+.site-type {
+    font-family: var(--type-family-ui);
+    font-size: var(--type-ui-size);
+    font-weight: var(--type-ui-weight);
+    line-height: var(--type-ui-line);
+}
+
+.type-nav,
+.site-navigation-layers__label {
+    font-family: var(--type-family-nav);
+    font-size: var(--type-nav-size);
+    font-weight: var(--type-nav-weight);
+    line-height: var(--type-nav-line);
+}
+
 .note-idcode {
-    font-family: ratzif22, sans-serif;
-    font-size: 0.875rem;
     position: absolute;
     left: 0.5rem;
     top: 50%;
@@ -954,8 +1015,6 @@ body.view-level-3 .layer-dot {
 }
 
 .tag {
-    font-family: ratzif22, sans-serif;
-    font-size: 0.875rem;
     border-radius: 50px;
     background-color: var(--bg-main);
     display: inline-flex;
@@ -1210,10 +1269,6 @@ body.view-level-3 .site-navigation-layers.is-dimmed {
     display: block;
     width: max-content;
     max-width: 100%;
-    font-family: var(--site-type-family);
-    font-size: var(--layer-nav-type-size, 3rem);
-    line-height: var(--layer-nav-type-line, 1.15);
-    font-weight: var(--layer-nav-type-weight, 600);
     color: var(--main-text);
     text-align: right;
     writing-mode: horizontal-tb;
@@ -1232,7 +1287,7 @@ body.view-level-3 .site-navigation-layers.is-dimmed {
 }
 
 .site-navigation-layers__title.is-active .site-navigation-layers__label {
-    font-weight: var(--layer-nav-type-weight-active, 700);
+    font-weight: var(--type-nav-weight-active);
     opacity: 1;
     transform: translateY(-100%) translateX(calc(-1 * var(--layer-nav-active-indent, calc(0.5 * var(--site-grid-cell-w)))));
     text-decoration: none;
@@ -2730,7 +2785,8 @@ body.is-depth-v2.view-level-3 .micro-mock__card.note-card {
     justify-content: flex-start;
     align-items: stretch;
     transform: none;
-    transform-origin: top right;
+    transform-origin: center center;
+    transition: transform 0.35s cubic-bezier(0.25, 1, 0.5, 1);
     box-sizing: border-box;
     padding: calc(var(--site-grid-gap, 1.25rem) * 0.75) var(--site-grid-gap, 1.25rem) var(--site-grid-gap, 1.25rem);
 }
@@ -2872,6 +2928,73 @@ body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-mock__card.note-c
     min-height: var(--site-micro-note-min-height, calc(6 * var(--site-grid-cell-h) + 5 * var(--site-grid-gap))) !important;
     margin: 0 !important;
     transform: none !important;
+    transform-origin: center center !important;
+    transition: transform 0.35s cubic-bezier(0.25, 1, 0.5, 1) !important;
     pointer-events: auto !important;
     cursor: pointer;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-mock__card.note-card:hover {
+    transform: rotate(var(--note-micro-hover-rotation, 0deg)) !important;
+    overflow: visible !important;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper:has(.micro-mock__card.note-card:hover) {
+    z-index: 3;
+    overflow: visible !important;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper:has(.micro-mock__card.note-card:hover) .note-stage,
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper:has(.micro-mock__card.note-card:hover) .depth-v2-glyph--micro {
+    overflow: visible !important;
+}
+
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-grid-column:has(.micro-mock__card.note-card:hover) {
+    overflow: visible;
+}
+
+/* ==========================================================================
+   09. EXPERIMENTAL — pill chrome on interactive text only
+   Toggle: CONFIG.experimental.interactivePillChrome (false = revert)
+   Draggable text: .action-block labels (base capsule frame in §07).
+   Clickable text: depth layer labels (מאקרו / מזו / מיקרו).
+   ========================================================================== */
+body.is-interactive-pill-chrome {
+    --pill-chrome-bg: var(--card-bg);
+    --pill-chrome-border: var(--outline-weight) solid var(--main-text);
+    --pill-chrome-radius: var(--capsule-radius);
+    --pill-chrome-hover-bg: var(--block-hover-bg);
+    --pill-chrome-pad-y: 0.22rem;
+    --pill-chrome-pad-x: 1rem;
+}
+
+/* Depth nav — clickable layer labels */
+body.is-interactive-pill-chrome .site-navigation-layers__label {
+    background-color: var(--pill-chrome-bg);
+    border: var(--pill-chrome-border);
+    border-radius: var(--pill-chrome-radius);
+    padding: var(--pill-chrome-pad-y) var(--pill-chrome-pad-x);
+    box-sizing: border-box;
+    transition:
+        transform var(--layer-nav-slot-duration, 0.34s) var(--layer-nav-slot-easing, cubic-bezier(0.9, 0, 0.02, 1)),
+        opacity 0.12s ease,
+        font-weight 0.12s ease,
+        background-color var(--transition-fast);
+}
+
+body.is-interactive-pill-chrome .site-navigation-layers__title:not(:disabled):hover .site-navigation-layers__label {
+    background-color: var(--pill-chrome-hover-bg);
+}
+
+body.is-interactive-pill-chrome .site-navigation-layers__title.is-active .site-navigation-layers__label {
+    background-color: var(--pill-chrome-bg);
+}
+
+/* Draggable block pills — extra inset (capsule frame already on .action-block) */
+body.is-interactive-pill-chrome .action-block:not(.action-block--frame) {
+    padding: var(--pill-chrome-pad-y) var(--pill-chrome-pad-x);
+}
+
+body.is-interactive-pill-chrome .action-block--author {
+    padding: var(--pill-chrome-pad-y) calc(var(--pill-chrome-pad-x) + 0.12rem);
 }
