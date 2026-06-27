@@ -59,6 +59,10 @@ const RenderEngine = {
 
         wrapper.addEventListener('click', (e) => {
             if (e.target.closest('.layer-dot')) return;
+            if (typeof isPointOverSiteNavigationUI === 'function' &&
+                isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+                return;
+            }
             e.stopPropagation();
 
             if (DepthController.currentLevel >= 2 &&

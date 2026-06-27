@@ -15,8 +15,23 @@
     --outline-weight: 0.2pt;
     --capsule-radius: 9999px;
     --site-type-size: 10pt;
-    --site-type-family: ratzif22, sans-serif;
+    --site-type-family: NarkissYair, sans-serif;
     --site-type-line: 1.2;
+    --layer-nav-type-size: 3rem;
+    --layer-nav-type-line: 1.15;
+    --layer-nav-type-weight: 600;
+    --layer-nav-type-weight-active: 700;
+    --layer-nav-gap: 1rem;
+    --layer-nav-inactive-opacity: 0.35;
+    --layer-nav-anchor-top: var(--site-grid-cell-h);
+    --layer-nav-slot-base-top: calc(var(--site-grid-padding) + var(--site-grid-cell-h));
+    --layer-nav-hit-pad: 0.625rem;
+    --layer-nav-active-indent: calc(0.5 * var(--site-grid-cell-w));
+    --layer-nav-hover-indent: calc(0.5 * var(--site-grid-cell-w));
+    --layer-nav-row-gap: 0.08rem;
+    --layer-nav-row-step: calc(var(--layer-nav-type-size) * var(--layer-nav-type-line) + var(--layer-nav-row-gap));
+    --layer-nav-slot-duration: 0.34s;
+    --layer-nav-slot-easing: cubic-bezier(0.9, 0, 0.02, 1);
 }
 
 *, *:before, *:after {
@@ -154,16 +169,23 @@ body.site-grid.view-level-1 {
     --canvas-width: var(--site-macro-canvas-width, 180vw);
     --grid-gap: var(--site-grid-gap);
     --grid-padding: var(--site-grid-padding);
+    --site-macro-row-stride: calc(2 * var(--site-grid-cell-h) + var(--site-grid-gap));
 }
 
 body.site-grid.view-level-1 #app {
-    gap: var(--site-grid-gap);
+    column-gap: var(--site-grid-gap);
+    row-gap: 0;
     padding: var(--site-grid-padding);
+    /* One content row + one empty reference row per L1 band; centers on odd shell rows */
+    grid-auto-rows: var(--site-macro-row-stride, calc(2 * var(--site-grid-cell-h) + var(--site-grid-gap)));
 }
 
 body.site-grid.view-level-1 .note-wrapper {
     aspect-ratio: auto;
+    height: var(--site-macro-row-height, var(--site-grid-cell-h));
     min-height: var(--site-macro-row-height, var(--site-grid-cell-h));
+    max-height: var(--site-macro-row-height, var(--site-grid-cell-h));
+    align-self: start;
     align-items: center;
     justify-content: center;
 }
@@ -821,6 +843,12 @@ body.view-level-3 .layer-dot {
 
 /* Typography Fonts */
 @font-face {
+    font-family: "NarkissYair";
+    font-weight: 400;
+    src: url("../assets/fonts/NarkissYair-Regular-TRIAL.woff2") format("woff2");
+}
+
+@font-face {
     font-family: "ratzif22";
     font-weight: 400;
     src: url("../assets/fonts/ratzif22-regular.woff2") format("woff2");
@@ -1115,59 +1143,132 @@ body.is-depth-v2.view-level-2.is-depth-workspace-active .link-canvas {
 }
 
 /* ==========================================================================
-   06b. NAVIGATION — layer titles (right) + active minimap (3 cols × 2 rows)
+   06b. LAYER NAVIGATION — depth labels (top-right)
    ========================================================================== */
 
-/* Layer titles — right edge, no outline */
+/* Depth layer titles — fixed to site grid; slot 0 = bottom edge of row 1 */
 .site-navigation-layers {
     position: fixed;
-    z-index: 48;
-    display: flex;
-    flex-direction: column;
-    gap: var(--nav-layer-gap, 0.35rem);
+    z-index: 940;
+    inset: 0;
     box-sizing: border-box;
-    padding: 0.15rem 0.25rem;
+    padding: 0;
+    margin: 0;
     background: transparent;
     border: none;
     direction: rtl;
     pointer-events: none;
+    overflow: visible;
     transition: opacity 0.25s ease;
 }
 
 body.site-grid .site-navigation-layers {
-    left: var(--site-layer-navigationLayers-left);
-    top: var(--site-layer-navigationLayers-top);
-    width: var(--site-layer-navigationLayers-width);
-    max-height: var(--site-layer-navigationLayers-height);
+    left: auto;
+    top: auto;
+    width: auto;
+    height: auto;
+    max-height: none;
 }
 
 .site-navigation-layers.is-dimmed {
     opacity: 0.45;
 }
 
+body.view-level-2 .site-navigation-layers,
+body.view-level-3 .site-navigation-layers {
+    opacity: 1;
+}
+
+body.view-level-2 .site-navigation-layers.is-dimmed,
+body.view-level-3 .site-navigation-layers.is-dimmed {
+    opacity: 0.72;
+}
+
 .site-navigation-layers__title {
+    position: fixed;
+    right: var(--site-grid-padding);
+    left: auto;
+    width: max-content;
+    max-width: calc(100vw - 2 * var(--site-grid-padding));
+    background: none;
+    border: none;
+    padding: var(--layer-nav-hit-pad, 0.625rem);
+    margin: 0;
+    cursor: pointer;
+    pointer-events: auto;
+    z-index: 941;
+    top: calc(
+        var(--layer-nav-slot-base-top, calc(var(--site-grid-padding) + var(--site-grid-cell-h))) +
+        var(--layer-nav-slot, 0) * var(--layer-nav-row-step)
+    );
+    transform: none;
+    transition:
+        top var(--layer-nav-slot-duration, 0.34s) var(--layer-nav-slot-easing, cubic-bezier(0.9, 0, 0.02, 1));
+}
+
+.site-navigation-layers__label {
+    display: block;
+    width: max-content;
+    max-width: 100%;
     font-family: var(--site-type-family);
-    font-size: var(--site-type-size);
-    line-height: var(--site-type-line);
+    font-size: var(--layer-nav-type-size, 3rem);
+    line-height: var(--layer-nav-type-line, 1.15);
+    font-weight: var(--layer-nav-type-weight, 600);
     color: var(--main-text);
     text-align: right;
     writing-mode: horizontal-tb;
     user-select: none;
-    opacity: 0.4;
-    transition: opacity 0.2s ease;
+    text-decoration: none;
+    opacity: var(--layer-nav-inactive-opacity, 0.35);
+    transform: translateY(-100%) translateX(0);
+    transition:
+        transform var(--layer-nav-slot-duration, 0.34s) var(--layer-nav-slot-easing, cubic-bezier(0.9, 0, 0.02, 1)),
+        opacity 0.12s ease,
+        font-weight 0.12s ease;
 }
 
 .site-navigation-layers__title.is-active {
-    opacity: 1;
-    text-decoration: underline;
-    text-decoration-color: var(--accent-olive);
-    text-underline-offset: 3px;
+    z-index: 2;
 }
 
-/* Single minimap — bottom right, 3 site cols × 2 rows, no chrome */
+.site-navigation-layers__title.is-active .site-navigation-layers__label {
+    font-weight: var(--layer-nav-type-weight-active, 700);
+    opacity: 1;
+    transform: translateY(-100%) translateX(calc(-1 * var(--layer-nav-active-indent, calc(0.5 * var(--site-grid-cell-w)))));
+    text-decoration: none;
+}
+
+.site-navigation-layers__title.is-inactive:not(:disabled):hover .site-navigation-layers__label {
+    opacity: var(--layer-nav-inactive-opacity, 0.35);
+    transform: translateY(-100%) translateX(calc(-1 * var(--layer-nav-hover-indent, calc(0.5 * var(--site-grid-cell-w)))));
+}
+
+.site-navigation-layers.is-dimmed .site-navigation-layers__title:disabled {
+    pointer-events: none;
+    cursor: default;
+}
+
+.site-navigation-layers__title:disabled {
+    cursor: default;
+}
+
+.site-navigation-layers.is-dimmed .site-navigation-layers__title:disabled {
+    opacity: 0.45;
+}
+
+body.view-level-2 .site-navigation-layers__title:disabled,
+body.view-level-3 .site-navigation-layers__title:disabled {
+    opacity: 1;
+}
+
+/* ==========================================================================
+   06c. NAVIGATION MINIMAP — spatial overview canvas (bottom-right)
+   ========================================================================== */
+
+/* Active-depth minimap — 3 site cols × 2 rows, separate from layer labels */
 .site-navigation-maps {
     position: fixed;
-    z-index: 48;
+    z-index: 940;
     box-sizing: border-box;
     padding: 0;
     margin: 0;
@@ -1191,6 +1292,17 @@ body.site-grid .site-navigation-maps {
     pointer-events: none;
 }
 
+body.view-level-2 .site-navigation-maps,
+body.view-level-3 .site-navigation-maps {
+    opacity: 1;
+}
+
+body.view-level-2 .site-navigation-maps.is-dimmed,
+body.view-level-3 .site-navigation-maps.is-dimmed {
+    opacity: 0.72;
+    pointer-events: none;
+}
+
 .site-navigation-maps__map-wrap {
     width: 100%;
     height: 100%;
@@ -1204,7 +1316,7 @@ body.site-grid .site-navigation-maps {
     border: none;
     background: #e8e8e8;
     box-sizing: border-box;
-    cursor: crosshair;
+    cursor: grab;
 }
 
 /* ==========================================================================
@@ -2238,6 +2350,23 @@ body.is-depth-v2.view-level-1 #app {
     row-gap: var(--grid-gap);
     column-gap: var(--grid-gap);
     width: var(--canvas-width);
+}
+
+/* L1 + site shell — odd reference rows for content, even rows empty (overrides square aspect-ratio above) */
+body.site-grid.is-depth-v2.view-level-1 #app {
+    grid-auto-rows: var(--site-macro-row-stride, calc(2 * var(--site-grid-cell-h) + var(--site-grid-gap)));
+    row-gap: 0;
+    column-gap: var(--site-grid-gap);
+}
+
+body.site-grid.is-depth-v2.view-level-1 .note-wrapper {
+    aspect-ratio: auto;
+    height: var(--site-macro-row-height, var(--site-grid-cell-h));
+    min-height: var(--site-macro-row-height, var(--site-grid-cell-h));
+    max-height: var(--site-macro-row-height, var(--site-grid-cell-h));
+    align-self: start;
+    align-items: center;
+    justify-content: center;
 }
 
 body.is-depth-v2.view-level-1 .note-stage {

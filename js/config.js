@@ -24,7 +24,7 @@ const CONFIG = {
             blockBar:       { colStart: 4, colEnd: 16, rowStart: 8, rowEnd: 9  },
             inspector:    { colStart: 6, colEnd: 14, rowStart: 5, rowEnd: 9  },
             filterFringe: { colStart: 17, colEnd: 19, rowStart: 1, rowEnd: 9  },
-            navigationLayers: { colStart: 16, colEnd: 19, rowStart: 1, rowEnd: 4  },
+            navigationLayers: { colStart: 17, colEnd: 19, rowStart: 1, rowEnd: 6  },
             navigationMaps:   { colStart: 16, colEnd: 19, rowStart: 9, rowEnd: 11 },
             resetButton:  { colStart: 3, colEnd: 4,  rowStart: 9, rowEnd: 10 }
         },
@@ -299,10 +299,27 @@ const CONFIG = {
         spacePanKey: 'Space'
     },
 
-    /* --- Navigation map panel (minimaps + layer titles) --- */
-    navigationMap: {
+    /* --- Layer navigation — depth labels (מאקרו / מזו / מיקרו), top-right --- */
+    layerNavigation: {
         labels: { 1: 'מאקרו', 2: 'מזו', 3: 'מיקרו' },
-        layerGap: { value: 0.35, unit: 'rem' },
+        typeSize: { value: 3, unit: 'rem' },
+        typeLine: 1.15,
+        typeWeight: 600,
+        typeWeightActive: 700,
+        gap: { value: 1, unit: 'rem' },
+        rowGap: { value: 0.08, unit: 'rem' },
+        slotMoveDuration: 0.34,
+        // Extreme slow-in → snap mid → very short ease-out (no overshoot)
+        slotMoveEasing: 'cubic-bezier(0.9, 0, 0.02, 1)',
+        indentColumns: 0.5,
+        anchorRow: 1,
+        inactiveOpacity: 0.35,
+        hitAreaPadding: { value: 0.625, unit: 'rem' },
+        slotCount: 3
+    },
+
+    /* --- Navigation minimap — spatial overview canvas, bottom-right (not layer labels) --- */
+    navigationMap: {
         frameInset: 2,
         macroRefreshMs: 120
     },
@@ -702,6 +719,11 @@ function applySiteGridContentScale(root = document.documentElement) {
     root.style.setProperty('--site-micro-viewport-cols', String(viewportMicroCols));
     root.style.setProperty('--site-macro-cell-width', siteGridSpanWidth(span1));
     root.style.setProperty('--site-macro-row-height', 'var(--site-grid-cell-h)');
+    /* L1 row stride: content row + one empty reference row (odd shell rows 1, 3, 5…) */
+    root.style.setProperty(
+        '--site-macro-row-stride',
+        'calc(2 * var(--site-grid-cell-h) + var(--site-grid-gap))'
+    );
     root.style.setProperty('--site-meso-col-width', siteGridContentColumnWidth(2));
     root.style.setProperty('--site-micro-col-width', siteGridContentColumnWidth(3));
     const microMinRows = g.microNoteMinRows ?? 6;
@@ -726,6 +748,62 @@ function siteGridRegionRect(placement) {
         width: `calc(${colSpan} * var(--site-grid-cell-w) + ${Math.max(0, colSpan - 1)} * var(--site-grid-gap))`,
         height: `calc(${rowSpan} * var(--site-grid-cell-h) + ${Math.max(0, rowSpan - 1)} * var(--site-grid-gap))`
     };
+}
+
+function getLayerNavHitAreaPaddingPx() {
+    const btn = document.querySelector('.site-navigation-layers__title');
+    if (btn) {
+        const pad = parseFloat(window.getComputedStyle(btn).paddingTop);
+        if (Number.isFinite(pad) && pad > 0) return pad;
+    }
+    return 10;
+}
+
+function isPointOverSiteNavigationUI(clientX, clientY) {
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
+
+    const pad = getLayerNavHitAreaPaddingPx();
+
+    const layerButtons = document.querySelectorAll('.site-navigation-layers__title:not(:disabled)');
+    for (const btn of layerButtons) {
+        const rect = btn.getBoundingClientRect();
+        if (
+            clientX >= rect.left - pad &&
+            clientX <= rect.right + pad &&
+            clientY >= rect.top - pad &&
+            clientY <= rect.bottom + pad
+        ) {
+            return true;
+        }
+    }
+
+    const layersPanel = document.getElementById('site-navigation-layers');
+    if (layersPanel && window.getComputedStyle(layersPanel).pointerEvents !== 'none') {
+        const rect = layersPanel.getBoundingClientRect();
+        if (
+            clientX >= rect.left - pad &&
+            clientX <= rect.right + pad &&
+            clientY >= rect.top - pad &&
+            clientY <= rect.bottom + pad
+        ) {
+            return true;
+        }
+    }
+
+    const mapsPanel = document.getElementById('site-navigation-maps');
+    if (mapsPanel && window.getComputedStyle(mapsPanel).pointerEvents !== 'none') {
+        const rect = mapsPanel.getBoundingClientRect();
+        if (
+            clientX >= rect.left &&
+            clientX <= rect.right &&
+            clientY >= rect.top &&
+            clientY <= rect.bottom
+        ) {
+            return true;
+        }
+    }
+
+    return false;
 }
 
 function getSiteGridLevel() {

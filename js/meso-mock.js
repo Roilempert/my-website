@@ -1601,6 +1601,11 @@ const MesoMock = {
     handleShaderPointerMove(e) {
         if (typeof DepthV2 === 'undefined' || !DepthV2.isActive()) return;
         if (typeof DepthController !== 'undefined' && DepthController.currentLevel !== 2) return;
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+            this.stopShaderLiveHover();
+            return;
+        }
 
         const glyph = this.findMesoGlyphAt(e.clientX, e.clientY);
         if (!glyph) {

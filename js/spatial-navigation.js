@@ -220,6 +220,11 @@ const SpatialNavigation = {
 
     calculateAndScroll() {
         if (this.isPaused) return;
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(this.mouseX, this.mouseY)) {
+            this.isScrolling = false;
+            return;
+        }
 
         let dx = 0;
         let dy = 0;

@@ -1309,6 +1309,11 @@ const PhysicsEngine = {
         }
         const target = e?.target;
         if (target?.closest?.('.warehouse-shell, .action-block, .action-warehouse')) return false;
+        if (target?.closest?.('.site-navigation-layers, .site-navigation-maps')) return false;
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+            return false;
+        }
         if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) return false;
         return true;
     },
@@ -1374,6 +1379,14 @@ const PhysicsEngine = {
         if (!badge) return;
 
         if (DepthController.currentLevel !== 1 || this.bodiesData.length === 0) {
+            badge.classList.remove('is-visible');
+            this.hoveredNoteIndex = -1;
+            document.body.classList.remove('is-molecule-hover');
+            return;
+        }
+
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(this.mouseClientX, this.mouseClientY)) {
             badge.classList.remove('is-visible');
             this.hoveredNoteIndex = -1;
             document.body.classList.remove('is-molecule-hover');
