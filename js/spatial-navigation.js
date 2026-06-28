@@ -286,14 +286,41 @@ const SpatialNavigation = {
         return [dx, dy];
     },
 
-    getViewportPageRect(forLevel = DepthController.currentLevel) {
-        const bottomReserve = forLevel === 1 ? ActionWarehouse.getScrollReserve() : 0;
+    getBottomChromeTop(forLevel = DepthController.currentLevel) {
+        let chromeTop = window.innerHeight;
+        const selectors = ['.warehouse-shell', '.site-navigation-maps'];
+        if (forLevel >= 2) {
+            selectors.push('.depth-block-bar.has-blocks', '.depth-block-bar.is-drop-active');
+        }
+
+        selectors.forEach((selector) => {
+            document.querySelectorAll(selector).forEach((el) => {
+                const rect = el.getBoundingClientRect();
+                if (rect.width < 1 || rect.height < 1) return;
+                chromeTop = Math.min(chromeTop, rect.top);
+            });
+        });
+
+        return chromeTop;
+    },
+
+    // Catalog viewport — padded content area; height includes bottom UI strip (warehouse + minimap).
+    getCatalogViewportPageRect(forLevel = DepthController.currentLevel) {
+        const pad = CONFIG.navigation.contentPadding;
+        const scrollX = window.pageXOffset;
+        const scrollY = window.pageYOffset;
+        void forLevel;
+
         return {
-            left: window.pageXOffset,
-            top: window.pageYOffset,
-            width: window.innerWidth,
-            height: Math.max(0, window.innerHeight - bottomReserve)
+            left: scrollX + pad,
+            top: scrollY + pad,
+            width: Math.max(0, window.innerWidth - 2 * pad),
+            height: Math.max(0, window.innerHeight - pad)
         };
+    },
+
+    getViewportPageRect(forLevel = DepthController.currentLevel) {
+        return this.getCatalogViewportPageRect(forLevel);
     },
 
     getMacroContentBounds() {
@@ -321,16 +348,20 @@ const SpatialNavigation = {
         let minY = Infinity;
         let maxY = -Infinity;
 
-        groups.forEach((dots, noteIndex) => {
-            const radius = ActionWarehouse.noteMoleculeExtent(bodiesData, noteIndex, orbitCfg);
+        groups.forEach((dots) => {
+            const radius = ActionWarehouse.noteMoleculeExtent(bodiesData, dots[0].noteIndex, orbitCfg, dots.length);
             let cx = 0;
             let cy = 0;
+            let count = 0;
             dots.forEach(item => {
+                if (!item.body) return;
                 cx += item.body.position.x;
                 cy += item.body.position.y;
+                count++;
             });
-            cx /= dots.length;
-            cy /= dots.length;
+            if (!count) return;
+            cx /= count;
+            cy /= count;
             minX = Math.min(minX, cx - radius);
             maxX = Math.max(maxX, cx + radius);
             minY = Math.min(minY, cy - radius);
@@ -348,6 +379,59 @@ const SpatialNavigation = {
 
         if (!Number.isFinite(minX)) return appBounds;
         return this.mergeBounds(appBounds, { minX, maxX, minY, maxY });
+    },
+
+    getDepthNoteContentBounds() {
+        const appBounds = this.getAppBounds();
+        if (!appBounds) return null;
+
+        const scrollX = window.pageXOffset;
+        const scrollY = window.pageYOffset;
+        let minX = Infinity;
+        let maxX = -Infinity;
+        let minY = Infinity;
+        let maxY = -Infinity;
+        let count = 0;
+
+        document.querySelectorAll('#app .note-wrapper').forEach((wrapper) => {
+            if (wrapper.classList.contains('is-layout-excluded')) return;
+            if (wrapper.classList.contains('is-molecule-filtered-out')) return;
+            const rect = wrapper.getBoundingClientRect();
+            if (rect.width < 1 || rect.height < 1) return;
+            minX = Math.min(minX, rect.left + scrollX);
+            maxX = Math.max(maxX, rect.right + scrollX);
+            minY = Math.min(minY, rect.top + scrollY);
+            maxY = Math.max(maxY, rect.bottom + scrollY);
+            count++;
+        });
+
+        if (typeof ActionWarehouse !== 'undefined') {
+            ActionWarehouse.blocks.forEach((block) => {
+                if (block.state !== 'active' || block.type === 'frame' || !block.element) return;
+                const rect = block.element.getBoundingClientRect();
+                if (rect.width < 0.5 && rect.height < 0.5) return;
+                const pad = scale(20);
+                const cx = rect.left + rect.width / 2 + scrollX;
+                const cy = rect.top + rect.height / 2 + scrollY;
+                minX = Math.min(minX, cx - pad);
+                maxX = Math.max(maxX, cx + pad);
+                minY = Math.min(minY, cy - pad);
+                maxY = Math.max(maxY, cy + pad);
+                count++;
+            });
+        }
+
+        if (!count || !Number.isFinite(minX)) return appBounds;
+        return this.mergeBounds(appBounds, { minX, maxX, minY, maxY });
+    },
+
+    // Shared minimap coordinate frame — same scale/origin as L1 macro on every depth level.
+    getMapReferenceBounds() {
+        const macro = this.getMacroContentBounds();
+        if (macro) return macro;
+        const depth = this.getDepthNoteContentBounds();
+        if (depth) return depth;
+        return this.getAppBounds();
     },
 
     getCatalogLevelBounds(level) {
@@ -401,6 +485,8 @@ const SpatialNavigation = {
                         return this.mergeBounds(this.getAppBounds(), { minX, maxX, minY, maxY });
                     }
                 }
+
+                return this.getDepthNoteContentBounds();
             }
             return this.getAppBounds();
         }
@@ -522,8 +608,8 @@ const SpatialNavigation = {
             let minY = Infinity;
             let maxY = -Infinity;
 
-            groups.forEach((dots, noteIndex) => {
-                const radius = ActionWarehouse.noteMoleculeExtent(bodiesData, noteIndex, orbitCfg);
+            groups.forEach((dots) => {
+                const radius = ActionWarehouse.noteMoleculeExtent(bodiesData, dots[0].noteIndex, orbitCfg, dots.length);
                 let cx = 0;
                 let cy = 0;
                 dots.forEach(item => {

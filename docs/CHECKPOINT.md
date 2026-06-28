@@ -104,6 +104,16 @@ navigation.contentPadding: scale(120)
 - While dragging: `position: fixed` + `syncBody` with `pageXOffset`
 - After placement: `block.x` in page coordinates (no double `pageXOffset` in `bodyX`)
 
+### Navigation minimap (`NavigationMap`)
+
+**Full reference:** `docs/REFERENCE-2026-06-28-navigation-map-scaling.md`
+
+- **Fixed marker:** `viewportMarkerMode: 'fixed'` — same marker size L1/L2/L3; map pans under center
+- **Scale:** marker-driven via `computeFixedMarkerScale`; L3 trim `levelMapScaleAdjust: { 3: 0.92 }`
+- **Viewport rect:** `getCatalogViewportPageRect()` — includes bottom chrome; do not subtract scroll reserve from height
+- **L3 bounds:** `getDepthMapMarkerBounds()` (note cards + pad), not raw `#app` alone
+- **Do not** drive fixed-mode scale from `levelMapOverscan` alone — causes edge slack / marker outside map
+
 ## Fixed bugs (do not reintroduce)
 
 | Symptom | Cause | Fix |

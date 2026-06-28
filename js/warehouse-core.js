@@ -29,6 +29,7 @@ const ActionWarehouse = {
     _prevKinematicActive: false,
     filteredNoteIndices: new Set(),
     filterExitByNote: new Map(),   // noteIndex → { phase: 'hollow'|'peel', phaseStart }
+    _navigationMapBlockCount: 0,
 
     init() {
         this.ensurePhysicsMaps();
@@ -40,7 +41,7 @@ const ActionWarehouse = {
         this.shellElement.classList.add('warehouse-shell', 'site-type');
         this.shellElement.dataset.siteLayer = 'warehouse';
         this.shellElement.innerHTML = `
-            <button type="button" class="warehouse-reset" aria-label="Reset">×</button>
+            <button type="button" class="warehouse-reset site-type" aria-label="Reset">×</button>
             <div class="depth-block-bar" aria-hidden="true"></div>
             <div class="action-warehouse">
                 <div class="warehouse-label">ACTION REPOSITORY</div>
@@ -65,7 +66,6 @@ const ActionWarehouse = {
         this.shellElement.querySelector('.warehouse-reset')
             .addEventListener('click', () => this.resetAll());
         const resetBtn = this.shellElement.querySelector('.warehouse-reset');
-        if (resetBtn) resetBtn.dataset.siteLayer = 'resetButton';
         document.body.appendChild(this.shellElement);
 
         this.resizeObserver = new ResizeObserver(() => this.updateScrollReserve());
@@ -185,7 +185,9 @@ const ActionWarehouse = {
 
     // Called once the data pipeline resolves (tag dictionary is ready)
     populate() {
-        this.createBlock({ type: 'frame', frameKind: 'filter' });
+        if (CONFIG.warehouse.enableFilterFrame) {
+            this.createBlock({ type: 'frame', frameKind: 'filter' });
+        }
 
         AppState.tagColorsMap.forEach((color, tagName) => {
             this.createBlock({ type: 'tag', tag: tagName, color: color });
@@ -736,12 +738,6 @@ const ActionWarehouse = {
             this.depthBlockBarElement?.classList.add('is-drop-active');
         }
 
-        if (pullFromFrame || liftFromSurface || liftFromBar) {
-            this.updateDotFocusFilter();
-        } else if (!depthUi) {
-            this.updateWorkspaceState();
-        }
-
         this.dragState = {
             block: block,
             depthUi: depthUi,
@@ -763,6 +759,12 @@ const ActionWarehouse = {
             rafId: null,
             hoverFrame: null
         };
+
+        if (pullFromFrame || liftFromSurface || liftFromBar) {
+            this.updateDotFocusFilter();
+        } else if (!depthUi) {
+            this.updateWorkspaceState();
+        }
 
         this.dragLoop();
     },
@@ -888,6 +890,10 @@ const ActionWarehouse = {
         }
         if (block.type === 'frame' && (block.nestedBlocks || []).length > 0) {
             this.refreshFrameLayout(block);
+        }
+
+        if (typeof NavigationMap !== 'undefined') {
+            NavigationMap.scheduleMotionRender();
         }
 
         drag.rafId = requestAnimationFrame(() => this.dragLoop());
@@ -1020,6 +1026,9 @@ const ActionWarehouse = {
         this.syncFrameBodyOwnership(block);
         if (block.type === 'frame') this.refreshFrameLayout(block);
         this.updateWorkspaceState();
+        if (typeof NavigationMap !== 'undefined') {
+            NavigationMap.flushPendingBlockLayoutRender();
+        }
     },
 
     returnToDock(block) {
@@ -1044,6 +1053,9 @@ const ActionWarehouse = {
             this.updateDotFocusFilter();
         } else {
             this.updateWorkspaceState();
+        }
+        if (typeof NavigationMap !== 'undefined') {
+            NavigationMap.flushPendingBlockLayoutRender();
         }
 
         setTimeout(() => {
@@ -1237,6 +1249,8 @@ const ActionWarehouse = {
         const anyActive = activeCount > 0;
         const wasOff = !this.workspaceCenters;
         const rushCfg = CONFIG.warehouse.workspaceGrid;
+        const blockCountChanged = activeCount !== this._navigationMapBlockCount;
+        this._navigationMapBlockCount = activeCount;
 
         if (anyActive) {
             if (wasOff) {
@@ -1277,6 +1291,10 @@ const ActionWarehouse = {
 
         this.updateWarehouseCapacityUI();
         this.updateDotFocusFilter();
+
+        if (blockCountChanged && typeof NavigationMap !== 'undefined') {
+            NavigationMap.onBlockLayoutChanged();
+        }
     },
 
     // Gray out docked tag/author pills when the workspace capture limit is reached
@@ -1312,7 +1330,7 @@ const ActionWarehouse = {
             focus && ((isV2Depth && level <= 3) || isMacro || isCatalogDepth)
         );
         document.body.classList.toggle('is-block-filter', hasFilterCriteria);
-        document.body.classList.toggle('is-catalog-lens', focus && isCatalogDepth);
+        document.body.classList.toggle('is-catalog-lens', focus && (isCatalogDepth || (isV2Depth && level >= 2)));
         document.body.classList.toggle(
             'is-depth-workspace-active',
             isV2Depth && level >= 2 && this.getActiveBlockCount() > 0
@@ -1425,5 +1443,9 @@ const ActionWarehouse = {
 
         this.updateWarehouseBlockRelevance();
         this.updateWarehouseCapacityUI();
+
+        if (typeof NavigationMap !== 'undefined' && level >= 2) {
+            NavigationMap.notifyMapRefreshTick(false);
+        }
     }
 };

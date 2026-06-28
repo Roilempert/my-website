@@ -39,6 +39,14 @@ docs/REFERENCE-2026-06-25-layout-boot.md
 
 Restore point for scaling, boot order, `index.html` structure, and blank-screen fixes. Pair with `CHECKPOINT.md` for physics.
 
+**Verified 28 June 2026 — navigation minimap L1/L2/L3 scaling**
+
+```
+docs/REFERENCE-2026-06-28-navigation-map-scaling.md
+```
+
+Fixed viewport marker, marker-driven scale, L3 edge alignment (`levelMapScaleAdjust[3]: 0.92`). Read before minimap regressions.
+
 ---
 
 ## Depth architecture

@@ -414,6 +414,10 @@ const MacroMesoBridge = {
                             note.wrapper.style.setProperty('--macro-meso-reveal', String(eased));
                         });
 
+                        if (typeof NavigationMap !== 'undefined') {
+                            NavigationMap.notifyTransitionTick();
+                        }
+
                         if (elapsed < totalDuration) {
                             this._raf = requestAnimationFrame(tick);
                         } else {
@@ -456,6 +460,10 @@ const MacroMesoBridge = {
                         const eased = this.noteRevealEase(false, t);
                         note.wrapper.style.setProperty('--macro-meso-reveal', String(1 - eased));
                     });
+
+                    if (typeof NavigationMap !== 'undefined') {
+                        NavigationMap.notifyTransitionTick();
+                    }
 
                     if (elapsed < totalDuration) {
                         this._raf = requestAnimationFrame(tick);

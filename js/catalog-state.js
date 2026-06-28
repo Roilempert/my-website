@@ -14,6 +14,7 @@ const CatalogState = {
     hasFilterCriteria: false,
     hasFocus: false,
     macroRank: null,
+    baselineMacroRank: null,
     visibleOrder: [],
     lastMesoAnchors: [],
     _listeners: [],
@@ -59,6 +60,7 @@ const CatalogState = {
 
         ActionWarehouse.blocks.forEach(block => {
             if (block.state !== 'active') return;
+            if (block.nestedIn) return;
             if (!ActionWarehouse.isBlockFocusEligible(block)) return;
 
             if (block.type === 'tag' && block.tag) activeTags.add(block.tag);

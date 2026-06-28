@@ -346,10 +346,12 @@ Object.assign(ActionWarehouse, {
     },
 
     // Bounding radius of a full molecule (anchor + sibling fan + cluster + outline)
-    noteMoleculeExtent(bodiesData, noteIndex, cfg) {
+    noteMoleculeExtent(bodiesData, noteIndex, cfg, dotCount) {
         const bodyR = CONFIG.physics.body.radius;
         const pad = CONFIG.outlines.padding;
-        const dotCount = bodiesData.filter(d => d.noteIndex === noteIndex).length;
+        if (dotCount == null) {
+            dotCount = bodiesData.filter(d => d.noteIndex === noteIndex).length;
+        }
         const siblingCount = Math.max(0, dotCount - 1);
 
         let reach = bodyR + pad;

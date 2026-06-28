@@ -302,6 +302,10 @@ const PhysicsEngine = {
             this.syncStretchSiblingSprings();
             this.applyKinematicCaptureFollow();
             this.applyMotionSettling();
+
+            if (typeof NavigationMap !== 'undefined') {
+                NavigationMap.notifyPhysicsTick();
+            }
         });
 
         this.runner = Matter.Runner.create();

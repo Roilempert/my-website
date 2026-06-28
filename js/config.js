@@ -42,8 +42,8 @@ const CONFIG = {
             inspector:    { colStart: 6, colEnd: 14, rowStart: 5, rowEnd: 9  },
             filterFringe: { colStart: 17, colEnd: 19, rowStart: 1, rowEnd: 9  },
             navigationLayers: { colStart: 17, colEnd: 19, rowStart: 1, rowEnd: 6  },
-            navigationMaps:   { colStart: 16, colEnd: 19, rowStart: 9, rowEnd: 11 },
-            resetButton:  { colStart: 3, colEnd: 4,  rowStart: 9, rowEnd: 10 }
+            navigationMaps:   { colStart: 16, colEnd: 19, rowStart: 9, rowEnd: 11 }
+            // reset button: centered above warehouse shell — not a grid region
         },
         regionsByLevel: {
             2: { inspector: { colStart: 5, colEnd: 15, rowStart: 4, rowEnd: 8 } },
@@ -90,6 +90,7 @@ const CONFIG = {
         cooldownDelay: 1200,        // ms between accepted wheel gestures
         wheelThreshold: 15,         // minimal |deltaY| to register a zoom intent
         wheelAccumWindow: 120,      // ms - merge trackpad micro-deltas into one gesture
+        wheelZoomInvert: true,      // flip scroll-to-zoom (scroll in → deeper levels)
         cameraLockDuration: 650,
         macroMesoRevealDuration: 640,
         macroMesoStagger: 12,
@@ -343,8 +344,68 @@ const CONFIG = {
 
     /* --- Navigation minimap — spatial overview canvas, bottom-right (not layer labels) --- */
     navigationMap: {
-        frameInset: 2,
-        macroRefreshMs: 120
+        frameInset: 0,
+        backgroundColor: null,
+        showWorldFill: false,
+        showViewportFill: true,
+        showViewportOutline: true,
+        viewportFillColor: 'rgba(16, 16, 16, 0.05)',
+        viewportOutlineColor: 'rgba(16, 16, 16, 0.55)',
+        viewportOutlineWidth: 0.75,
+        offsetY: { value: -0.35, unit: 'cellH' },
+        viewportFollow: true,
+        viewportFollowStrength: 1,
+        viewportFollowClamp: false,
+        /* Shrink map scale so viewport marker is never clipped by map-wrap overflow (scaled mode only) */
+        viewportFitInFrame: true,
+        mapOverscan: 1.55,
+        mapCanvasOverscan: 1.65,
+        /* Per-layer map density when viewportMarkerMode is scaled; fixed mode uses marker-driven scale */
+        levelMapOverscan: { 1: 1.55, 2: 3.05, 3: 5.0 },
+        levelMapScaleAdjust: { 3: 0.92 },
+        macroMinScaleLock: true,
+        macroRefreshMs: 0,
+        macroRefreshMsBlock: 80,
+        mesoRefreshMs: 1500,
+        mesoRefreshMsBlock: 80,
+        microRefreshMs: 1500,
+        microRefreshMsBlock: 80,
+        macroDotStride: 1,
+        macroMapNoteCenters: true,
+        macroFocusDetails: true,
+        macroFocusDetailsWhenBlocks: true,
+        macroFocusConnectors: false,
+        macroBlockMarkers: true,
+        macroDotRadius: 1.5,
+        macroDotFill: 'rgba(16, 16, 16, 0.4)',
+        macroDotMutedFill: 'rgba(16, 16, 16, 0.12)',
+        mesoMapDetailed: true,
+        mesoLineFill: 'rgba(16, 16, 16, 0.62)',
+        mesoLineMutedFill: 'rgba(16, 16, 16, 0.14)',
+        mesoPathFill: 'rgba(16, 16, 16, 0.55)',
+        noteCardFill: 'rgba(16, 16, 16, 0.62)',
+        noteCardMutedFill: 'rgba(16, 16, 16, 0.14)',
+        noteCardStroke: 'rgba(16, 16, 16, 0.22)',
+        noteBlockFill: 'rgba(16, 16, 16, 0.72)',
+        noteBlockMutedFill: 'rgba(16, 16, 16, 0.16)',
+        noteBlockMinHeight: 0.75,
+        blockMarkerSize: 3.5,
+        blockConnectorAlpha: 0.28,
+        authorBlockColor: '#101010',
+        /* L1 minimap — DOM wrapper centers match on-screen notes (not physics-only) */
+        macroMapUseDomPositions: true,
+        /* Shared macro coordinate frame on L1 only; L2/L3 fit active grid layout */
+        sharedReferenceScale: true,
+        /* Fixed viewport marker UI size; map scale per layer via levelMapOverscan */
+        viewportMarkerMode: 'fixed',
+        viewportMarkerWidthRatio: 0.92,
+        viewportMarkerHeightRatio: 0.56,
+        /* Per-layer glyph size on the shared frame (not map scale) */
+        levelGlyphScale: { 1: 1, 2: 1, 3: 1 },
+        /* L2/L3 minimap — cell rects from one batched DOM read; no full silhouette bake */
+        depthMapLayoutSettleMs: 480,
+        depthMapMaxCollect: 320,
+        depthMapBoundsPad: 32
     },
 
     /* --- Artifact Inspector (focus/isolation overlay) --- */
@@ -466,6 +527,8 @@ const CONFIG = {
     warehouse: {
         blockHeight: 26,            // px; pill height — fits .site-type
         blockGlyphSize: 12,         // px; colored tag circle inside the pill
+        // Black filter/deletion frame in tray — archived: js/archive/warehouse-filter-frame.js
+        enableFilterFrame: false,
         // Block cap — policy: docs/block-cap-policy.md (hard limit 5; kinematic at 6+ deferred)
         maxCaptureBlocks: 5,
 

@@ -108,13 +108,7 @@ const DepthFocusLinks = {
     /* --- L2 depth --- */
 
     shouldDraw() {
-        const cfg = CONFIG.depth?.v2?.focusLinks;
-        if (cfg?.visible === false) return false;
-        if (typeof DepthV2 === 'undefined' || !DepthV2.isActive()) return false;
-        if (DepthController.currentLevel !== 2) return false;
-        if (!document.body.classList.contains('is-depth-workspace-active')) return false;
-        if (typeof CatalogState === 'undefined' || !CatalogState.hasFocus) return false;
-        return true;
+        return false;
     },
 
     getLineConfig() {

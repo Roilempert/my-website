@@ -35,10 +35,30 @@ const MesoSpatialLayout = {
         return { rankByNote, visibleOrder, lastMesoAnchors };
     },
 
+    hasActiveLens() {
+        if (typeof ActionWarehouse === 'undefined') return false;
+        const { tags, authors } = ActionWarehouse.getActiveFocusCriteria();
+        const filter = ActionWarehouse.getFilterCriteria();
+        return tags.size > 0 || authors.size > 0 ||
+            filter.tags.size > 0 || filter.authors.size > 0;
+    },
+
+    getLayoutRanks() {
+        if (typeof CatalogState === 'undefined') return null;
+        if (CatalogState.baselineMacroRank?.size) return CatalogState.baselineMacroRank;
+        return CatalogState.macroRank;
+    },
+
     captureAndStoreSnapshot() {
         const snapshot = this.captureRankSnapshot();
         if (typeof CatalogState !== 'undefined') {
-            CatalogState.macroRank = snapshot.rankByNote;
+            if (!CatalogState.baselineMacroRank?.size) {
+                CatalogState.baselineMacroRank = new Map(snapshot.rankByNote);
+            }
+            if (!this.hasActiveLens()) {
+                CatalogState.baselineMacroRank = new Map(snapshot.rankByNote);
+            }
+            CatalogState.macroRank = this.getLayoutRanks() || snapshot.rankByNote;
             CatalogState.visibleOrder = snapshot.visibleOrder;
             CatalogState.lastMesoAnchors = snapshot.lastMesoAnchors;
         }
@@ -46,7 +66,7 @@ const MesoSpatialLayout = {
     },
 
     sortWrappersByRank(wrappers, rankByNote) {
-        const ranks = rankByNote || CatalogState?.macroRank;
+        const ranks = rankByNote || this.getLayoutRanks() || CatalogState?.macroRank;
         if (!ranks || ranks.size === 0) return [...wrappers];
 
         return [...wrappers].sort((a, b) => {

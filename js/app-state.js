@@ -32,8 +32,20 @@ const AppState = {
                 if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.buildWorld) {
                     PhysicsEngine.buildWorld();
                 }
+                requestAnimationFrame(() => {
+                    if (typeof NavigationMap !== 'undefined') {
+                        NavigationMap.onBootComplete();
+                    }
+                });
             } catch (err) {
                 console.error('Boot physics failed', err);
+                try {
+                    if (typeof NavigationMap !== 'undefined') {
+                        NavigationMap.onBootComplete();
+                    }
+                } catch (mapErr) {
+                    console.warn('NavigationMap.onBootComplete failed:', mapErr);
+                }
             }
         }, CONFIG.boot.physicsBuildDelay);
     },

@@ -1,6 +1,10 @@
 document.addEventListener('DOMContentLoaded', () => {
-    applyVisualScaleTokens();
-    applySiteGridTokens();
+    try {
+        applyVisualScaleTokens();
+        applySiteGridTokens();
+    } catch (err) {
+        console.error('Site token init failed:', err);
+    }
 
     try {
         DepthController.init();
@@ -25,7 +29,11 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error('NavigationMap.init failed:', err);
     }
 
-    applySiteGridTokens();
+    try {
+        applySiteGridTokens();
+    } catch (err) {
+        console.error('Site grid refresh failed:', err);
+    }
 
     IdleRefresh.init();
 
@@ -33,6 +41,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const safetyTimer = setTimeout(() => {
         console.warn('Boot safety reveal — data pipeline did not finish in time');
         AppState.revealApp();
+        try {
+            if (typeof NavigationMap !== 'undefined') {
+                NavigationMap.onBootComplete();
+            }
+        } catch (err) {
+            console.warn('NavigationMap.onBootComplete failed:', err);
+        }
     }, safetyMs);
 
     AppState.init()
@@ -40,6 +55,13 @@ document.addEventListener('DOMContentLoaded', () => {
         .catch((err) => {
             console.error('AppState.init failed:', err);
             AppState.revealApp();
+            try {
+                if (typeof NavigationMap !== 'undefined') {
+                    NavigationMap.onBootComplete();
+                }
+            } catch (mapErr) {
+                console.warn('NavigationMap.onBootComplete failed:', mapErr);
+            }
         })
         .finally(() => clearTimeout(safetyTimer));
 });

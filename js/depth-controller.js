@@ -135,15 +135,19 @@ const DepthController = {
                 return;
             }
             e.preventDefault();
+            const wheelDelta = CONFIG.depth.wheelZoomInvert ? -e.deltaY : e.deltaY;
             if (ArtifactInspector.isActive) {
-                if (Math.abs(e.deltaY) > CONFIG.depth.wheelThreshold && e.deltaY > 0) {
+                if (this.isWheelLocked()) return;
+                const intent = this._consumeWheelIntent(wheelDelta);
+                const zoomOutIntent = CONFIG.depth.wheelZoomInvert ? intent < 0 : intent > 0;
+                if (intent !== 0 && zoomOutIntent) {
                     ArtifactInspector.close();
                 }
                 return;
             }
             if (this.isWheelLocked()) return;
 
-            const intent = this._consumeWheelIntent(e.deltaY);
+            const intent = this._consumeWheelIntent(wheelDelta);
             if (intent > 0) {
                 this.zoomOut();
             } else if (intent < 0) {
@@ -425,6 +429,9 @@ const DepthController = {
                 DepthV2.ensureShell();
             }
             PhysicsEngine.setTransitionFrozen(true);
+            if (PhysicsEngine.linkCtx) {
+                PhysicsEngine.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+            }
             this.currentLevel = newLevel;
             this.syncViewLevelClass(newLevel);
             ActionWarehouse.updateScrollReserve();

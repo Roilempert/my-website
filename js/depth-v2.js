@@ -7,6 +7,12 @@ const DepthV2 = {
     _mesoLayoutReadyPromise: null,
     _resolveMesoLayoutReady: null,
 
+    _notifyMapLayoutReady() {
+        if (typeof NavigationMap !== 'undefined') {
+            NavigationMap.notifyDepthLayoutReady();
+        }
+    },
+
     isActive() {
         return CONFIG.depth.depthEngine === 'v2';
     },
@@ -152,7 +158,6 @@ const DepthV2 = {
     partitionWrappersForLayout(wrappers) {
         const layout = [];
         const hidden = [];
-        const hasFocus = typeof CatalogState !== 'undefined' && CatalogState.hasFocus;
 
         wrappers.forEach(wrapper => {
             const noteIndex = typeof MesoSpatialLayout !== 'undefined'
@@ -165,14 +170,6 @@ const DepthV2 = {
 
             if (role === 'filtered' ||
                 (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.isNoteFiltered(noteIndex))) {
-                hidden.push(wrapper);
-                return;
-            }
-
-            if (hasFocus &&
-                role !== 'emphasized' &&
-                role !== 'captured' &&
-                role !== 'stretched') {
                 hidden.push(wrapper);
                 return;
             }
@@ -257,9 +254,7 @@ const DepthV2 = {
     },
 
     shouldUseMesoHiveLayout() {
-        return DepthController.currentLevel === 2 &&
-            typeof CatalogState !== 'undefined' &&
-            CatalogState.hasFocus;
+        return false;
     },
 
     applyMesoLayoutForState(options = {}) {
@@ -403,18 +398,33 @@ const DepthV2 = {
 
         const { layout, hidden } = this.partitionWrappersForLayout(allWrappers);
 
+        const ranks = typeof MesoSpatialLayout !== 'undefined'
+            ? MesoSpatialLayout.getLayoutRanks()
+            : CatalogState?.macroRank;
+        const sorted = typeof MesoSpatialLayout !== 'undefined'
+            ? MesoSpatialLayout.sortWrappersByRank(layout, ranks)
+            : layout;
+
         const columns = Array.from({ length: colCount }, () => {
             const col = document.createElement('div');
             col.className = 'meso-grid-column';
             return col;
         });
 
-        layout.forEach((wrapper, index) => {
+        sorted.forEach((wrapper, index) => {
             wrapper.classList.remove('is-layout-excluded');
             wrapper.style.minHeight = '';
             const stage = wrapper.querySelector('.note-stage');
             if (stage) stage.style.minHeight = '';
-            columns[index % colCount].appendChild(wrapper);
+
+            const noteIndex = typeof MesoSpatialLayout !== 'undefined'
+                ? MesoSpatialLayout.getNoteIndex(wrapper)
+                : index;
+            const rank = ranks?.get(noteIndex);
+            const col = rank != null && Number.isFinite(rank)
+                ? ((rank % colCount) + colCount) % colCount
+                : index % colCount;
+            columns[col].appendChild(wrapper);
         });
 
         columns.forEach(col => app.appendChild(col));
@@ -483,6 +493,7 @@ const DepthV2 = {
 
         app.classList.add('is-micro-grid-layout');
         app.classList.remove('has-filter-fringe');
+        this._notifyMapLayoutReady();
     },
 
     relayoutForFilterChange(options = {}) {
@@ -498,6 +509,7 @@ const DepthV2 = {
             this.layoutMicroGrid(options);
             if (typeof MicroMock !== 'undefined') MicroMock.applyAll();
         }
+        this._notifyMapLayoutReady();
     },
 
     applyGridTokens(level = DepthController.currentLevel) {
@@ -667,6 +679,9 @@ const DepthV2 = {
                 this._resolveMesoLayoutReady();
                 this._resolveMesoLayoutReady = null;
             }
+            if (phase === 'immediate' && DepthController.currentLevel === 2) {
+                this._notifyMapLayoutReady();
+            }
         };
 
         const applyMocksAfterRefresh = (fullApply = false) => {
@@ -814,6 +829,10 @@ const DepthV2 = {
         if (typeof ActionWarehouse !== 'undefined') {
             ActionWarehouse.updateDotFocusFilter();
             ActionWarehouse.syncDeployedBlocksForDepth?.();
+        }
+
+        if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.linkCtx) {
+            PhysicsEngine.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
         }
 
         if (level === 3) {

@@ -166,6 +166,9 @@ const DepthTransitionOrchestrator = {
                 startX + (destX - startX) * eased,
                 startY + (destY - startY) * eased
             );
+            if (typeof NavigationMap !== 'undefined') {
+                NavigationMap.notifyTransitionTick();
+            }
             if (t < 1) {
                 requestAnimationFrame(tick);
             } else {
@@ -190,6 +193,10 @@ const DepthTransitionOrchestrator = {
             document.body.style.setProperty('--depth-transition-blur', `${blurPx}px`);
 
             if (typeof onTick === 'function') onTick(t);
+
+            if (typeof NavigationMap !== 'undefined') {
+                NavigationMap.notifyTransitionTick();
+            }
 
             if (t < 1) {
                 requestAnimationFrame(tick);
