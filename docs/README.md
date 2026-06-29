@@ -12,9 +12,9 @@ The public site updates **only when you manually publish** — pushes to `main` 
 
 ### One-time setup (GitHub)
 
-1. Repo → **Settings → Pages → Build and deployment**
+1. Open [Pages settings](https://github.com/Roilempert/my-website/settings/pages) → **Build and deployment**
 2. Set **Source** to **GitHub Actions**
-3. For open sharing (exhibition, reviewers): **Settings → General → Change visibility → Public**
+3. For open sharing (exhibition, reviewers): [repo visibility](https://github.com/Roilempert/my-website/settings) → **Change visibility → Public**
 
 ### Publish on demand
 
@@ -23,7 +23,7 @@ The public site updates **only when you manually publish** — pushes to `main` 
    ./build-js.sh
    ```
 2. Commit and push to `main`
-3. Repo → **Actions** → **Deploy to GitHub Pages** → **Run workflow**
+3. Open [Deploy to GitHub Pages](https://github.com/Roilempert/my-website/actions/workflows/deploy-pages.yml) → **Run workflow**
 4. Wait ~1–2 minutes, then open the live URL and hard-refresh (`Cmd+Shift+R`)
 
 CLI alternative (requires [GitHub CLI](https://cli.github.com/) authenticated):
