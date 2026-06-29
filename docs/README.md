@@ -4,6 +4,36 @@ Index of project documentation files.
 
 ---
 
+## Live site (GitHub Pages)
+
+**URL:** https://roilempert.github.io/my-website/
+
+The public site updates **only when you manually publish** — pushes to `main` do not change the live link by themselves.
+
+### One-time setup (GitHub)
+
+1. Repo → **Settings → Pages → Build and deployment**
+2. Set **Source** to **GitHub Actions**
+3. For open sharing (exhibition, reviewers): **Settings → General → Change visibility → Public**
+
+### Publish on demand
+
+1. If you edited modules under `js/` (not `config.js` alone), rebuild locally:
+   ```bash
+   ./build-js.sh
+   ```
+2. Commit and push to `main`
+3. Repo → **Actions** → **Deploy to GitHub Pages** → **Run workflow**
+4. Wait ~1–2 minutes, then open the live URL and hard-refresh (`Cmd+Shift+R`)
+
+CLI alternative (requires [GitHub CLI](https://cli.github.com/) authenticated):
+
+```bash
+gh workflow run deploy-pages.yml
+```
+
+---
+
 ## Project root
 
 **AGENTS.md**  
