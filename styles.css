@@ -1361,12 +1361,49 @@ body.view-level-3 .site-navigation-maps.is-inspector-dimmed {
 }
 
 .site-navigation-maps__map-wrap {
-    position: relative;
-    width: 100%;
-    height: 100%;
+    --navigation-map-clip-scale: 1.38;
+    --navigation-map-edge-fade: 14%;
+    position: absolute;
+    left: 50%;
+    top: 50%;
+    width: calc(100% * var(--navigation-map-clip-scale));
+    height: calc(100% * var(--navigation-map-clip-scale));
+    transform: translate(-50%, -50%);
     overflow: hidden;
     cursor: grab;
     touch-action: none;
+    -webkit-mask-image:
+        linear-gradient(
+            to right,
+            transparent 0,
+            #000 var(--navigation-map-edge-fade),
+            #000 calc(100% - var(--navigation-map-edge-fade)),
+            transparent 100%
+        ),
+        linear-gradient(
+            to bottom,
+            transparent 0,
+            #000 var(--navigation-map-edge-fade),
+            #000 calc(100% - var(--navigation-map-edge-fade)),
+            transparent 100%
+        );
+    mask-image:
+        linear-gradient(
+            to right,
+            transparent 0,
+            #000 var(--navigation-map-edge-fade),
+            #000 calc(100% - var(--navigation-map-edge-fade)),
+            transparent 100%
+        ),
+        linear-gradient(
+            to bottom,
+            transparent 0,
+            #000 var(--navigation-map-edge-fade),
+            #000 calc(100% - var(--navigation-map-edge-fade)),
+            transparent 100%
+        );
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
 }
 
 .site-navigation-maps.is-map-dragging .site-navigation-maps__map-wrap {

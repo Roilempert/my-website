@@ -8051,6 +8051,12 @@ const NavigationMap = {
         if (mapCfg?.viewportOutlineWidth != null) {
             root.style.setProperty('--navigation-map-viewport-outline-width', `${mapCfg.viewportOutlineWidth}px`);
         }
+        if (mapCfg?.clipFrameScale != null) {
+            root.style.setProperty('--navigation-map-clip-scale', String(mapCfg.clipFrameScale));
+        }
+        if (mapCfg?.clipEdgeFadePct != null) {
+            root.style.setProperty('--navigation-map-edge-fade', `${mapCfg.clipEdgeFadePct}%`);
+        }
 
         const layersPanel = document.createElement('nav');
         layersPanel.id = 'site-navigation-layers';
