@@ -202,6 +202,9 @@ const SpatialNavigation = {
         if (scrollDx !== 0 || scrollDy !== 0) {
             window.scrollBy(scrollDx, scrollDy);
             IdleRefresh.touch();
+            if (typeof NavigationMap !== 'undefined') {
+                NavigationMap.schedulePanUpdate();
+            }
         }
     },
 
@@ -215,6 +218,10 @@ const SpatialNavigation = {
         const captureEl = this.navSurface || document.body;
         if (captureEl.releasePointerCapture) {
             try { captureEl.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
+        }
+
+        if (typeof NavigationMap !== 'undefined') {
+            NavigationMap.schedulePanUpdate();
         }
     },
 
@@ -321,6 +328,52 @@ const SpatialNavigation = {
 
     getViewportPageRect(forLevel = DepthController.currentLevel) {
         return this.getCatalogViewportPageRect(forLevel);
+    },
+
+    // Page-rect span of the catalog viewport at scroll extremes; keeps minimap pan aligned with scroll clamp.
+    getScrollAlignedMapBounds(forLevel = DepthController.currentLevel) {
+        const pad = CONFIG.navigation.contentPadding;
+        const vpW = Math.max(0, window.innerWidth - 2 * pad);
+        const vpH = Math.max(0, window.innerHeight - pad);
+        const limits = this.getViewportClampLimits();
+
+        if (!limits) {
+            const vp = this.getCatalogViewportPageRect(forLevel);
+            return {
+                minX: vp.left,
+                maxX: vp.left + vp.width,
+                minY: vp.top,
+                maxY: vp.top + vp.height
+            };
+        }
+
+        const { rect, leftMin, leftMax, topMin, topMax } = limits;
+        const appPageLeft = rect.left + window.pageXOffset;
+        const appPageTop = rect.top + window.pageYOffset;
+
+        const scrollXAtLeft = appPageLeft - leftMax;
+        const scrollXAtRight = appPageLeft - leftMin;
+        const scrollYAtTop = appPageTop - topMax;
+        const scrollYAtBottom = appPageTop - topMin;
+
+        const docEl = document.documentElement;
+        const bodyEl = document.body;
+        const maxScrollY = Math.max(
+            0,
+            Math.max(docEl?.scrollHeight || 0, bodyEl?.scrollHeight || 0) - window.innerHeight
+        );
+
+        const achievableScrollYTop = Math.max(0, scrollYAtTop);
+        const achievableScrollYBottom = Math.min(Math.max(0, scrollYAtBottom), maxScrollY);
+        const achievableScrollXLeft = scrollXAtLeft;
+        const achievableScrollXRight = Math.max(achievableScrollXLeft, scrollXAtRight);
+
+        return {
+            minX: achievableScrollXLeft + pad,
+            maxX: achievableScrollXRight + pad + vpW,
+            minY: achievableScrollYTop + pad,
+            maxY: achievableScrollYBottom + pad + vpH
+        };
     },
 
     getMacroContentBounds() {

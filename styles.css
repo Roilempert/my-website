@@ -2355,14 +2355,20 @@ body.is-depth-v2.view-level-3 .note-wrapper {
     margin-bottom: 0;
 }
 
+body.is-depth-v2.view-level-2 .note-wrapper,
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout .note-wrapper,
+body.is-depth-v2.view-level-2 #app.is-meso-hive-layout .note-wrapper,
+body.is-depth-v2.view-level-3 .note-wrapper,
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper {
+    pointer-events: none !important;
+}
+
 body.is-depth-v2.view-level-2 .note-wrapper {
     height: 100%;
     min-height: var(--v2-cell-height, 72px);
-    pointer-events: none;
 }
 
-body.is-depth-v2.view-level-2 .note-wrapper:not(.is-layout-excluded):not(.is-molecule-filtered-out) {
-    pointer-events: auto;
+body.is-depth-v2.view-level-2 .note-wrapper:not(.is-layout-excluded):not(.is-molecule-filtered-out) .depth-v2-glyph--meso {
     cursor: pointer;
 }
 
@@ -2383,7 +2389,6 @@ body.is-depth-v2.view-level-3 .note-wrapper {
     align-items: stretch;
     justify-content: flex-start;
     overflow: visible;
-    pointer-events: auto;
 }
 
 body.is-depth-v2.view-level-2 .note-stage {

@@ -492,7 +492,7 @@ const NavigationMap = {
     },
 
     getActiveDepthMapBounds() {
-        if (this._activeLevel === 3) {
+        if (this._activeLevel >= 2) {
             const markerBounds = this.getDepthMapMarkerBounds();
             if (markerBounds) return markerBounds;
         }
@@ -683,17 +683,17 @@ const NavigationMap = {
         if (!this._baseTransform?.contentBounds) return null;
 
         const t = this._baseTransform;
+        const panBounds = t.panBounds || t.contentBounds;
         const offsetX = t.baseOffsetX + this._panDisplayX;
         const offsetY = t.baseOffsetY + this._panDisplayY;
-        const contentBounds = t.contentBounds;
 
         return {
             ...t,
             offsetX,
             offsetY,
             toMap: (pageX, pageY) => ({
-                x: offsetX + (pageX - contentBounds.minX) * t.scale,
-                y: offsetY + (pageY - contentBounds.minY) * t.scale
+                x: offsetX + (pageX - panBounds.minX) * t.scale,
+                y: offsetY + (pageY - panBounds.minY) * t.scale
             })
         };
     },
@@ -801,26 +801,90 @@ const NavigationMap = {
         return SpatialNavigation.getViewportPageRect(this._activeLevel);
     },
 
+    getMapDrawBounds() {
+        if (this._activeLevel >= 2) {
+            const markerBounds = this.getActiveDepthMapBounds();
+            if (markerBounds) return markerBounds;
+            return SpatialNavigation.getAppBounds();
+        }
+        return SpatialNavigation.getMapReferenceBounds() || SpatialNavigation.getAppBounds();
+    },
+
+    getMapPanBounds() {
+        return SpatialNavigation.getScrollAlignedMapBounds(this._activeLevel);
+    },
+
+    getMapFrameBounds() {
+        const panBounds = this.getMapPanBounds();
+        const drawBounds = this.getMapDrawBounds();
+        if (!drawBounds) return panBounds;
+        if (!panBounds) return drawBounds;
+        return SpatialNavigation.mergeBounds(drawBounds, panBounds);
+    },
+
     getMapContentBounds() {
         if (this._cachedReferenceBounds && !this._referenceBoundsDirty) {
             return this._cachedReferenceBounds;
         }
 
-        let bounds;
-        if (this._activeLevel >= 2) {
-            bounds = this.getActiveDepthMapBounds();
-            if (!bounds) {
-                bounds = SpatialNavigation.getAppBounds();
-            }
-        } else {
-            bounds = SpatialNavigation.getMapReferenceBounds();
-        }
-
+        const bounds = this.getMapFrameBounds();
         if (bounds) {
             this._cachedReferenceBounds = bounds;
             this._referenceBoundsDirty = false;
         }
         return bounds;
+    },
+
+    computeFollowPan(base, panBounds, viewport, scale) {
+        if (!base || !panBounds || !viewport) return { panX: 0, panY: 0 };
+
+        const vpCenterX = viewport.left + viewport.width / 2;
+        const vpCenterY = viewport.top + viewport.height / 2;
+        let followX = base.anchorX - (vpCenterX - panBounds.minX) * scale;
+        let followY = base.anchorY - (vpCenterY - panBounds.minY) * scale;
+
+        const scrollPan = this.getScrollPanLimits(base, panBounds, scale, viewport);
+        if (scrollPan) {
+            followX = Math.max(scrollPan.minOffX, Math.min(scrollPan.maxOffX, followX));
+            followY = Math.max(scrollPan.minOffY, Math.min(scrollPan.maxOffY, followY));
+        }
+
+        return {
+            panX: followX - base.baseOffsetX,
+            panY: followY - base.baseOffsetY
+        };
+    },
+
+    getScrollPanLimits(base, panBounds, scale, viewport) {
+        if (!base || !panBounds || !viewport) return null;
+
+        const vpW = viewport.width;
+        const vpH = viewport.height;
+        const corners = [
+            { left: panBounds.minX, top: panBounds.minY },
+            { left: panBounds.maxX - vpW, top: panBounds.minY },
+            { left: panBounds.minX, top: panBounds.maxY - vpH },
+            { left: panBounds.maxX - vpW, top: panBounds.maxY - vpH }
+        ];
+
+        let minOffX = Infinity;
+        let maxOffX = -Infinity;
+        let minOffY = Infinity;
+        let maxOffY = -Infinity;
+
+        corners.forEach(({ left, top }) => {
+            const vpCenterX = left + vpW / 2;
+            const vpCenterY = top + vpH / 2;
+            const offX = base.anchorX - (vpCenterX - panBounds.minX) * scale;
+            const offY = base.anchorY - (vpCenterY - panBounds.minY) * scale;
+            minOffX = Math.min(minOffX, offX);
+            maxOffX = Math.max(maxOffX, offX);
+            minOffY = Math.min(minOffY, offY);
+            maxOffY = Math.max(maxOffY, offY);
+        });
+
+        if (!Number.isFinite(minOffX)) return null;
+        return { minOffX, maxOffX, minOffY, maxOffY };
     },
 
     applyReferenceMapScale(scale, fromSharedReference = false) {
@@ -900,13 +964,14 @@ const NavigationMap = {
         const innerW = Math.max(1, cssW - inset * 2);
         const innerH = Math.max(1, cssH - inset * 2);
         const contentBounds = t.contentBounds;
+        const panBounds = t.panBounds || contentBounds;
         t.baseOffsetX = inset + (innerW - t.drawW) / 2;
         t.baseOffsetY = inset + (innerH - t.drawH) / 2;
         t.anchorX = inset + innerW / 2;
         t.anchorY = inset + innerH / 2;
         t.toMap = (pageX, pageY) => ({
-            x: t.baseOffsetX + (pageX - contentBounds.minX) * t.scale,
-            y: t.baseOffsetY + (pageY - contentBounds.minY) * t.scale
+            x: t.baseOffsetX + (pageX - panBounds.minX) * t.scale,
+            y: t.baseOffsetY + (pageY - panBounds.minY) * t.scale
         });
 
         return t;
@@ -1122,19 +1187,20 @@ const NavigationMap = {
         );
     },
 
-    computeTransform(contentBounds, viewport, canvasW, canvasH, options = {}) {
+    computeTransform(frameBounds, viewport, canvasW, canvasH, options = {}) {
         const style = this.getMapStyle();
         const inset = style.frameInset ?? 0;
         const innerW = Math.max(1, canvasW - inset * 2);
         const innerH = Math.max(1, canvasH - inset * 2);
         const { frameW, frameH } = this.getMapFrameSize();
-        const scaleBounds = options.scaleBounds || contentBounds;
+        const panBounds = options.panBounds || frameBounds;
+        const scaleBounds = options.scaleBounds || frameBounds;
         const useSharedScale = options.scaleBounds != null &&
-            options.scaleBounds !== contentBounds;
+            options.scaleBounds !== frameBounds;
         const scaleWorldW = Math.max(1, scaleBounds.maxX - scaleBounds.minX);
         const scaleWorldH = Math.max(1, scaleBounds.maxY - scaleBounds.minY);
-        const contentWorldW = Math.max(1, contentBounds.maxX - contentBounds.minX);
-        const contentWorldH = Math.max(1, contentBounds.maxY - contentBounds.minY);
+        const contentWorldW = Math.max(1, frameBounds.maxX - frameBounds.minX);
+        const contentWorldH = Math.max(1, frameBounds.maxY - frameBounds.minY);
 
         const containScale = this.computeContainScale(scaleWorldW, scaleWorldH, frameW, frameH);
         const overscan = this.getMapOverscan();
@@ -1145,15 +1211,6 @@ const NavigationMap = {
 
         if (fixedMarkerScale != null) {
             scale = fixedMarkerScale;
-            if (this._activeLevel === 1) {
-                scale = this.resolveMacroMapScale(
-                    scale,
-                    frameW,
-                    frameH,
-                    containScale,
-                    useSharedScale
-                );
-            }
         } else {
             scale = containScale * overscan;
             scale = this.resolveMacroMapScale(scale, frameW, frameH, containScale, useSharedScale);
@@ -1193,46 +1250,45 @@ const NavigationMap = {
 
         if (applyFollow) {
             const strength = style.viewportFollowStrength ?? 1;
-            const vpCenterX = viewport.left + viewport.width / 2;
-            const vpCenterY = viewport.top + viewport.height / 2;
+            const follow = this.computeFollowPan(
+                {
+                    anchorX,
+                    anchorY,
+                    baseOffsetX,
+                    baseOffsetY
+                },
+                panBounds,
+                viewport,
+                scale
+            );
+            let followX = baseOffsetX + follow.panX;
+            let followY = baseOffsetY + follow.panY;
+            panX = follow.panX;
+            panY = follow.panY;
 
-            let followX = anchorX - (vpCenterX - contentBounds.minX) * scale;
-            let followY = anchorY - (vpCenterY - contentBounds.minY) * scale;
-
-            if (style.viewportFollowClamp) {
-                const { minOffX, minOffY, maxOffX, maxOffY } = this.getMapPanLimits(
-                    baseOffsetX, baseOffsetY, drawW, drawH, innerW, innerH, inset
-                );
-                followX = Math.max(minOffX, Math.min(maxOffX, followX));
-                followY = Math.max(minOffY, Math.min(maxOffY, followY));
+            if (strength < 1) {
+                followX = baseOffsetX + panX * strength;
+                followY = baseOffsetY + panY * strength;
+                panX = followX - baseOffsetX;
+                panY = followY - baseOffsetY;
             }
 
-            panX = followX - baseOffsetX;
-            panY = followY - baseOffsetY;
-
-            if (strength >= 1) {
-                offsetX = followX;
-                offsetY = followY;
-            } else {
-                offsetX = baseOffsetX + panX * strength;
-                offsetY = baseOffsetY + panY * strength;
-                panX = offsetX - baseOffsetX;
-                panY = offsetY - baseOffsetY;
-            }
+            offsetX = followX;
+            offsetY = followY;
         }
 
         const toMap = (pageX, pageY) => ({
-            x: baseOffsetX + (pageX - contentBounds.minX) * scale,
-            y: baseOffsetY + (pageY - contentBounds.minY) * scale
+            x: baseOffsetX + (pageX - panBounds.minX) * scale,
+            y: baseOffsetY + (pageY - panBounds.minY) * scale
         });
 
         const vpTl = viewport
-            ? { x: offsetX + (viewport.left - contentBounds.minX) * scale, y: offsetY + (viewport.top - contentBounds.minY) * scale }
+            ? { x: offsetX + (viewport.left - panBounds.minX) * scale, y: offsetY + (viewport.top - panBounds.minY) * scale }
             : null;
         const vpBr = viewport
             ? {
-                x: offsetX + (viewport.left + viewport.width - contentBounds.minX) * scale,
-                y: offsetY + (viewport.top + viewport.height - contentBounds.minY) * scale
+                x: offsetX + (viewport.left + viewport.width - panBounds.minX) * scale,
+                y: offsetY + (viewport.top + viewport.height - panBounds.minY) * scale
             }
             : null;
 
@@ -1249,7 +1305,8 @@ const NavigationMap = {
             drawW,
             drawH,
             toMap,
-            contentBounds,
+            contentBounds: frameBounds,
+            panBounds,
             vpTl,
             vpBr
         };
@@ -1265,6 +1322,7 @@ const NavigationMap = {
         if (!this._baseTransform || !contentBounds) return;
 
         const t = this._baseTransform;
+        const panBounds = t.panBounds || contentBounds;
         const offsetX = t.baseOffsetX + this._panDisplayX;
         const offsetY = t.baseOffsetY + this._panDisplayY;
         const effective = {
@@ -1272,8 +1330,8 @@ const NavigationMap = {
             offsetX,
             offsetY,
             toMap: (pageX, pageY) => ({
-                x: offsetX + (pageX - contentBounds.minX) * t.scale,
-                y: offsetY + (pageY - contentBounds.minY) * t.scale
+                x: offsetX + (pageX - panBounds.minX) * t.scale,
+                y: offsetY + (pageY - panBounds.minY) * t.scale
             })
         };
 
@@ -1292,13 +1350,13 @@ const NavigationMap = {
         };
     },
 
-    updatePanFromViewport() {
+    updatePanFromViewport(force = false) {
         if (!this.canvas || !this._baseTransform) return;
-        if (this._navDragActive) return;
+        if (!force && this._navDragActive) return;
 
         const base = this._baseTransform;
-        const contentBounds = base.contentBounds;
-        if (!contentBounds) return;
+        const panBounds = base.panBounds || base.contentBounds;
+        if (!panBounds) return;
 
         const vp = SpatialNavigation.getViewportPageRect(this._activeLevel);
         const style = this.getMapStyle();
@@ -1308,30 +1366,9 @@ const NavigationMap = {
 
         if (style.viewportFollow !== false) {
             const strength = style.viewportFollowStrength ?? 1;
-            const vpCenterX = vp.left + vp.width / 2;
-            const vpCenterY = vp.top + vp.height / 2;
-            let followX = base.anchorX - (vpCenterX - contentBounds.minX) * base.scale;
-            let followY = base.anchorY - (vpCenterY - contentBounds.minY) * base.scale;
-
-            if (style.viewportFollowClamp) {
-                const inset = style.frameInset ?? 0;
-                const innerW = Math.max(1, this.canvas.clientWidth - inset * 2);
-                const innerH = Math.max(1, this.canvas.clientHeight - inset * 2);
-                const { minOffX, minOffY, maxOffX, maxOffY } = this.getMapPanLimits(
-                    base.baseOffsetX,
-                    base.baseOffsetY,
-                    base.drawW,
-                    base.drawH,
-                    innerW,
-                    innerH,
-                    inset
-                );
-                followX = Math.max(minOffX, Math.min(maxOffX, followX));
-                followY = Math.max(minOffY, Math.min(maxOffY, followY));
-            }
-
-            panX = followX - base.baseOffsetX;
-            panY = followY - base.baseOffsetY;
+            const follow = this.computeFollowPan(base, panBounds, vp, base.scale);
+            panX = follow.panX;
+            panY = follow.panY;
 
             if (strength < 1) {
                 panX *= strength;
@@ -1345,7 +1382,7 @@ const NavigationMap = {
         this._panDisplayY = panY;
         this.applyCanvasPan();
         this.updateViewportMarker(base, vp);
-        this.syncLastTransform(this._activeLevel, contentBounds, vp);
+        this.syncLastTransform(this._activeLevel, base.contentBounds, vp);
     },
 
     drawMapContent(ctx, t, level) {
@@ -1400,20 +1437,22 @@ const NavigationMap = {
                 return;
             }
 
-            const contentBounds = this.getMapContentBounds();
-            if (!contentBounds) return;
+            const frameBounds = this.getMapFrameBounds();
+            const panBounds = this.getMapPanBounds();
+            if (!frameBounds || !panBounds) return;
 
             const vp = SpatialNavigation.getViewportPageRect(level);
 
-            this._cachedContentBounds = contentBounds;
+            this._cachedContentBounds = frameBounds;
             this._baseTransform = this.computeTransform(
-                contentBounds,
+                frameBounds,
                 vp,
                 frameW,
                 frameH,
-                { contentOnly: true }
+                { contentOnly: true, panBounds }
             );
-            this._baseTransform.contentBounds = contentBounds;
+            this._baseTransform.contentBounds = frameBounds;
+            this._baseTransform.panBounds = panBounds;
             this.syncCanvasToDrawExtents(this._baseTransform);
             this.drawMapContent(this.ctx, this._baseTransform, level);
             this._contentDirty = false;
@@ -2077,30 +2116,22 @@ const NavigationMap = {
         const base = this._baseTransform;
         if (!base) return { x: panX, y: panY };
 
-        const style = this.getMapStyle();
-        const inset = style.frameInset ?? 0;
-        const innerW = Math.max(1, this.canvas.clientWidth - inset * 2);
-        const innerH = Math.max(1, this.canvas.clientHeight - inset * 2);
-        const { minPanX, maxPanX, minPanY, maxPanY } = this.getMapPanLimits(
-            base.baseOffsetX,
-            base.baseOffsetY,
-            base.drawW,
-            base.drawH,
-            innerW,
-            innerH,
-            inset
-        );
+        const panBounds = base.panBounds || base.contentBounds;
+        const vp = SpatialNavigation.getViewportPageRect(this._activeLevel);
+        const scrollPan = this.getScrollPanLimits(base, panBounds, base.scale, vp);
+        if (!scrollPan) return { x: panX, y: panY };
 
         return {
-            x: Math.max(minPanX, Math.min(maxPanX, panX)),
-            y: Math.max(minPanY, Math.min(maxPanY, panY))
+            x: Math.max(scrollPan.minOffX - base.baseOffsetX, Math.min(scrollPan.maxOffX - base.baseOffsetX, panX)),
+            y: Math.max(scrollPan.minOffY - base.baseOffsetY, Math.min(scrollPan.maxOffY - base.baseOffsetY, panY))
         };
     },
 
     mapPointToPage(mx, my, t, contentBounds) {
+        const panBounds = t.panBounds || contentBounds;
         return {
-            x: (mx - t.offsetX) / t.scale + contentBounds.minX,
-            y: (my - t.offsetY) / t.scale + contentBounds.minY
+            x: (mx - t.offsetX) / t.scale + panBounds.minX,
+            y: (my - t.offsetY) / t.scale + panBounds.minY
         };
     },
 
@@ -2133,7 +2164,10 @@ const NavigationMap = {
         if (e.button !== 0) return;
         if (this.isInteractionBlocked()) return;
         if (SpatialNavigation.pan.active || ActionWarehouse.dragState) return;
-        if (!this._baseTransform?.contentBounds) return;
+        if (!this._baseTransform?.contentBounds) {
+            this.render();
+            if (!this._baseTransform?.contentBounds) return;
+        }
 
         e.preventDefault();
         e.stopPropagation();
@@ -2205,32 +2239,13 @@ const NavigationMap = {
             drag.moved = true;
         }
 
-        const scale = this._baseTransform.scale;
-        const prevPanX = this._panDisplayX;
-        const prevPanY = this._panDisplayY;
-        const clamped = this.clampMapPan(prevPanX + dx, prevPanY + dy);
-        this._panDisplayX = clamped.x;
-        this._panDisplayY = clamped.y;
+        const scale = Math.max(1e-6, this._baseTransform.scale);
+        this.scrollViewportBy(-dx / scale, -dy / scale);
+        this.updatePanFromViewport(true);
+    },
 
-        const appliedPanDx = this._panDisplayX - prevPanX;
-        const appliedPanDy = this._panDisplayY - prevPanY;
-        const overflowDx = dx - appliedPanDx;
-        const overflowDy = dy - appliedPanDy;
-
-        if (appliedPanDx === 0 && appliedPanDy === 0 && overflowDx === 0 && overflowDy === 0) return;
-
-        if (appliedPanDx !== 0 || appliedPanDy !== 0) {
-            this.applyCanvasPan();
-            this.scrollViewportBy(-appliedPanDx / scale, -appliedPanDy / scale);
-        }
-        if (overflowDx !== 0 || overflowDy !== 0) {
-            this.scrollViewportBy(-overflowDx / scale, -overflowDy / scale);
-        }
-
-        const vp = SpatialNavigation.getViewportPageRect(this._activeLevel);
-        const contentBounds = this._baseTransform.contentBounds;
-        this.updateViewportMarker(this._baseTransform, vp);
-        this.syncLastTransform(this._activeLevel, contentBounds, vp);
+    syncPanFromViewportDuringDrag() {
+        this.updatePanFromViewport(true);
     },
 
     handlePointerEnd(e) {
