@@ -879,44 +879,44 @@ body.view-level-3 .layer-dot {
 @font-face {
     font-family: "NarkissYair";
     font-weight: 400;
-    src: url("../assets/fonts/NarkissYair-Regular-TRIAL.woff2") format("woff2");
+    src: url("assets/fonts/NarkissYair-Regular-TRIAL.woff2") format("woff2");
 }
 
 @font-face {
     font-family: "ratzif22";
     font-weight: 400;
-    src: url("../assets/fonts/Ratzif22-Regular.woff2") format("woff2");
+    src: url("assets/fonts/Ratzif22-Regular.woff2") format("woff2");
 }
 
 @font-face {
     font-family: "ratzif22";
     font-weight: 600;
-    src: url("../assets/fonts/Ratzif22-Bold.woff2") format("woff2");
+    src: url("assets/fonts/Ratzif22-Bold.woff2") format("woff2");
 }
 
 @font-face {
     font-family: "ratzif22";
     font-weight: 500;
-    src: url("../assets/fonts/Ratzif22-Medium.woff2") format("woff2");
+    src: url("assets/fonts/Ratzif22-Medium.woff2") format("woff2");
 }
 
 @font-face {
     font-family: "Neoklass";
     font-weight: 600;
     font-style: italic;
-    src: url("../assets/fonts/Neoklass-BoldItalic-TRIAL.woff2") format("woff2");
+    src: url("assets/fonts/Neoklass-BoldItalic-TRIAL.woff2") format("woff2");
 }
 
 @font-face {
     font-family: "NarkissTam";
     font-weight: 400;
-    src: url("../assets/fonts/NarkissTam-Regular-TRIAL.woff2") format("woff2");
+    src: url("assets/fonts/NarkissTam-Regular-TRIAL.woff2") format("woff2");
 }
 
 @font-face {
     font-family: "HelveticaNeue";
     font-weight: 400;
-    src: url("../assets/fonts/HelveticaNeue-01.woff2") format("woff2");
+    src: url("assets/fonts/HelveticaNeue-01.woff2") format("woff2");
 }
 
 /*
