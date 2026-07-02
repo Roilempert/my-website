@@ -30,7 +30,10 @@ In chat: "Create a work session for [topic] from TEMPLATE." The agent will fill 
 Empty template — do not edit; only copy.
 
 **Dated file**  
-e.g. `2026-06-18-….md` — your session; safe to delete when done.
+e.g. `2026-06-18-….md` — your session; move to `archive/` when done (or delete).
+
+**archive/**  
+Completed sessions kept for reference (e.g. `2026-06-22-l2-grid-stable.md`).
 
 **docs/CHECKPOINT.md**  
 Physics stability — permanent doc, not a session.

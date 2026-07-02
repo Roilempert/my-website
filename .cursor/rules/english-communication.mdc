@@ -17,7 +17,7 @@ alwaysApply: true
 
 ## Site content is out of scope
 
-The product is a Hebrew RTL catalog. Do not translate:
+The product is a Hebrew RTL study platform. Do not translate:
 
 - Note titles and body text from the data pipeline
 - UI strings shown to visitors (`index.html` title, in-app labels)
@@ -31,4 +31,6 @@ Put file paths, function names, and selectors in fenced code blocks or on their 
 
 ## Tone
 
-Clinical, professional, analytical. No filler. Go straight to the technical point.
+**Agent replies:** Clear, professional, analytical. No filler. Go straight to the technical point.
+
+**Product design** (see `AGENTS.md`): Slick, fun, well designed — not a cold archival aesthetic. Do not let agent tone override the product direction when making UI or motion choices.

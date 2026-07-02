@@ -1,6 +1,11 @@
 עקבות — HOW TO OPEN THE SITE ON THE iMac
 =========================================
 
+PRESENTATION MACHINE
+--------------------
+21.5-inch iMac — the site is built and tuned for this screen at the exhibition.
+
+
 You will NOT find a start button in the folder right-click menu.
 Follow these steps in Finder:
 

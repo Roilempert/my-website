@@ -14,20 +14,31 @@ Code file:
 js/depth-v2.js
 ```
 
+## Site shell vs canvas grids
+
+| Grid | Scope | Canonical size |
+|------|-------|----------------|
+| **Site shell** | Viewport reference — padding, UI anchors, proportional tokens | **18 columns × 10 rows** (`CONFIG.siteGrid`) — see [`site-grid.md`](site-grid.md) |
+| **Canvas (L2/L3)** | Scrollable `#app` workspace — note layout at meso/micro | `CONFIG.depth.v2.meso` / `.micro` (wider than viewport) |
+
+Do not change canvas column counts when adjusting the 18×10 shell.
+
 ## Work phases
 
 | Phase | Status | Description |
 |-----|--------|--------|
-| 1 | **active** | Two separate grids + silhouette mock (`MesoMock`) |
-| 2 | pending | Layer transitions |
-| 3 | pending | Real content (silhouettes, notes) |
+| 1 | **active** | Separate L2/L3 canvas grids + **interim** L2 placeholder (`MesoMock` gradients) |
+| 2 | pending | Layer transitions (scroll → FX → reveal) |
+| 3 | **target** | **Typographic silhouettes** at L2 via `SilhouetteEngine` (project goal in `AGENTS.md`) |
 
-## Grids (defaults)
+MesoMock is a **stand-in**, not the intended exhibition look. Phase 3 replaces gradient mocks with measured title/body silhouettes.
 
-| Layer | Canvas width | Columns | Cell height |
-|------|-----------|--------|---------|
-| L2 meso | `220vw` | 12 | 64px scaled |
-| L3 micro | `300vw` | 8 | 120px scaled |
+## Canvas grids (current `config.js`)
+
+| Layer | Canvas width | Columns | Notes |
+|------|-------------|---------|--------|
+| L2 meso | `175vw` | 9 | ~5–6 cols in viewport; rest scrolls off-screen (stable 2026-06-22) |
+| L3 micro | (viewport-driven) | 12 | `viewportCols: 3` in frame |
 
 Values in:
 
@@ -36,9 +47,9 @@ CONFIG.depth.v2.meso
 CONFIG.depth.v2.micro
 ```
 
-## Silhouette mock (MesoMock)
+## Interim L2 placeholder (MesoMock)
 
-In V2, L2 shows a **light mock** — not `SilhouetteEngine`:
+Until Phase 3, V2 L2 shows a **gradient mock** — not `SilhouetteEngine`:
 
 ```
 js/meso-mock.js

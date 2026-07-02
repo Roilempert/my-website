@@ -26,12 +26,11 @@ Files to attach to the agent (remove what is not relevant):
 
 ## Relevant code files
 
+(Optional — leave blank if unsure; the agent will find files from your description.)
+
 ```
-js/
 styles.css
 ```
-
-(list specific paths)
 
 ---
 

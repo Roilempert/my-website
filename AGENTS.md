@@ -2,25 +2,49 @@
 
 ## Project goal
 
-A speculative micro-archaeological catalog (from a 24th-century viewpoint) that archives, catalogs, and visually renders digital information remnants and human data (behavioral and personal) from the 21st century. The aim is to turn dry databases into an interactive spatial experience under a fully clinical, structured, archival aesthetic.
+A spatial research platform that treats personal notes from mobile phones as material for study — how people interact, what they feel, and what they think, as captured in short written traces. The site turns a live note archive into an explorable field: visitors can wander without a fixed path or deliberately study specific topics through the interface.
+
+The experience should feel **slick, fun, and well designed** — polished interaction and visual craft, not a dry database or institutional archive.
 
 ## What I want to achieve
 
-- **Live data pipeline:** A stable system that pulls data in real time from CSV files (Google Sheets) and maps each row to a physical object on the canvas.
-- **Deep display space:** A navigation interface with multi-directional scrolling across three zoom levels for exploring information particles.
-- **Data-driven physics:** A stable physics engine where object behavior, gravity, and clustering are computed dynamically from each object's data variables, with precise collider bounds and no clipping.
-- **Optimization:** High, stable client-side rendering performance despite a large object count.
+- **Live data pipeline:** A stable system that loads note data (Google Sheets with local CSV fallback) and maps each row to an object on the canvas.
+- **Two modes of use:**
+  - **Discovery** — aimless roaming across a deep scroll/zoom space; notes surface through motion, proximity, and curiosity.
+  - **Study** — intentional focus on topics via blocks, tags, capture, and depth levels (macro → meso → micro).
+- **Deep display space:** Multi-directional navigation across three zoom levels for exploring note particles.
+- **Data-driven physics:** Stable object behavior, clustering, and capture driven by each note's data (tags, layout), with precise colliders and no clipping.
+- **Typographic meso:** Medium zoom shows **typographic silhouettes** — abstract structure from title/body layout, not full readable notes. *(Interim: gradient mock at L2 until `SilhouetteEngine` is wired in V2 — see Meso layer below.)*
+- **Optimization:** High, stable client-side performance for exhibition hardware and large note counts.
 
 ## Context
 
-Bezalel visual communication graduation project, year 4. Intended for frontal exhibition display and future print translation.
+Bezalel visual communication graduation project, year 4. Built for **frontal exhibition display** on a **21.5″ iMac** (primary presentation machine). Print and other offline media are **out of scope**.
+
+**Exhibition hardware:** 21.5-inch screen — design and performance targets assume this viewport; launcher steps in [`EXHIBITION-START-HERE.txt`](EXHIBITION-START-HERE.txt).
+
+## Design direction
+
+| Layer | Direction |
+|-------|-----------|
+| **Product UI** | Slick, fun, well crafted — spatial, responsive, rewarding to move through |
+| **Content** | Hebrew personal notes from phones; tags as study categories |
+| **Agent/docs tone** | Clear, professional, analytical (English) — see `.cursor/rules/english-communication.mdc` |
+
+Do not default to a cold clinical or faux-archival aesthetic unless a specific task calls for it.
+
+## Layout reference
+
+**Site shell grid:** **18 columns × 10 rows** — viewport-level proportions, padding, and UI anchors (`CONFIG.siteGrid`). See [`docs/architecture/site-grid.md`](docs/architecture/site-grid.md).
+
+Canvas grids inside `#app` (macro physics, L2 meso, L3 micro) are separate and wider than the viewport; do not confuse them with the 18×10 shell.
 
 ## Technical stack
 
 - Static site: `index.html`, `styles.css`, `js/app.js` (bundled from `js/*.js` via `build-js.sh`)
 - **Site language:** Hebrew, RTL at the UI layer (content stays Hebrew).
 - **Work language:** English for docs, agents, and code comments.
-- Libraries: Matter.js via CDN.
+- Libraries: Matter.js (`vendor/matter.min.js` — bundled locally for offline/exhibition).
 - **Docs:** [`docs/README.md`](docs/README.md) · **Work sessions:** [`docs/work/README.md`](docs/work/README.md) · **Stability:** [`docs/CHECKPOINT.md`](docs/CHECKPOINT.md)
 - **Depth architecture (V2 active):** [`docs/architecture/depth-v2.md`](docs/architecture/depth-v2.md) · legacy: [`docs/architecture/depth-legacy.md`](docs/architecture/depth-legacy.md)
 
@@ -61,9 +85,10 @@ Bezalel visual communication graduation project, year 4. Intended for frontal ex
 - **Do not translate site content** — Hebrew UI and note data stay as-is.
 - Code and identifiers in English only; prefer English code comments.
 - Communication rules: `.cursor/rules/english-communication.mdc`
-- Keep a clinical, professional, analytical tone. No emojis or filler. Go straight to the technical solution.
-- For content terminology when needed, prefer clinical terms (e.g. "behavioral ordering" over generic self-help jargon).
+- Keep agent replies direct and analytical; no filler.
+- When describing study themes in docs, use precise observational language — not generic self-help jargon.
 - Practical modular JavaScript solutions; no unnecessary external dependencies.
+- **Physics/navigation changes:** read [`docs/CHECKPOINT.md`](docs/CHECKPOINT.md) first.
 
 ## Work session (new topic)
 
@@ -75,10 +100,17 @@ No fixed task board. Per topic:
 
 Details: [`docs/work/README.md`](docs/work/README.md)
 
-## Meso layer (in development)
+## Meso layer
 
-- **Goal:** Medium resolution — "cities" in the world-map metaphor: abstract typographic structure, not a full note.
-- **Layout:** V2 — separate grids (see `docs/architecture/depth-v2.md`). legacy — catalog layout (`docs/architecture/depth-legacy.md`).
-- **Structure:** `.note-stage` — silhouette + note, shared zoom (`--note-zoom`).
-- **Silhouette:** `SilhouetteEngine` — measure from `.note-card` at micro grid size (`is-silhouette-micro-measure`); `syncMicroFrame` syncs frame.
-- **Zoom transitions:** orchestrator (scroll → FX → reveal); click block/note from L1. Files: `MacroMesoBridge`, `DepthTransitionOrchestrator`, `CatalogState`, `CatalogLayoutEngine`.
+**Target (exhibition):** Typographic **silhouettes** at L2 — measured from each note's title/body layout (`SilhouetteEngine`), abstract structure rather than readable text. Tag markers on the silhouette where relevant.
+
+**Current build (interim):** V2 L2 still uses **MesoMock** (p5 gradient placeholders) while silhouette integration is pending. Do not treat the mock as the final meso aesthetic.
+
+| Topic | Reference |
+|-------|-----------|
+| V2 grids, phases, mock vs silhouette | [`docs/architecture/depth-v2.md`](docs/architecture/depth-v2.md) |
+| Silhouette measurement | `js/silhouette-engine.js` |
+| Interim mock | `js/meso-mock.js`, `js/meso-gradient-p5.js` |
+| Layout | `js/depth-v2.js` — separate L2/L3 canvas grids |
+| Structure | `.note-stage` — silhouette + note, shared zoom (`--note-zoom`) |
+| Zoom transitions | `DepthTransitionOrchestrator`, `MacroMesoBridge`, `CatalogState` |

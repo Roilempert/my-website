@@ -44,6 +44,5 @@ STILL STUCK?
 Copy the whole my-website folder again from USB.
 Make sure you have:
   Start Local Server.command
-  scripts/serve-exhibition.sh
   data/main.csv
   data/tags.csv

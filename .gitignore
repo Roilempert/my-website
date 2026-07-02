@@ -8,3 +8,8 @@
 
 # Editor local state (keep shared settings if you add them)
 .vscode/*.code-workspace
+
+# Debug screenshots (agent captures — not part of the site)
+/site-*.png
+/site-full.png
+/site-viewport.png

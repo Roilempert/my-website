@@ -1,5 +1,7 @@
 # Site shell grid
 
+**Canonical layout reference: 18 columns × 10 rows** (`CONFIG.siteGrid.columns` / `.rows`). Documented in `AGENTS.md` as the project shell standard.
+
 Viewport-level **reference grid** for proportions, spacing, and default anchors. Separate from the **canvas grids** inside `#app` (physics macro grid, catalog layout, depth V2 meso/micro grids).
 
 Layers are **not** locked into grid cells. The canvas scrolls wider than the viewport, blocks drag freely, and pan stays full-screen. The shell grid supplies measurable tokens (`--site-grid-cell-w/h`, `--site-layer-*`) that UI can scale against.

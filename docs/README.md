@@ -34,10 +34,24 @@ gh workflow run deploy-pages.yml
 
 ---
 
+## Exhibition
+
+**Hardware:** 21.5″ iMac (primary presentation machine). See `AGENTS.md` (Context) and `EXHIBITION-START-HERE.txt` (launcher on the iMac).
+
+---
+
 ## Project root
 
 **AGENTS.md**  
-Agent context — goals, glossary, working guidelines.
+Agent context — project goal (study platform), discovery + study modes, design direction, glossary, working guidelines.
+
+**Site shell grid (18×10)**
+
+```
+docs/architecture/site-grid.md
+```
+
+Viewport reference grid — separate from scrollable canvas grids inside `#app`.
 
 ---
 
@@ -116,4 +130,18 @@ docs/work/README.md
 docs/work/TEMPLATE.md
 ```
 
-Pick a topic → new file in this folder → agent chat.
+Pick a topic → new file in this folder → agent chat. Completed sessions can move to `docs/work/archive/` when done.
+
+**Archive:** `docs/work/archive/` — completed sessions (reference only).
+
+---
+
+## Maintenance audit
+
+**Cleanup report (2026-07-02)**
+
+```
+docs/cleanup-report.md
+```
+
+Read-only audit of unused assets, legacy code, and safe deletion candidates. Pair with this index when pruning the repo.

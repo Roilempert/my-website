@@ -1,0 +1,35 @@
+---
+description: Figma MCP workflow — translate designs to this project's static HTML/CSS/RTL stack
+alwaysApply: false
+---
+
+# Figma MCP Integration
+
+Use when the user provides a Figma URL or asks to implement/sync UI from Figma.
+
+## Required flow (do not skip)
+
+1. Extract `fileKey` and `node-id` from the URL (`node-id=42-15` → `42:15`).
+2. Run `get_design_context` for structured layout, typography, and tokens.
+3. If truncated, run `get_metadata` first, then fetch child nodes individually.
+4. Run `get_screenshot` for visual validation.
+5. Download assets from localhost URLs in the MCP response — do not substitute icon libraries or placeholders.
+6. Translate output into this project's conventions (not React/Tailwind by default).
+
+## Project conventions
+
+- **Stack:** static `index.html`, `styles.css`, bundled `js/app.js` — no React/Vue.
+- **Language:** Hebrew UI stays Hebrew; RTL at `.note-card` / UI layer; `#app { direction: ltr }` for canvas physics.
+- **Layout reference:** 18×10 site shell grid — see `docs/architecture/site-grid.md` and `CONFIG.siteGrid` in `js/config.js`.
+- **Design direction:** slick, spatial, fun — not cold archival (see `AGENTS.md`).
+- **Physics/navigation:** if Figma-driven UI touches scroll/centering/blocks, read `docs/CHECKPOINT.md` first.
+
+## Write to Figma (`use_figma`)
+
+- Load `figma-use` skill before every `use_figma` call.
+- Work incrementally; return all created/mutated node IDs.
+- Scripts are atomic — fix errors before retrying.
+
+## Rate limits
+
+Authenticated account may have read limits on Starter/View seats. Write tools are currently beta-exempt but require appropriate Figma access.

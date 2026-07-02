@@ -2,6 +2,8 @@
 
 Agreed restore point after fixing RTL navigation, viewport centering, secondary grid, multi-block stretch, hull collision, performance, and **physics stability at 4–7 blocks**.
 
+**Exhibition build:** surface capture is capped at **5 blocks** (`docs/block-cap-policy.md`). Tuning for block 6+ below is documented for a future cap raise — not reachable in the current UI.
+
 **Before physics/navigation changes:** read this file. If regressions appear — compare against the patterns below.
 
 ## What works

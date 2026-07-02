@@ -108,7 +108,7 @@ const PhysicsEngine = {
     init() {
         if (typeof Matter === 'undefined') {
             console.error(
-                'Matter.js did not load (CDN blocked or offline). Physics is disabled — serve over HTTP and check network.'
+                'Matter.js did not load (vendor/matter.min.js missing or failed). Physics is disabled — serve over HTTP from the project folder.'
             );
             return;
         }

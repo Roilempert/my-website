@@ -68,7 +68,7 @@ const CONFIG = {
             main: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ7yUXgr2RmRgAg9hWSPesVZsqkROq-PedKOh6KpERDO9HcC5ru11oobFPN8Mhsnruw26JKe4peAIFT/pub?gid=693502086&single=true&output=csv',
             tags: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ7yUXgr2RmRgAg9hWSPesVZsqkROq-PedKOh6KpERDO9HcC5ru11oobFPN8Mhsnruw26JKe4peAIFT/pub?gid=946159072&single=true&output=csv'
         },
-        preferLocal: true,
+        preferLocal: false,
         // Column indices in the main CSV (zero-based)
         columns: {
             authorCode: 2,
