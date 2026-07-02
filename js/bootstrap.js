@@ -1,5 +1,11 @@
 document.addEventListener('DOMContentLoaded', () => {
     try {
+        if (typeof applyPresentationProfile === 'function') applyPresentationProfile();
+    } catch (err) {
+        console.error('Presentation profile failed:', err);
+    }
+
+    try {
         applyVisualScaleTokens();
         applySiteGridTokens();
     } catch (err) {

@@ -2,5 +2,6 @@
   "liveServer.settings.ignoreFiles": [
     ".cursor/**",
     "**/.cursor/**"
-  ]
+  ],
+  "liveServer.settings.port": 5501
 }

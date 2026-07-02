@@ -741,8 +741,13 @@ const DepthV2 = {
                 const itemsById = new Map(
                     (typeof AppState !== 'undefined' ? AppState.items : []).map(item => [String(item.id), item])
                 );
+                const pres = typeof isPresentationMode === 'function' && isPresentationMode();
+                const columnLimit = pres ? (CONFIG.presentation?.mesoInitialBakeColumns ?? 0) : 0;
+                const { wrappers } = typeof MesoMock._collectMesoWrappers === 'function'
+                    ? MesoMock._collectMesoWrappers({ columnLimit })
+                    : { wrappers: [...document.querySelectorAll('.note-wrapper')] };
 
-                document.querySelectorAll('.note-wrapper').forEach(wrapper => {
+                wrappers.forEach(wrapper => {
                     const item = itemsById.get(wrapper.dataset.noteId);
                     if (!item || wrapper.querySelector('.meso-mock__frame')) return;
                     try {

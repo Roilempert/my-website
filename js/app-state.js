@@ -72,11 +72,38 @@ const AppState = {
         }
     },
 
+    async fetchDataText(key) {
+        const localUrl = CONFIG.data.urls?.[key];
+        const remoteUrl = CONFIG.data.remoteUrls?.[key];
+        const preferLocal = CONFIG.data.preferLocal !== false;
+        const candidates = preferLocal
+            ? [localUrl, remoteUrl]
+            : [remoteUrl, localUrl];
+        const urls = [...new Set(candidates.filter(Boolean))];
+
+        let lastError = null;
+        for (const url of urls) {
+            try {
+                const text = await this.fetchText(url);
+                if (key === 'main' && !preferLocal && url === localUrl) {
+                    console.info(`Data: loaded ${key} from local fallback (${url})`);
+                } else if (key === 'main' || key === 'tags') {
+                    console.info(`Data: loaded ${key} from ${url}`);
+                }
+                return text;
+            } catch (err) {
+                lastError = err;
+                console.warn(`Data fetch failed for ${url}`, err);
+            }
+        }
+        throw lastError || new Error(`No data source configured for ${key}`);
+    },
+
     async buildDataPipeline() {
-        const tagsCsv = await this.fetchText(CONFIG.data.urls.tags);
+        const tagsCsv = await this.fetchDataText('tags');
         this.parseTagsDictionary(tagsCsv);
 
-        const mainCsv = await this.fetchText(CONFIG.data.urls.main);
+        const mainCsv = await this.fetchDataText('main');
         this.items = this.parseMainNotes(mainCsv);
     },
 

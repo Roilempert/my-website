@@ -110,6 +110,47 @@ body {
     );
 }
 
+/* Reference grid intersection marks — behind pan layer and canvas */
+:root {
+    --site-grid-cross-arm: 6px;
+    --site-grid-cross-weight: 1px;
+    --site-grid-cross-color: rgba(16, 16, 16, 0.14);
+}
+
+#site-grid-crosses {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    pointer-events: none;
+    overflow: hidden;
+}
+
+.site-grid-cross {
+    position: absolute;
+    transform: translate(-50%, -50%);
+}
+
+.site-grid-cross::before,
+.site-grid-cross::after {
+    content: "";
+    position: absolute;
+    background-color: var(--site-grid-cross-color);
+}
+
+.site-grid-cross::before {
+    width: var(--site-grid-cross-arm);
+    height: var(--site-grid-cross-weight);
+    left: calc(var(--site-grid-cross-arm) / -2);
+    top: calc(var(--site-grid-cross-weight) / -2);
+}
+
+.site-grid-cross::after {
+    width: var(--site-grid-cross-weight);
+    height: var(--site-grid-cross-arm);
+    left: calc(var(--site-grid-cross-weight) / -2);
+    top: calc(var(--site-grid-cross-arm) / -2);
+}
+
 /* Full-viewport pan layer — sits beneath #app; receives clicks through transparent grid cells */
 #nav-surface {
     position: fixed;
@@ -182,7 +223,24 @@ body::before {
     filter: grayscale(100%) contrast(300%) brightness(120%);
     mix-blend-mode: multiply; 
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='3.0' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
-}      
+}
+
+body.is-presentation::before {
+    display: none;
+}
+
+body.is-presentation.is-depth-transition #app {
+    filter: blur(calc(var(--depth-transition-blur, 0px) * 0.45));
+}
+
+body.is-presentation.is-meso-to-micro #app {
+    filter: blur(calc(var(--micro-atmosphere, 0) * 0.8px));
+}
+
+body.is-presentation.view-level-2 .note-wrapper {
+    content-visibility: auto;
+    contain-intrinsic-size: auto 120px;
+}
 
 /* ==========================================================================
    01. CANVAS (#app) & GLOBAL WRAPPERS
@@ -2400,6 +2458,24 @@ body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper {
     pointer-events: none !important;
 }
 
+/* L2/L3 — pass drag/wheel through note chrome to nav-surface (clicks via SpatialNavigation hit test) */
+body.is-depth-v2.view-level-2 .depth-v2-glyph,
+body.is-depth-v2.view-level-2 .depth-v2-glyph *,
+body.is-depth-v2.view-level-3 .depth-v2-glyph,
+body.is-depth-v2.view-level-3 .depth-v2-glyph *,
+body.is-depth-v2.view-level-2 .note-stage,
+body.is-depth-v2.view-level-2 .note-stage *,
+body.is-depth-v2.view-level-3 .note-stage,
+body.is-depth-v2.view-level-3 .note-stage *,
+body.is-depth-v2.view-level-2 #app.is-meso-column-layout .filter-fringe-zone .note-wrapper,
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .filter-fringe-zone .note-wrapper,
+body.is-depth-v2.view-level-2 #app.is-workspace-lens-layout .note-wrapper.is-workspace-lens-anchored,
+body.is-depth-v2.view-level-3 #app.is-workspace-lens-layout .note-wrapper.is-workspace-lens-anchored,
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-mock__card.note-card,
+body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-mock__card.note-card * {
+    pointer-events: none !important;
+}
+
 body.is-depth-v2.view-level-2 .note-wrapper {
     height: 100%;
     min-height: var(--v2-cell-height, 72px);
@@ -2860,7 +2936,7 @@ body.is-depth-v2.view-level-3 .depth-v2-glyph--micro {
     background: none;
     border: none;
     box-sizing: border-box;
-    pointer-events: auto;
+    pointer-events: none;
 }
 
 body.is-depth-v2.view-level-3 .micro-mock__card.note-card {
@@ -2882,6 +2958,7 @@ body.is-depth-v2.view-level-3 .micro-mock__card.note-card {
     transition: transform 0.35s cubic-bezier(0.25, 1, 0.5, 1);
     box-sizing: border-box;
     padding: calc(var(--site-grid-gap, 1.25rem) * 0.75) var(--site-grid-gap, 1.25rem) var(--site-grid-gap, 1.25rem);
+    pointer-events: none;
 }
 
 body.is-depth-v2.view-level-3 .micro-mock__card .note-title {
@@ -3022,13 +3099,10 @@ body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-mock__card.note-c
     margin: 0 !important;
     transform: none !important;
     transform-origin: center center !important;
-    transition: transform 0.35s cubic-bezier(0.25, 1, 0.5, 1) !important;
-    pointer-events: auto !important;
-    cursor: pointer;
+    pointer-events: none !important;
 }
 
 body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-mock__card.note-card:hover {
-    transform: rotate(var(--note-micro-hover-rotation, 0deg)) !important;
     overflow: visible !important;
 }
 

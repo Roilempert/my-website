@@ -21,9 +21,88 @@ const PhysicsEngine = {
     moleculeClickIntent: null,
     moleculeIdBadge: null,
     transitionFrozen: false,
+    runnerEnabled: false,
+    syncLoopLastTs: 0,
+    navPhysicsTickLastTs: 0,
+    renderStepTs: 0,
 
     setTransitionFrozen(value) {
         this.transitionFrozen = !!value;
+    },
+
+    setMacroPhysicsActive(active) {
+        if (!this.runner || !this.engine) return;
+        const shouldRun = !!active;
+        if (shouldRun === this.runnerEnabled) return;
+        if (shouldRun) {
+            Matter.Runner.run(this.runner, this.engine);
+        } else {
+            Matter.Runner.stop(this.runner);
+        }
+        this.runnerEnabled = shouldRun;
+    },
+
+    shouldThrottleMacroCanvas() {
+        if (CONFIG.presentation?.displayInterp) return false;
+        if (typeof isPresentationMode !== 'function' || !isPresentationMode()) return false;
+        const targetFps = CONFIG.presentation?.targetFps ?? 0;
+        if (!targetFps || targetFps >= 60) return false;
+        const minDelta = 1000 / targetFps;
+        const now = performance.now();
+        if (now - this.syncLoopLastTs < minDelta) return true;
+        this.syncLoopLastTs = now;
+        return false;
+    },
+
+    captureRenderSnapshot() {
+        const now = performance.now();
+        this.bodiesData.forEach(item => {
+            if (!item.body) return;
+            const x = item.body.position.x;
+            const y = item.body.position.y;
+            if (item._renderToX == null) {
+                item._renderFromX = x;
+                item._renderFromY = y;
+            } else {
+                item._renderFromX = item._renderToX;
+                item._renderFromY = item._renderToY;
+            }
+            item._renderToX = x;
+            item._renderToY = y;
+        });
+        this.renderStepTs = now;
+    },
+
+    getDisplayPosition(item) {
+        const body = item.body;
+        if (!body) return null;
+
+        const useInterp = typeof isPresentationMode === 'function' &&
+            isPresentationMode() &&
+            CONFIG.presentation?.displayInterp !== false &&
+            item._renderToX != null;
+
+        if (!useInterp) {
+            return { x: body.position.x, y: body.position.y };
+        }
+
+        const physFps = CONFIG.presentation?.physicsFps ?? 30;
+        const stepMs = 1000 / physFps;
+        const sinceStep = performance.now() - (this.renderStepTs || 0);
+        let alpha = Math.min(1, sinceStep / stepMs);
+        alpha = alpha * alpha * (3 - 2 * alpha);
+
+        return {
+            x: item._renderFromX + (item._renderToX - item._renderFromX) * alpha,
+            y: item._renderFromY + (item._renderToY - item._renderFromY) * alpha
+        };
+    },
+
+    getItemDrawPosition(item) {
+        const pos = this.getDisplayPosition(item);
+        if (pos) return pos;
+        const body = item.body;
+        return body ? { x: body.position.x, y: body.position.y } : null;
     },
 
     init() {
@@ -103,6 +182,8 @@ const PhysicsEngine = {
 
                 const rawTarget = item.overrideTarget;
                 const isStretchedNote = ActionWarehouse.stretchedNotes.has(item.noteIndex);
+                if (isStretchedNote && rawTarget && captureBlockCount >= 2) return;
+
                 const smoothTarget = item.smoothTarget;
                 const smoothLag = rawTarget && smoothTarget
                     ? Math.hypot(rawTarget.x - smoothTarget.x, rawTarget.y - smoothTarget.y)
@@ -117,12 +198,20 @@ const PhysicsEngine = {
                 let pullTarget = useRawTarget
                     ? rawTarget
                     : (rawTarget && smoothTarget ? smoothTarget : rawTarget);
-                if (rawTarget && smoothTarget && captureBlockCount >= 5 && smoothLag < scale(14)) {
-                    pullTarget = rawTarget;
-                }
-                if (rawTarget && smoothTarget && isStretchedNote &&
-                    captureBlockCount >= 5 && smoothLag > scale(10)) {
-                    pullTarget = rawTarget;
+                if (rawTarget && smoothTarget && !useRawTarget && !isStretchedNote) {
+                    const bodyDist = Math.hypot(
+                        rawTarget.x - item.body.position.x,
+                        rawTarget.y - item.body.position.y
+                    );
+                    const far = scale(60);
+                    const near = scale(14);
+                    const span = Math.max(scale(8), far - near);
+                    const t = Math.max(0, Math.min(1, (bodyDist - near) / span));
+                    const chase = CONFIG.physics.targetSmoothing.captureChase ?? 0.38;
+                    pullTarget = {
+                        x: smoothTarget.x + (rawTarget.x - smoothTarget.x) * t * chase,
+                        y: smoothTarget.y + (rawTarget.y - smoothTarget.y) * t * chase
+                    };
                 }
                 if (rawTarget && captureBlockCount === 5 && !isStretchedNote && smoothTarget) {
                     const bodyOrbit = Math.hypot(
@@ -284,7 +373,12 @@ const PhysicsEngine = {
 
             const blockCount = ActionWarehouse.getCrowdedBlockCount();
             const hasStretch = ActionWarehouse.stretchedNotes.size > 0;
-            const passes = hasStretch ? 2 : 1;
+            const pres = typeof isPresentationMode === 'function' && isPresentationMode();
+            const passCap = CONFIG.presentation?.physicsPassCapAtBlocks ?? 0;
+            let passes = hasStretch ? 2 : 1;
+            if (pres && passCap > 0 && blockCount >= passCap && !hasStretch) {
+                passes = 1;
+            }
 
             const molecules = this.buildMoleculeHulls();
 
@@ -300,16 +394,44 @@ const PhysicsEngine = {
             }
 
             this.syncStretchSiblingSprings();
+            this.applyStretchKinematicFollow();
             this.applyKinematicCaptureFollow();
             this.applyMotionSettling();
 
             if (typeof NavigationMap !== 'undefined') {
-                NavigationMap.notifyPhysicsTick();
+                const throttleMs = (pres && CONFIG.presentation?.navMapPhysicsThrottleMs)
+                    ? CONFIG.presentation.navMapPhysicsThrottleMs
+                    : 0;
+                if (throttleMs > 0) {
+                    const now = performance.now();
+                    if (now - this.navPhysicsTickLastTs >= throttleMs) {
+                        this.navPhysicsTickLastTs = now;
+                        NavigationMap.notifyPhysicsTick();
+                    }
+                } else {
+                    NavigationMap.notifyPhysicsTick();
+                }
             }
+
+            this.captureRenderSnapshot();
         });
 
-        this.runner = Matter.Runner.create();
-        Matter.Runner.run(this.runner, this.engine);
+        this.runner = Matter.Runner.create(
+            (typeof isPresentationMode === 'function' && isPresentationMode())
+                ? {
+                    delta: 1000 / (CONFIG.presentation?.physicsFps ?? 30),
+                    isFixed: true
+                }
+                : undefined
+        );
+        const startRunner = typeof DepthController === 'undefined' ||
+            DepthController.currentLevel === 1;
+        if (startRunner) {
+            Matter.Runner.run(this.runner, this.engine);
+            this.runnerEnabled = true;
+        } else {
+            this.runnerEnabled = false;
+        }
 
         this.syncLoop();
     },
@@ -400,6 +522,23 @@ const PhysicsEngine = {
                     const dist = Math.hypot(dx, dy);
                     if (useBroadPhase && dist >= molA.radius + molB.radius + broadGap) continue;
 
+                    if (CONFIG.presentation?.hullCollisionDistanceCull &&
+                        typeof isPresentationMode === 'function' && isPresentationMode()) {
+                        const viewDiag = Math.hypot(window.innerWidth, window.innerHeight);
+                        const viewMul = CONFIG.presentation.hullCollisionViewCull ?? 1.45;
+                        const maxDist = viewDiag * viewMul + molA.radius + molB.radius;
+                        if (dist > maxDist) continue;
+                    }
+
+                    const stretched = ActionWarehouse.stretchedNotes;
+                    if (stretched.has(molA.noteIndex) && stretched.has(molB.noteIndex)) {
+                        const bindA = ActionWarehouse.stretchBindingByNote.get(molA.noteIndex);
+                        const bindB = ActionWarehouse.stretchBindingByNote.get(molB.noteIndex);
+                        const keyA = bindA ? ActionWarehouse.getStretchGroupKey(bindA) : '';
+                        const keyB = bindB ? ActionWarehouse.getStretchGroupKey(bindB) : '';
+                        if (keyA && keyA === keyB) continue;
+                    }
+
                     for (let ai = 0; ai < molA.dots.length; ai++) {
                         const dotA = molA.dots[ai];
                         if (dotA.isFiltered) continue;
@@ -419,6 +558,11 @@ const PhysicsEngine = {
     },
 
     separateOutlineShellPair(dotA, dotB, minDist, capturedWeight, kinematic, multiBlock) {
+        if (ActionWarehouse.stretchedNotes.has(dotA.noteIndex) ||
+            ActionWarehouse.stretchedNotes.has(dotB.noteIndex)) {
+            return;
+        }
+
         const staticA = !dotA.body || dotA.onBankGrid || dotA.body.isStatic;
         const staticB = !dotB.body || dotB.onBankGrid || dotB.body.isStatic;
         let wA = staticA ? 0 : (dotA.overrideTarget ? capturedWeight : 1);
@@ -629,13 +773,52 @@ const PhysicsEngine = {
                 return;
             }
 
-            link.constraint.stiffness = stretchStiff;
+            const blockCount = ActionWarehouse.getCrowdedBlockCount();
+            link.constraint.stiffness = (blockCount >= 2 && !ActionWarehouse.isKinematicCaptureMode(blockCount))
+                ? 0
+                : stretchStiff;
             const ax = link.bodyA.position.x;
             const ay = link.bodyA.position.y;
             const bx = link.bodyB.position.x;
             const by = link.bodyB.position.y;
             const dist = Math.hypot(bx - ax, by - ay) || linkCfg.siblingLength;
             link.constraint.length = Math.max(linkCfg.siblingLength, dist * slack);
+        });
+    },
+
+    applyStretchKinematicFollow() {
+        const blockCount = ActionWarehouse.getCrowdedBlockCount();
+        if (blockCount < 2 || ActionWarehouse.stretchedNotes.size === 0) return;
+        if (ActionWarehouse.isKinematicCaptureMode(blockCount)) return;
+
+        const cfg = CONFIG.physics.crowdedBlock;
+        const pres = typeof isPresentationMode === 'function' && isPresentationMode();
+        const dragging = ActionWarehouse.isAnyCaptureBlockDragging();
+        let lerp = pres
+            ? (CONFIG.presentation?.kinematicStretchLerp ?? 0.2)
+            : (cfg.kinematicLerpStretch ?? 0.16);
+        if (dragging) {
+            lerp = pres
+                ? (CONFIG.presentation?.kinematicStretchLerpDrag ?? 0.26)
+                : (cfg.kinematicSmoothLerpStretch ?? 0.2);
+        }
+        let maxStep = scale(dragging ? (cfg.kinematicMaxStepDrag ?? 3.6) : (cfg.kinematicMaxStep ?? 2.4));
+
+        this.bodiesData.forEach(item => {
+            if (!ActionWarehouse.stretchedNotes.has(item.noteIndex)) return;
+            if (!item.overrideTarget || item.onBankGrid || item.isFiltered || item.isFilterExiting) return;
+            const tgt = item.overrideTarget;
+            const body = item.body;
+            if (!body || body.isStatic) return;
+
+            const lag = Math.hypot(tgt.x - body.position.x, tgt.y - body.position.y);
+            const stepCap = ActionWarehouse.kinematicAdaptiveMaxStep(maxStep, lag, cfg);
+            const next = ActionWarehouse.kinematicLerpToward(
+                body.position.x, body.position.y, tgt.x, tgt.y, lerp, stepCap
+            );
+            Matter.Body.setPosition(body, next);
+            Matter.Body.setVelocity(body, { x: 0, y: 0 });
+            Matter.Body.setAngularVelocity(body, 0);
         });
     },
 
@@ -708,6 +891,8 @@ const PhysicsEngine = {
             const body = item.body;
             if (item.onBankGrid || body.isStatic) return;
             if (kinematicCapture && item.overrideTarget) return;
+            if (ActionWarehouse.stretchedNotes.has(item.noteIndex) &&
+                item.overrideTarget && blockCount >= 2) return;
 
             let vx = body.velocity.x;
             let vy = body.velocity.y;
@@ -779,6 +964,10 @@ const PhysicsEngine = {
                     vx = (vx / speed) * transitCap;
                     vy = (vy / speed) * transitCap;
                 }
+            } else if (item.overrideTarget && speed > transitCap * 0.52) {
+                vx = (vx / speed) * transitCap * 0.52;
+                vy = (vy / speed) * transitCap * 0.52;
+                speed = Math.hypot(vx, vy);
             } else if (speed < cfg.nearJitterSpeed) {
                 vx *= cfg.nearDamping;
                 vy *= cfg.nearDamping;
@@ -843,8 +1032,11 @@ const PhysicsEngine = {
 
             for (let i = 0; i < dots.length; i++) {
                 for (let j = i + 1; j < dots.length; j++) {
-                    const dx = dots[i].body.position.x - dots[j].body.position.x;
-                    const dy = dots[i].body.position.y - dots[j].body.position.y;
+                    const pi = this.getItemDrawPosition(dots[i]);
+                    const pj = this.getItemDrawPosition(dots[j]);
+                    if (!pi || !pj) continue;
+                    const dx = pi.x - pj.x;
+                    const dy = pi.y - pj.y;
                     candidates.push({ i, j, distSq: dx * dx + dy * dy });
                 }
             }
@@ -857,8 +1049,9 @@ const PhysicsEngine = {
                 const key = i < j ? `${i}-${j}` : `${j}-${i}`;
                 if (drawnPairs.has(key)) return false;
                 drawnPairs.add(key);
-                const a = dots[i].body.position;
-                const b = dots[j].body.position;
+                const a = this.getItemDrawPosition(dots[i]);
+                const b = this.getItemDrawPosition(dots[j]);
+                if (!a || !b) return false;
                 ctx.moveTo(a.x - scrollX, a.y - scrollY);
                 ctx.lineTo(b.x - scrollX, b.y - scrollY);
                 degree[i]++;
@@ -882,8 +1075,11 @@ const PhysicsEngine = {
                     let bestDist = Infinity;
                     for (let j = 0; j < dots.length; j++) {
                         if (i === j) continue;
-                        const dx = dot.body.position.x - dots[j].body.position.x;
-                        const dy = dot.body.position.y - dots[j].body.position.y;
+                        const pi = this.getItemDrawPosition(dot);
+                        const pj = this.getItemDrawPosition(dots[j]);
+                        if (!pi || !pj) continue;
+                        const dx = pi.x - pj.x;
+                        const dy = pi.y - pj.y;
                         const distSq = dx * dx + dy * dy;
                         if (distSq < bestDist) {
                             bestDist = distSq;
@@ -912,10 +1108,12 @@ const PhysicsEngine = {
         const groups = new Map();
         this.bodiesData.forEach(item => {
             if (item.isFiltered) return;
+            const pos = this.getItemDrawPosition(item);
+            if (!pos) return;
             if (!groups.has(item.noteIndex)) groups.set(item.noteIndex, []);
             groups.get(item.noteIndex).push({
-                x: item.body.position.x - scrollX,
-                y: item.body.position.y - scrollY,
+                x: pos.x - scrollX,
+                y: pos.y - scrollY,
                 r: item.body.circleRadius
             });
         });
@@ -923,8 +1121,24 @@ const PhysicsEngine = {
         ctx.strokeStyle = this.linkColor;
         ctx.lineWidth = cfg.width;
 
+        const presCull = CONFIG.presentation?.outlineViewportCull &&
+            typeof isPresentationMode === 'function' && isPresentationMode();
+        const viewPad = CONFIG.outlines.padding + CONFIG.physics.body.radius + 48;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+
         groups.forEach((pts, noteIndex) => {
             if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
+
+            if (presCull) {
+                let cx = 0;
+                let cy = 0;
+                pts.forEach(p => { cx += p.x; cy += p.y; });
+                cx /= pts.length;
+                cy /= pts.length;
+                if (cx < -viewPad || cx > vw + viewPad || cy < -viewPad || cy > vh + viewPad) return;
+            }
+
             const isHover = noteIndex === this.hoveredNoteIndex;
             ctx.lineWidth = isHover ? (cfg.hoverWidth ?? cfg.width * 2.5) : cfg.width;
             const R = pts[0].r + cfg.padding;
@@ -1159,6 +1373,7 @@ const PhysicsEngine = {
 
         ActionWarehouse.refreshWorkspaceGrid();
         ActionWarehouse.updateDotFocusFilter();
+        this.captureRenderSnapshot();
     },
 
     getLiveWrapperOrigin(noteIndex, cache) {
@@ -1187,8 +1402,11 @@ const PhysicsEngine = {
             const origin = this.getLiveWrapperOrigin(item.noteIndex, wrapperOrigins);
             if (!origin) return;
 
-            const dx = item.body.position.x - origin.x;
-            const dy = item.body.position.y - origin.y;
+            const pos = this.getDisplayPosition(item);
+            if (!pos) return;
+
+            const dx = pos.x - origin.x;
+            const dy = pos.y - origin.y;
 
             item.element.style.setProperty('--phys-x', `${dx}px`);
             item.element.style.setProperty('--phys-y', `${dy}px`);
@@ -1203,6 +1421,7 @@ const PhysicsEngine = {
         const macroVisualActive = MacroMesoBridge.isMacroVisualActive();
         const depthFocusLinks = typeof DepthFocusLinks !== 'undefined' &&
             DepthFocusLinks.shouldDraw();
+        const skipCanvasDraw = this.shouldThrottleMacroCanvas();
 
         if (!macroVisualActive && !depthFocusLinks) {
             if (this.isActive) {
@@ -1224,6 +1443,8 @@ const PhysicsEngine = {
         } else {
             this.isActive = false;
         }
+
+        if (!this.linkCtx || skipCanvasDraw) return;
 
         this.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 

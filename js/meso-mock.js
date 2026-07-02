@@ -10,6 +10,64 @@ const MesoMock = {
     _bakeQueue: [],
     _bakeIdleHandle: null,
 
+    _presentationBakeBatch() {
+        if (typeof isPresentationMode !== 'function' || !isPresentationMode()) {
+            return { structure: 3, texture: 2 };
+        }
+        const p = CONFIG.presentation || {};
+        return {
+            structure: p.mesoBakeStructurePerFrame ?? 6,
+            texture: p.mesoBakeTexturePerFrame ?? 4
+        };
+    },
+
+    _collectMesoWrappers(options = {}) {
+        const wrappers = [];
+        const columnLimit = options.columnLimit ?? 0;
+        const cols = [...document.querySelectorAll('#app.is-meso-column-layout > .meso-grid-column')];
+        const hiveAnchors = document.querySelectorAll(
+            '#app.is-meso-hive-layout .note-wrapper.is-meso-hive-anchored'
+        );
+
+        if (hiveAnchors.length) {
+            wrappers.push(...hiveAnchors);
+        } else if (cols.length) {
+            const useCols = columnLimit > 0 ? cols.slice(0, columnLimit) : cols;
+            useCols.forEach(col => wrappers.push(...col.querySelectorAll('.note-wrapper')));
+        } else {
+            wrappers.push(...document.querySelectorAll('.note-wrapper'));
+        }
+
+        return { wrappers, deferredCols: columnLimit > 0 ? cols.slice(columnLimit) : [] };
+    },
+
+    _scheduleDeferredColumnBakes(cols) {
+        if (!cols?.length) return;
+        const run = () => {
+            if (typeof DepthController !== 'undefined' && DepthController.currentLevel !== 2) return;
+            const itemsById = new Map(
+                (typeof AppState !== 'undefined' ? AppState.items : []).map(item => [String(item.id), item])
+            );
+            cols.forEach(col => {
+                col.querySelectorAll('.note-wrapper').forEach(wrapper => {
+                    const item = itemsById.get(wrapper.dataset.noteId);
+                    if (!item) return;
+                    try {
+                        this.syncGlyphLayout(wrapper, item);
+                    } catch (err) {
+                        console.warn('MesoMock deferred glyph sync failed', wrapper.dataset.noteId, err);
+                    }
+                    this._enqueueBakeJob({ type: 'texture', wrapper, item });
+                });
+            });
+        };
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(run, { timeout: 2500 });
+        } else {
+            setTimeout(run, 120);
+        }
+    },
+
     _enqueueBakeJob(job) {
         this._bakeQueue.push(job);
         if (this._bakeIdleHandle != null) return;
@@ -46,7 +104,8 @@ const MesoMock = {
         }
 
         let extra = 0;
-        while (extra < 3 && this._bakeQueue[0]?.type === 'structure') {
+        const batch = this._presentationBakeBatch();
+        while (extra < batch.structure && this._bakeQueue[0]?.type === 'structure') {
             const next = this._bakeQueue.shift();
             try {
                 this.applyToWrapper(next.wrapper, next.item, { skipBake: true });
@@ -55,7 +114,7 @@ const MesoMock = {
             }
             extra++;
         }
-        while (extra < 2 && this._bakeQueue[0]?.type === 'texture') {
+        while (extra < batch.texture && this._bakeQueue[0]?.type === 'texture') {
             const next = this._bakeQueue.shift();
             try {
                 const glyph = next.wrapper.querySelector('.depth-v2-glyph--meso');
@@ -1964,6 +2023,9 @@ const MesoMock = {
             (typeof AppState !== 'undefined' ? AppState.items : []).map(item => [String(item.id), item])
         );
         let synced = 0;
+        const pres = typeof isPresentationMode === 'function' && isPresentationMode();
+        const columnLimit = pres ? (CONFIG.presentation?.mesoInitialBakeColumns ?? 0) : 0;
+        const { wrappers, deferredCols } = this._collectMesoWrappers({ columnLimit });
 
         document.body.classList.add('is-silhouette-micro-measure');
         try {
@@ -1971,7 +2033,7 @@ const MesoMock = {
             this.invalidateColumnGradientLayout();
             this.buildColumnGradientLayout();
 
-            document.querySelectorAll('.note-wrapper').forEach(wrapper => {
+            wrappers.forEach(wrapper => {
                 const noteId = wrapper.dataset.noteId;
                 const item = noteId ? itemsById.get(noteId) : null;
                 if (!item) return;
@@ -1980,6 +2042,29 @@ const MesoMock = {
             });
         } finally {
             document.body.classList.remove('is-silhouette-micro-measure');
+        }
+
+        if (deferredCols.length) {
+            const runDeferred = () => {
+                if (typeof DepthController !== 'undefined' && DepthController.currentLevel !== 2) return;
+                document.body.classList.add('is-silhouette-micro-measure');
+                try {
+                    deferredCols.forEach(col => {
+                        col.querySelectorAll('.note-wrapper').forEach(wrapper => {
+                            const item = itemsById.get(wrapper.dataset.noteId);
+                            if (!item) return;
+                            this.syncGlyphLayout(wrapper, item);
+                        });
+                    });
+                } finally {
+                    document.body.classList.remove('is-silhouette-micro-measure');
+                }
+            };
+            if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(runDeferred, { timeout: 2000 });
+            } else {
+                setTimeout(runDeferred, 150);
+            }
         }
 
         return synced;
@@ -2000,24 +2085,9 @@ const MesoMock = {
         );
         let queued = 0;
         const textureJobs = [];
-        const wrappers = [];
-
-        const firstCol = document.querySelector('#app.is-meso-column-layout > .meso-grid-column');
-        const hiveAnchors = document.querySelectorAll(
-            '#app.is-meso-hive-layout .note-wrapper.is-meso-hive-anchored'
-        );
-        if (hiveAnchors.length) {
-            wrappers.push(...hiveAnchors);
-        } else if (firstCol) {
-            wrappers.push(...firstCol.querySelectorAll('.note-wrapper'));
-            document.querySelectorAll('#app.is-meso-column-layout > .meso-grid-column').forEach(col => {
-                if (col !== firstCol) {
-                    wrappers.push(...col.querySelectorAll('.note-wrapper'));
-                }
-            });
-        } else {
-            wrappers.push(...document.querySelectorAll('.note-wrapper'));
-        }
+        const pres = typeof isPresentationMode === 'function' && isPresentationMode();
+        const columnLimit = pres ? (CONFIG.presentation?.mesoInitialBakeColumns ?? 0) : 0;
+        const { wrappers, deferredCols } = this._collectMesoWrappers({ columnLimit });
 
         wrappers.forEach(wrapper => {
             const noteId = wrapper.dataset.noteId;
@@ -2046,6 +2116,10 @@ const MesoMock = {
             }
         } else if (typeof DepthController !== 'undefined' && DepthController.currentLevel === 2) {
             requestAnimationFrame(() => this.finishBakeQueueIfIdle());
+        }
+
+        if (deferredCols.length) {
+            this._scheduleDeferredColumnBakes(deferredCols);
         }
 
         return queued;

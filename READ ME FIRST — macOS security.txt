@@ -1,0 +1,49 @@
+macOS BLOCKED THE FILE? — FIX WITH MOUSE ONLY (no keyboard)
+============================================================
+
+You saw: "cannot be opened because it is from an unidentified developer"
+
+That is normal for copied project files. Use ONE of these:
+
+
+METHOD A — RIGHT-CLICK OPEN (easiest)
+-------------------------------------
+1. Find:  Start Local Server.command
+2. RIGHT-CLICK it (or Control+click)
+3. Click:  Open
+4. Click:  Open   again in the small dialog
+5. Terminal opens — wait for "Site is ready"
+6. Next time: double-click works normally
+
+
+METHOD B — SYSTEM SETTINGS (if Method A is not shown)
+-----------------------------------------------------
+1. Try double-clicking Start Local Server.command once (it will fail)
+2. Apple menu (top-left) → System Settings
+3. Click: Privacy & Security
+4. Scroll down — you should see a message about the blocked file
+5. Click:  Open Anyway
+6. Click:  Allow
+7. Double-click Start Local Server.command again
+
+
+METHOD C — USE THE APP INSTEAD
+------------------------------
+1. RIGHT-CLICK  Start Site.app  →  Open  →  Open
+2. It opens the same server launcher
+
+
+AFTER IT WORKS ONCE
+-------------------
+Double-click Start Local Server.command normally.
+Leave Terminal open during the presentation.
+
+
+STILL STUCK?
+------------
+Copy the whole my-website folder again from USB.
+Make sure you have:
+  Start Local Server.command
+  scripts/serve-exhibition.sh
+  data/main.csv
+  data/tags.csv

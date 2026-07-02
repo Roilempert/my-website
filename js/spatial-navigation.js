@@ -16,7 +16,10 @@ const SpatialNavigation = {
         active: false,
         pointerId: null,
         lastX: 0,
-        lastY: 0
+        lastY: 0,
+        startX: 0,
+        startY: 0,
+        didMove: false
     },
 
     init() {
@@ -25,7 +28,11 @@ const SpatialNavigation = {
         window.addEventListener('mousemove', (e) => {
             this.mouseX = e.clientX;
             this.mouseY = e.clientY;
-            if (!this.isScrolling && !this.isPaused && !this.pan.active) this.calculateAndScroll();
+            this.updateDepthPanCursor(e.clientX, e.clientY);
+            if (CONFIG.navigation.edgeScrollEnabled &&
+                !this.isScrolling && !this.isPaused && !this.pan.active) {
+                this.calculateAndScroll();
+            }
         });
 
         window.addEventListener('mouseleave', () => {
@@ -55,13 +62,64 @@ const SpatialNavigation = {
             this.navSurface.addEventListener('pointerdown', this.onPanDown);
         }
         document.addEventListener('pointerdown', (e) => {
-            if (this.spaceHeld) this.handlePanDown(e);
-        });
+            if (this.spaceHeld) {
+                this.handlePanDown(e);
+                return;
+            }
+            if (!e.target?.closest?.('#app')) return;
+            if (e.target === this.navSurface) return;
+            if (!this.canStartPan(e)) return;
+            this.handlePanDown(e);
+        }, { capture: true });
         document.addEventListener('pointermove', this.onPanMove);
         document.addEventListener('pointerup', this.onPanEnd);
         document.addEventListener('pointercancel', this.onPanEnd);
 
         window.addEventListener('scroll', () => this.constrainScrollPosition(), { passive: true });
+
+        window.addEventListener('wheel', (e) => this.handleWheel(e), { passive: false });
+    },
+
+    handleWheel(e) {
+        if (e.ctrlKey) return;
+
+        if (this.isPaused ||
+            (typeof DepthController !== 'undefined' && DepthController.isWheelLocked())) {
+            e.preventDefault();
+            return;
+        }
+
+        if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
+            e.preventDefault();
+            return;
+        }
+
+        if (this.isPanBlockedTarget(e.target)) return;
+
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+            return;
+        }
+
+        e.preventDefault();
+
+        const speed = CONFIG.navigation.wheel?.speed ?? 1;
+        let dx = e.deltaX * speed;
+        let dy = e.deltaY * speed;
+
+        [dx, dy] = this.clampToContent(dx, dy);
+
+        if (dx === 0 && dy === 0) return;
+
+        this.isScrolling = true;
+        window.scrollBy(dx, dy);
+        IdleRefresh.touch();
+        if (typeof NavigationMap !== 'undefined') {
+            NavigationMap.schedulePanUpdate();
+        }
+        requestAnimationFrame(() => {
+            this.isScrolling = false;
+        });
     },
 
     // Soft guard for wheel/trackpad — viewport-relative, RTL-safe
@@ -144,6 +202,82 @@ const SpatialNavigation = {
         };
     },
 
+    isDepthCanvasLevel() {
+        return typeof DepthController !== 'undefined' &&
+            DepthController.currentLevel >= 2 &&
+            typeof DepthV2 !== 'undefined' &&
+            DepthV2.isActive();
+    },
+
+    hitTestDepthNote(clientX, clientY) {
+        if (!this.isDepthCanvasLevel()) return null;
+
+        const level = DepthController.currentLevel;
+        const wrappers = document.querySelectorAll('#app .note-wrapper');
+        let hit = null;
+        let hitArea = Infinity;
+
+        wrappers.forEach((wrapper) => {
+            if (wrapper.classList.contains('is-layout-excluded') ||
+                wrapper.classList.contains('is-molecule-filtered-out')) {
+                return;
+            }
+
+            const target = level === 2
+                ? (wrapper.querySelector('.depth-v2-glyph--meso .meso-mock__frame')
+                    || wrapper.querySelector('.depth-v2-glyph--meso'))
+                : (wrapper.querySelector('.micro-mock__card.note-card')
+                    || wrapper.querySelector('.depth-v2-glyph--micro'));
+            if (!target) return;
+            const rect = target.getBoundingClientRect();
+            if (rect.width < 1 || rect.height < 1) return;
+            if (clientX < rect.left || clientX > rect.right ||
+                clientY < rect.top || clientY > rect.bottom) {
+                return;
+            }
+
+            const area = rect.width * rect.height;
+            if (area < hitArea) {
+                hit = wrapper;
+                hitArea = area;
+            }
+        });
+
+        return hit;
+    },
+
+    dispatchDepthNoteTap(clientX, clientY) {
+        const wrapper = this.hitTestDepthNote(clientX, clientY);
+        if (!wrapper) return false;
+
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(clientX, clientY)) {
+            return false;
+        }
+
+        if (typeof ArtifactInspector !== 'undefined') {
+            if (ArtifactInspector.isActive) {
+                ArtifactInspector.close();
+            } else {
+                ArtifactInspector.open(wrapper);
+            }
+            return true;
+        }
+
+        return false;
+    },
+
+    updateDepthPanCursor(clientX, clientY) {
+        if (!this.navSurface || !this.isDepthCanvasLevel()) {
+            if (this.navSurface) this.navSurface.style.removeProperty('cursor');
+            return;
+        }
+        if (this.pan.active || this.spaceHeld) return;
+
+        const overNote = !!this.hitTestDepthNote(clientX, clientY);
+        this.navSurface.style.cursor = overNote ? 'pointer' : 'grab';
+    },
+
     isPanBlockedTarget(target) {
         if (!(target instanceof Element)) return true;
         if (ArtifactInspector.isActive) return true;
@@ -161,6 +295,10 @@ const SpatialNavigation = {
         if (target === this.navSurface) return true;
         if (target.id === 'app') return true;
 
+        if (this.isDepthCanvasLevel() && target.closest?.('#app')) {
+            return true;
+        }
+
         return false;
     },
 
@@ -173,6 +311,9 @@ const SpatialNavigation = {
         this.pan.pointerId = e.pointerId;
         this.pan.lastX = e.clientX;
         this.pan.lastY = e.clientY;
+        this.pan.startX = e.clientX;
+        this.pan.startY = e.clientY;
+        this.pan.didMove = false;
         this.isScrolling = false;
         document.body.classList.add('is-canvas-panning');
 
@@ -184,6 +325,15 @@ const SpatialNavigation = {
 
     handlePanMove(e) {
         if (!this.pan.active || e.pointerId !== this.pan.pointerId) return;
+
+        if (!this.pan.didMove) {
+            const moved = Math.hypot(
+                e.clientX - this.pan.startX,
+                e.clientY - this.pan.startY
+            );
+            const threshold = CONFIG.depth.clickDragThreshold ?? 6;
+            if (moved >= threshold) this.pan.didMove = true;
+        }
 
         const dx = e.clientX - this.pan.lastX;
         const dy = e.clientY - this.pan.lastY;
@@ -211,6 +361,10 @@ const SpatialNavigation = {
     handlePanEnd(e) {
         if (!this.pan.active || e.pointerId !== this.pan.pointerId) return;
 
+        const wasTap = !this.pan.didMove;
+        const tapX = this.pan.startX;
+        const tapY = this.pan.startY;
+
         this.pan.active = false;
         this.pan.pointerId = null;
         document.body.classList.remove('is-canvas-panning');
@@ -220,12 +374,19 @@ const SpatialNavigation = {
             try { captureEl.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
         }
 
+        if (wasTap && this.isDepthCanvasLevel()) {
+            this.dispatchDepthNoteTap(tapX, tapY);
+        }
+
+        this.updateDepthPanCursor(e.clientX, e.clientY);
+
         if (typeof NavigationMap !== 'undefined') {
             NavigationMap.schedulePanUpdate();
         }
     },
 
     calculateAndScroll() {
+        if (!CONFIG.navigation.edgeScrollEnabled) return;
         if (this.isPaused) return;
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(this.mouseX, this.mouseY)) {

@@ -105,11 +105,38 @@ const AppState = {
         }
     },
 
+    async fetchDataText(key) {
+        const localUrl = CONFIG.data.urls?.[key];
+        const remoteUrl = CONFIG.data.remoteUrls?.[key];
+        const preferLocal = CONFIG.data.preferLocal !== false;
+        const candidates = preferLocal
+            ? [localUrl, remoteUrl]
+            : [remoteUrl, localUrl];
+        const urls = [...new Set(candidates.filter(Boolean))];
+
+        let lastError = null;
+        for (const url of urls) {
+            try {
+                const text = await this.fetchText(url);
+                if (key === 'main' && !preferLocal && url === localUrl) {
+                    console.info(`Data: loaded ${key} from local fallback (${url})`);
+                } else if (key === 'main' || key === 'tags') {
+                    console.info(`Data: loaded ${key} from ${url}`);
+                }
+                return text;
+            } catch (err) {
+                lastError = err;
+                console.warn(`Data fetch failed for ${url}`, err);
+            }
+        }
+        throw lastError || new Error(`No data source configured for ${key}`);
+    },
+
     async buildDataPipeline() {
-        const tagsCsv = await this.fetchText(CONFIG.data.urls.tags);
+        const tagsCsv = await this.fetchDataText('tags');
         this.parseTagsDictionary(tagsCsv);
 
-        const mainCsv = await this.fetchText(CONFIG.data.urls.main);
+        const mainCsv = await this.fetchDataText('main');
         this.items = this.parseMainNotes(mainCsv);
     },
 
@@ -1526,6 +1553,64 @@ const MesoMock = {
     _bakeQueue: [],
     _bakeIdleHandle: null,
 
+    _presentationBakeBatch() {
+        if (typeof isPresentationMode !== 'function' || !isPresentationMode()) {
+            return { structure: 3, texture: 2 };
+        }
+        const p = CONFIG.presentation || {};
+        return {
+            structure: p.mesoBakeStructurePerFrame ?? 6,
+            texture: p.mesoBakeTexturePerFrame ?? 4
+        };
+    },
+
+    _collectMesoWrappers(options = {}) {
+        const wrappers = [];
+        const columnLimit = options.columnLimit ?? 0;
+        const cols = [...document.querySelectorAll('#app.is-meso-column-layout > .meso-grid-column')];
+        const hiveAnchors = document.querySelectorAll(
+            '#app.is-meso-hive-layout .note-wrapper.is-meso-hive-anchored'
+        );
+
+        if (hiveAnchors.length) {
+            wrappers.push(...hiveAnchors);
+        } else if (cols.length) {
+            const useCols = columnLimit > 0 ? cols.slice(0, columnLimit) : cols;
+            useCols.forEach(col => wrappers.push(...col.querySelectorAll('.note-wrapper')));
+        } else {
+            wrappers.push(...document.querySelectorAll('.note-wrapper'));
+        }
+
+        return { wrappers, deferredCols: columnLimit > 0 ? cols.slice(columnLimit) : [] };
+    },
+
+    _scheduleDeferredColumnBakes(cols) {
+        if (!cols?.length) return;
+        const run = () => {
+            if (typeof DepthController !== 'undefined' && DepthController.currentLevel !== 2) return;
+            const itemsById = new Map(
+                (typeof AppState !== 'undefined' ? AppState.items : []).map(item => [String(item.id), item])
+            );
+            cols.forEach(col => {
+                col.querySelectorAll('.note-wrapper').forEach(wrapper => {
+                    const item = itemsById.get(wrapper.dataset.noteId);
+                    if (!item) return;
+                    try {
+                        this.syncGlyphLayout(wrapper, item);
+                    } catch (err) {
+                        console.warn('MesoMock deferred glyph sync failed', wrapper.dataset.noteId, err);
+                    }
+                    this._enqueueBakeJob({ type: 'texture', wrapper, item });
+                });
+            });
+        };
+        if (typeof requestIdleCallback === 'function') {
+            requestIdleCallback(run, { timeout: 2500 });
+        } else {
+            setTimeout(run, 120);
+        }
+    },
+
     _enqueueBakeJob(job) {
         this._bakeQueue.push(job);
         if (this._bakeIdleHandle != null) return;
@@ -1562,7 +1647,8 @@ const MesoMock = {
         }
 
         let extra = 0;
-        while (extra < 3 && this._bakeQueue[0]?.type === 'structure') {
+        const batch = this._presentationBakeBatch();
+        while (extra < batch.structure && this._bakeQueue[0]?.type === 'structure') {
             const next = this._bakeQueue.shift();
             try {
                 this.applyToWrapper(next.wrapper, next.item, { skipBake: true });
@@ -1571,7 +1657,7 @@ const MesoMock = {
             }
             extra++;
         }
-        while (extra < 2 && this._bakeQueue[0]?.type === 'texture') {
+        while (extra < batch.texture && this._bakeQueue[0]?.type === 'texture') {
             const next = this._bakeQueue.shift();
             try {
                 const glyph = next.wrapper.querySelector('.depth-v2-glyph--meso');
@@ -3480,6 +3566,9 @@ const MesoMock = {
             (typeof AppState !== 'undefined' ? AppState.items : []).map(item => [String(item.id), item])
         );
         let synced = 0;
+        const pres = typeof isPresentationMode === 'function' && isPresentationMode();
+        const columnLimit = pres ? (CONFIG.presentation?.mesoInitialBakeColumns ?? 0) : 0;
+        const { wrappers, deferredCols } = this._collectMesoWrappers({ columnLimit });
 
         document.body.classList.add('is-silhouette-micro-measure');
         try {
@@ -3487,7 +3576,7 @@ const MesoMock = {
             this.invalidateColumnGradientLayout();
             this.buildColumnGradientLayout();
 
-            document.querySelectorAll('.note-wrapper').forEach(wrapper => {
+            wrappers.forEach(wrapper => {
                 const noteId = wrapper.dataset.noteId;
                 const item = noteId ? itemsById.get(noteId) : null;
                 if (!item) return;
@@ -3496,6 +3585,29 @@ const MesoMock = {
             });
         } finally {
             document.body.classList.remove('is-silhouette-micro-measure');
+        }
+
+        if (deferredCols.length) {
+            const runDeferred = () => {
+                if (typeof DepthController !== 'undefined' && DepthController.currentLevel !== 2) return;
+                document.body.classList.add('is-silhouette-micro-measure');
+                try {
+                    deferredCols.forEach(col => {
+                        col.querySelectorAll('.note-wrapper').forEach(wrapper => {
+                            const item = itemsById.get(wrapper.dataset.noteId);
+                            if (!item) return;
+                            this.syncGlyphLayout(wrapper, item);
+                        });
+                    });
+                } finally {
+                    document.body.classList.remove('is-silhouette-micro-measure');
+                }
+            };
+            if (typeof requestIdleCallback === 'function') {
+                requestIdleCallback(runDeferred, { timeout: 2000 });
+            } else {
+                setTimeout(runDeferred, 150);
+            }
         }
 
         return synced;
@@ -3516,24 +3628,9 @@ const MesoMock = {
         );
         let queued = 0;
         const textureJobs = [];
-        const wrappers = [];
-
-        const firstCol = document.querySelector('#app.is-meso-column-layout > .meso-grid-column');
-        const hiveAnchors = document.querySelectorAll(
-            '#app.is-meso-hive-layout .note-wrapper.is-meso-hive-anchored'
-        );
-        if (hiveAnchors.length) {
-            wrappers.push(...hiveAnchors);
-        } else if (firstCol) {
-            wrappers.push(...firstCol.querySelectorAll('.note-wrapper'));
-            document.querySelectorAll('#app.is-meso-column-layout > .meso-grid-column').forEach(col => {
-                if (col !== firstCol) {
-                    wrappers.push(...col.querySelectorAll('.note-wrapper'));
-                }
-            });
-        } else {
-            wrappers.push(...document.querySelectorAll('.note-wrapper'));
-        }
+        const pres = typeof isPresentationMode === 'function' && isPresentationMode();
+        const columnLimit = pres ? (CONFIG.presentation?.mesoInitialBakeColumns ?? 0) : 0;
+        const { wrappers, deferredCols } = this._collectMesoWrappers({ columnLimit });
 
         wrappers.forEach(wrapper => {
             const noteId = wrapper.dataset.noteId;
@@ -3562,6 +3659,10 @@ const MesoMock = {
             }
         } else if (typeof DepthController !== 'undefined' && DepthController.currentLevel === 2) {
             requestAnimationFrame(() => this.finishBakeQueueIfIdle());
+        }
+
+        if (deferredCols.length) {
+            this._scheduleDeferredColumnBakes(deferredCols);
         }
 
         return queued;
@@ -6316,8 +6417,13 @@ const DepthV2 = {
                 const itemsById = new Map(
                     (typeof AppState !== 'undefined' ? AppState.items : []).map(item => [String(item.id), item])
                 );
+                const pres = typeof isPresentationMode === 'function' && isPresentationMode();
+                const columnLimit = pres ? (CONFIG.presentation?.mesoInitialBakeColumns ?? 0) : 0;
+                const { wrappers } = typeof MesoMock._collectMesoWrappers === 'function'
+                    ? MesoMock._collectMesoWrappers({ columnLimit })
+                    : { wrappers: [...document.querySelectorAll('.note-wrapper')] };
 
-                document.querySelectorAll('.note-wrapper').forEach(wrapper => {
+                wrappers.forEach(wrapper => {
                     const item = itemsById.get(wrapper.dataset.noteId);
                     if (!item || wrapper.querySelector('.meso-mock__frame')) return;
                     try {
@@ -6712,8 +6818,6 @@ const DepthController = {
     lastScrollTime: 0,
     cooldownDelay: CONFIG.depth.cooldownDelay,
     _wheelLockUntil: 0,
-    _wheelDelta: 0,
-    _wheelDeltaTimer: null,
     _levelChangeActive: false,
     _microRevealRaf: null,
     _microTransitionFrom: null,
@@ -6761,35 +6865,12 @@ const DepthController = {
         this.lockWheelAfterTransition();
     },
 
-    _accumulateWheelDelta(deltaY) {
-        const windowMs = CONFIG.depth.wheelAccumWindow ?? 120;
-        this._wheelDelta += deltaY;
-
-        if (this._wheelDeltaTimer) clearTimeout(this._wheelDeltaTimer);
-        this._wheelDeltaTimer = setTimeout(() => {
-            this._wheelDelta = 0;
-            this._wheelDeltaTimer = null;
-        }, windowMs);
-    },
-
-    _consumeWheelIntent(deltaY) {
-        const threshold = CONFIG.depth.wheelThreshold;
-        this._accumulateWheelDelta(deltaY);
-
-        if (Math.abs(this._wheelDelta) < threshold) return 0;
-
-        const direction = this._wheelDelta > 0 ? 1 : -1;
-        this._wheelDelta = 0;
-        if (this._wheelDeltaTimer) {
-            clearTimeout(this._wheelDeltaTimer);
-            this._wheelDeltaTimer = null;
-        }
-        return direction;
-    },
-
     syncViewLevelClass(level = this.currentLevel) {
         [1, 2, 3].forEach(l => document.body.classList.remove(`view-level-${l}`));
         document.body.classList.add(`view-level-${level}`);
+        if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.setMacroPhysicsActive) {
+            PhysicsEngine.setMacroPhysicsActive(level === 1);
+        }
         applySiteGridTokens(document.documentElement, level);
         if (typeof NavigationMap !== 'undefined') {
             NavigationMap.onLevelChange(level);
@@ -6832,32 +6913,6 @@ const DepthController = {
         } catch (err) {
             console.error('DepthV2.init failed:', err);
         }
-
-        window.addEventListener('wheel', (e) => {
-            if (e.ctrlKey) {
-                e.preventDefault();
-                return;
-            }
-            e.preventDefault();
-            const wheelDelta = CONFIG.depth.wheelZoomInvert ? -e.deltaY : e.deltaY;
-            if (ArtifactInspector.isActive) {
-                if (this.isWheelLocked()) return;
-                const intent = this._consumeWheelIntent(wheelDelta);
-                const zoomOutIntent = CONFIG.depth.wheelZoomInvert ? intent < 0 : intent > 0;
-                if (intent !== 0 && zoomOutIntent) {
-                    ArtifactInspector.close();
-                }
-                return;
-            }
-            if (this.isWheelLocked()) return;
-
-            const intent = this._consumeWheelIntent(wheelDelta);
-            if (intent > 0) {
-                this.zoomOut();
-            } else if (intent < 0) {
-                this.zoomIn();
-            }
-        }, { passive: false });
 
         window.addEventListener('keydown', (e) => {
             const keysToBlock = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'];
@@ -7255,7 +7310,10 @@ const SpatialNavigation = {
         active: false,
         pointerId: null,
         lastX: 0,
-        lastY: 0
+        lastY: 0,
+        startX: 0,
+        startY: 0,
+        didMove: false
     },
 
     init() {
@@ -7264,7 +7322,11 @@ const SpatialNavigation = {
         window.addEventListener('mousemove', (e) => {
             this.mouseX = e.clientX;
             this.mouseY = e.clientY;
-            if (!this.isScrolling && !this.isPaused && !this.pan.active) this.calculateAndScroll();
+            this.updateDepthPanCursor(e.clientX, e.clientY);
+            if (CONFIG.navigation.edgeScrollEnabled &&
+                !this.isScrolling && !this.isPaused && !this.pan.active) {
+                this.calculateAndScroll();
+            }
         });
 
         window.addEventListener('mouseleave', () => {
@@ -7294,13 +7356,64 @@ const SpatialNavigation = {
             this.navSurface.addEventListener('pointerdown', this.onPanDown);
         }
         document.addEventListener('pointerdown', (e) => {
-            if (this.spaceHeld) this.handlePanDown(e);
-        });
+            if (this.spaceHeld) {
+                this.handlePanDown(e);
+                return;
+            }
+            if (!e.target?.closest?.('#app')) return;
+            if (e.target === this.navSurface) return;
+            if (!this.canStartPan(e)) return;
+            this.handlePanDown(e);
+        }, { capture: true });
         document.addEventListener('pointermove', this.onPanMove);
         document.addEventListener('pointerup', this.onPanEnd);
         document.addEventListener('pointercancel', this.onPanEnd);
 
         window.addEventListener('scroll', () => this.constrainScrollPosition(), { passive: true });
+
+        window.addEventListener('wheel', (e) => this.handleWheel(e), { passive: false });
+    },
+
+    handleWheel(e) {
+        if (e.ctrlKey) return;
+
+        if (this.isPaused ||
+            (typeof DepthController !== 'undefined' && DepthController.isWheelLocked())) {
+            e.preventDefault();
+            return;
+        }
+
+        if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
+            e.preventDefault();
+            return;
+        }
+
+        if (this.isPanBlockedTarget(e.target)) return;
+
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+            return;
+        }
+
+        e.preventDefault();
+
+        const speed = CONFIG.navigation.wheel?.speed ?? 1;
+        let dx = e.deltaX * speed;
+        let dy = e.deltaY * speed;
+
+        [dx, dy] = this.clampToContent(dx, dy);
+
+        if (dx === 0 && dy === 0) return;
+
+        this.isScrolling = true;
+        window.scrollBy(dx, dy);
+        IdleRefresh.touch();
+        if (typeof NavigationMap !== 'undefined') {
+            NavigationMap.schedulePanUpdate();
+        }
+        requestAnimationFrame(() => {
+            this.isScrolling = false;
+        });
     },
 
     // Soft guard for wheel/trackpad — viewport-relative, RTL-safe
@@ -7383,6 +7496,82 @@ const SpatialNavigation = {
         };
     },
 
+    isDepthCanvasLevel() {
+        return typeof DepthController !== 'undefined' &&
+            DepthController.currentLevel >= 2 &&
+            typeof DepthV2 !== 'undefined' &&
+            DepthV2.isActive();
+    },
+
+    hitTestDepthNote(clientX, clientY) {
+        if (!this.isDepthCanvasLevel()) return null;
+
+        const level = DepthController.currentLevel;
+        const wrappers = document.querySelectorAll('#app .note-wrapper');
+        let hit = null;
+        let hitArea = Infinity;
+
+        wrappers.forEach((wrapper) => {
+            if (wrapper.classList.contains('is-layout-excluded') ||
+                wrapper.classList.contains('is-molecule-filtered-out')) {
+                return;
+            }
+
+            const target = level === 2
+                ? (wrapper.querySelector('.depth-v2-glyph--meso .meso-mock__frame')
+                    || wrapper.querySelector('.depth-v2-glyph--meso'))
+                : (wrapper.querySelector('.micro-mock__card.note-card')
+                    || wrapper.querySelector('.depth-v2-glyph--micro'));
+            if (!target) return;
+            const rect = target.getBoundingClientRect();
+            if (rect.width < 1 || rect.height < 1) return;
+            if (clientX < rect.left || clientX > rect.right ||
+                clientY < rect.top || clientY > rect.bottom) {
+                return;
+            }
+
+            const area = rect.width * rect.height;
+            if (area < hitArea) {
+                hit = wrapper;
+                hitArea = area;
+            }
+        });
+
+        return hit;
+    },
+
+    dispatchDepthNoteTap(clientX, clientY) {
+        const wrapper = this.hitTestDepthNote(clientX, clientY);
+        if (!wrapper) return false;
+
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(clientX, clientY)) {
+            return false;
+        }
+
+        if (typeof ArtifactInspector !== 'undefined') {
+            if (ArtifactInspector.isActive) {
+                ArtifactInspector.close();
+            } else {
+                ArtifactInspector.open(wrapper);
+            }
+            return true;
+        }
+
+        return false;
+    },
+
+    updateDepthPanCursor(clientX, clientY) {
+        if (!this.navSurface || !this.isDepthCanvasLevel()) {
+            if (this.navSurface) this.navSurface.style.removeProperty('cursor');
+            return;
+        }
+        if (this.pan.active || this.spaceHeld) return;
+
+        const overNote = !!this.hitTestDepthNote(clientX, clientY);
+        this.navSurface.style.cursor = overNote ? 'pointer' : 'grab';
+    },
+
     isPanBlockedTarget(target) {
         if (!(target instanceof Element)) return true;
         if (ArtifactInspector.isActive) return true;
@@ -7400,6 +7589,10 @@ const SpatialNavigation = {
         if (target === this.navSurface) return true;
         if (target.id === 'app') return true;
 
+        if (this.isDepthCanvasLevel() && target.closest?.('#app')) {
+            return true;
+        }
+
         return false;
     },
 
@@ -7412,6 +7605,9 @@ const SpatialNavigation = {
         this.pan.pointerId = e.pointerId;
         this.pan.lastX = e.clientX;
         this.pan.lastY = e.clientY;
+        this.pan.startX = e.clientX;
+        this.pan.startY = e.clientY;
+        this.pan.didMove = false;
         this.isScrolling = false;
         document.body.classList.add('is-canvas-panning');
 
@@ -7423,6 +7619,15 @@ const SpatialNavigation = {
 
     handlePanMove(e) {
         if (!this.pan.active || e.pointerId !== this.pan.pointerId) return;
+
+        if (!this.pan.didMove) {
+            const moved = Math.hypot(
+                e.clientX - this.pan.startX,
+                e.clientY - this.pan.startY
+            );
+            const threshold = CONFIG.depth.clickDragThreshold ?? 6;
+            if (moved >= threshold) this.pan.didMove = true;
+        }
 
         const dx = e.clientX - this.pan.lastX;
         const dy = e.clientY - this.pan.lastY;
@@ -7450,6 +7655,10 @@ const SpatialNavigation = {
     handlePanEnd(e) {
         if (!this.pan.active || e.pointerId !== this.pan.pointerId) return;
 
+        const wasTap = !this.pan.didMove;
+        const tapX = this.pan.startX;
+        const tapY = this.pan.startY;
+
         this.pan.active = false;
         this.pan.pointerId = null;
         document.body.classList.remove('is-canvas-panning');
@@ -7459,12 +7668,19 @@ const SpatialNavigation = {
             try { captureEl.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
         }
 
+        if (wasTap && this.isDepthCanvasLevel()) {
+            this.dispatchDepthNoteTap(tapX, tapY);
+        }
+
+        this.updateDepthPanCursor(e.clientX, e.clientY);
+
         if (typeof NavigationMap !== 'undefined') {
             NavigationMap.schedulePanUpdate();
         }
     },
 
     calculateAndScroll() {
+        if (!CONFIG.navigation.edgeScrollEnabled) return;
         if (this.isPaused) return;
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(this.mouseX, this.mouseY)) {
@@ -10391,9 +10607,88 @@ const PhysicsEngine = {
     moleculeClickIntent: null,
     moleculeIdBadge: null,
     transitionFrozen: false,
+    runnerEnabled: false,
+    syncLoopLastTs: 0,
+    navPhysicsTickLastTs: 0,
+    renderStepTs: 0,
 
     setTransitionFrozen(value) {
         this.transitionFrozen = !!value;
+    },
+
+    setMacroPhysicsActive(active) {
+        if (!this.runner || !this.engine) return;
+        const shouldRun = !!active;
+        if (shouldRun === this.runnerEnabled) return;
+        if (shouldRun) {
+            Matter.Runner.run(this.runner, this.engine);
+        } else {
+            Matter.Runner.stop(this.runner);
+        }
+        this.runnerEnabled = shouldRun;
+    },
+
+    shouldThrottleMacroCanvas() {
+        if (CONFIG.presentation?.displayInterp) return false;
+        if (typeof isPresentationMode !== 'function' || !isPresentationMode()) return false;
+        const targetFps = CONFIG.presentation?.targetFps ?? 0;
+        if (!targetFps || targetFps >= 60) return false;
+        const minDelta = 1000 / targetFps;
+        const now = performance.now();
+        if (now - this.syncLoopLastTs < minDelta) return true;
+        this.syncLoopLastTs = now;
+        return false;
+    },
+
+    captureRenderSnapshot() {
+        const now = performance.now();
+        this.bodiesData.forEach(item => {
+            if (!item.body) return;
+            const x = item.body.position.x;
+            const y = item.body.position.y;
+            if (item._renderToX == null) {
+                item._renderFromX = x;
+                item._renderFromY = y;
+            } else {
+                item._renderFromX = item._renderToX;
+                item._renderFromY = item._renderToY;
+            }
+            item._renderToX = x;
+            item._renderToY = y;
+        });
+        this.renderStepTs = now;
+    },
+
+    getDisplayPosition(item) {
+        const body = item.body;
+        if (!body) return null;
+
+        const useInterp = typeof isPresentationMode === 'function' &&
+            isPresentationMode() &&
+            CONFIG.presentation?.displayInterp !== false &&
+            item._renderToX != null;
+
+        if (!useInterp) {
+            return { x: body.position.x, y: body.position.y };
+        }
+
+        const physFps = CONFIG.presentation?.physicsFps ?? 30;
+        const stepMs = 1000 / physFps;
+        const sinceStep = performance.now() - (this.renderStepTs || 0);
+        let alpha = Math.min(1, sinceStep / stepMs);
+        alpha = alpha * alpha * (3 - 2 * alpha);
+
+        return {
+            x: item._renderFromX + (item._renderToX - item._renderFromX) * alpha,
+            y: item._renderFromY + (item._renderToY - item._renderFromY) * alpha
+        };
+    },
+
+    getItemDrawPosition(item) {
+        const pos = this.getDisplayPosition(item);
+        if (pos) return pos;
+        const body = item.body;
+        return body ? { x: body.position.x, y: body.position.y } : null;
     },
 
     init() {
@@ -10473,6 +10768,8 @@ const PhysicsEngine = {
 
                 const rawTarget = item.overrideTarget;
                 const isStretchedNote = ActionWarehouse.stretchedNotes.has(item.noteIndex);
+                if (isStretchedNote && rawTarget && captureBlockCount >= 2) return;
+
                 const smoothTarget = item.smoothTarget;
                 const smoothLag = rawTarget && smoothTarget
                     ? Math.hypot(rawTarget.x - smoothTarget.x, rawTarget.y - smoothTarget.y)
@@ -10487,12 +10784,20 @@ const PhysicsEngine = {
                 let pullTarget = useRawTarget
                     ? rawTarget
                     : (rawTarget && smoothTarget ? smoothTarget : rawTarget);
-                if (rawTarget && smoothTarget && captureBlockCount >= 5 && smoothLag < scale(14)) {
-                    pullTarget = rawTarget;
-                }
-                if (rawTarget && smoothTarget && isStretchedNote &&
-                    captureBlockCount >= 5 && smoothLag > scale(10)) {
-                    pullTarget = rawTarget;
+                if (rawTarget && smoothTarget && !useRawTarget && !isStretchedNote) {
+                    const bodyDist = Math.hypot(
+                        rawTarget.x - item.body.position.x,
+                        rawTarget.y - item.body.position.y
+                    );
+                    const far = scale(60);
+                    const near = scale(14);
+                    const span = Math.max(scale(8), far - near);
+                    const t = Math.max(0, Math.min(1, (bodyDist - near) / span));
+                    const chase = CONFIG.physics.targetSmoothing.captureChase ?? 0.38;
+                    pullTarget = {
+                        x: smoothTarget.x + (rawTarget.x - smoothTarget.x) * t * chase,
+                        y: smoothTarget.y + (rawTarget.y - smoothTarget.y) * t * chase
+                    };
                 }
                 if (rawTarget && captureBlockCount === 5 && !isStretchedNote && smoothTarget) {
                     const bodyOrbit = Math.hypot(
@@ -10654,7 +10959,12 @@ const PhysicsEngine = {
 
             const blockCount = ActionWarehouse.getCrowdedBlockCount();
             const hasStretch = ActionWarehouse.stretchedNotes.size > 0;
-            const passes = hasStretch ? 2 : 1;
+            const pres = typeof isPresentationMode === 'function' && isPresentationMode();
+            const passCap = CONFIG.presentation?.physicsPassCapAtBlocks ?? 0;
+            let passes = hasStretch ? 2 : 1;
+            if (pres && passCap > 0 && blockCount >= passCap && !hasStretch) {
+                passes = 1;
+            }
 
             const molecules = this.buildMoleculeHulls();
 
@@ -10670,16 +10980,44 @@ const PhysicsEngine = {
             }
 
             this.syncStretchSiblingSprings();
+            this.applyStretchKinematicFollow();
             this.applyKinematicCaptureFollow();
             this.applyMotionSettling();
 
             if (typeof NavigationMap !== 'undefined') {
-                NavigationMap.notifyPhysicsTick();
+                const throttleMs = (pres && CONFIG.presentation?.navMapPhysicsThrottleMs)
+                    ? CONFIG.presentation.navMapPhysicsThrottleMs
+                    : 0;
+                if (throttleMs > 0) {
+                    const now = performance.now();
+                    if (now - this.navPhysicsTickLastTs >= throttleMs) {
+                        this.navPhysicsTickLastTs = now;
+                        NavigationMap.notifyPhysicsTick();
+                    }
+                } else {
+                    NavigationMap.notifyPhysicsTick();
+                }
             }
+
+            this.captureRenderSnapshot();
         });
 
-        this.runner = Matter.Runner.create();
-        Matter.Runner.run(this.runner, this.engine);
+        this.runner = Matter.Runner.create(
+            (typeof isPresentationMode === 'function' && isPresentationMode())
+                ? {
+                    delta: 1000 / (CONFIG.presentation?.physicsFps ?? 30),
+                    isFixed: true
+                }
+                : undefined
+        );
+        const startRunner = typeof DepthController === 'undefined' ||
+            DepthController.currentLevel === 1;
+        if (startRunner) {
+            Matter.Runner.run(this.runner, this.engine);
+            this.runnerEnabled = true;
+        } else {
+            this.runnerEnabled = false;
+        }
 
         this.syncLoop();
     },
@@ -10770,6 +11108,23 @@ const PhysicsEngine = {
                     const dist = Math.hypot(dx, dy);
                     if (useBroadPhase && dist >= molA.radius + molB.radius + broadGap) continue;
 
+                    if (CONFIG.presentation?.hullCollisionDistanceCull &&
+                        typeof isPresentationMode === 'function' && isPresentationMode()) {
+                        const viewDiag = Math.hypot(window.innerWidth, window.innerHeight);
+                        const viewMul = CONFIG.presentation.hullCollisionViewCull ?? 1.45;
+                        const maxDist = viewDiag * viewMul + molA.radius + molB.radius;
+                        if (dist > maxDist) continue;
+                    }
+
+                    const stretched = ActionWarehouse.stretchedNotes;
+                    if (stretched.has(molA.noteIndex) && stretched.has(molB.noteIndex)) {
+                        const bindA = ActionWarehouse.stretchBindingByNote.get(molA.noteIndex);
+                        const bindB = ActionWarehouse.stretchBindingByNote.get(molB.noteIndex);
+                        const keyA = bindA ? ActionWarehouse.getStretchGroupKey(bindA) : '';
+                        const keyB = bindB ? ActionWarehouse.getStretchGroupKey(bindB) : '';
+                        if (keyA && keyA === keyB) continue;
+                    }
+
                     for (let ai = 0; ai < molA.dots.length; ai++) {
                         const dotA = molA.dots[ai];
                         if (dotA.isFiltered) continue;
@@ -10789,6 +11144,11 @@ const PhysicsEngine = {
     },
 
     separateOutlineShellPair(dotA, dotB, minDist, capturedWeight, kinematic, multiBlock) {
+        if (ActionWarehouse.stretchedNotes.has(dotA.noteIndex) ||
+            ActionWarehouse.stretchedNotes.has(dotB.noteIndex)) {
+            return;
+        }
+
         const staticA = !dotA.body || dotA.onBankGrid || dotA.body.isStatic;
         const staticB = !dotB.body || dotB.onBankGrid || dotB.body.isStatic;
         let wA = staticA ? 0 : (dotA.overrideTarget ? capturedWeight : 1);
@@ -10999,13 +11359,52 @@ const PhysicsEngine = {
                 return;
             }
 
-            link.constraint.stiffness = stretchStiff;
+            const blockCount = ActionWarehouse.getCrowdedBlockCount();
+            link.constraint.stiffness = (blockCount >= 2 && !ActionWarehouse.isKinematicCaptureMode(blockCount))
+                ? 0
+                : stretchStiff;
             const ax = link.bodyA.position.x;
             const ay = link.bodyA.position.y;
             const bx = link.bodyB.position.x;
             const by = link.bodyB.position.y;
             const dist = Math.hypot(bx - ax, by - ay) || linkCfg.siblingLength;
             link.constraint.length = Math.max(linkCfg.siblingLength, dist * slack);
+        });
+    },
+
+    applyStretchKinematicFollow() {
+        const blockCount = ActionWarehouse.getCrowdedBlockCount();
+        if (blockCount < 2 || ActionWarehouse.stretchedNotes.size === 0) return;
+        if (ActionWarehouse.isKinematicCaptureMode(blockCount)) return;
+
+        const cfg = CONFIG.physics.crowdedBlock;
+        const pres = typeof isPresentationMode === 'function' && isPresentationMode();
+        const dragging = ActionWarehouse.isAnyCaptureBlockDragging();
+        let lerp = pres
+            ? (CONFIG.presentation?.kinematicStretchLerp ?? 0.2)
+            : (cfg.kinematicLerpStretch ?? 0.16);
+        if (dragging) {
+            lerp = pres
+                ? (CONFIG.presentation?.kinematicStretchLerpDrag ?? 0.26)
+                : (cfg.kinematicSmoothLerpStretch ?? 0.2);
+        }
+        let maxStep = scale(dragging ? (cfg.kinematicMaxStepDrag ?? 3.6) : (cfg.kinematicMaxStep ?? 2.4));
+
+        this.bodiesData.forEach(item => {
+            if (!ActionWarehouse.stretchedNotes.has(item.noteIndex)) return;
+            if (!item.overrideTarget || item.onBankGrid || item.isFiltered || item.isFilterExiting) return;
+            const tgt = item.overrideTarget;
+            const body = item.body;
+            if (!body || body.isStatic) return;
+
+            const lag = Math.hypot(tgt.x - body.position.x, tgt.y - body.position.y);
+            const stepCap = ActionWarehouse.kinematicAdaptiveMaxStep(maxStep, lag, cfg);
+            const next = ActionWarehouse.kinematicLerpToward(
+                body.position.x, body.position.y, tgt.x, tgt.y, lerp, stepCap
+            );
+            Matter.Body.setPosition(body, next);
+            Matter.Body.setVelocity(body, { x: 0, y: 0 });
+            Matter.Body.setAngularVelocity(body, 0);
         });
     },
 
@@ -11078,6 +11477,8 @@ const PhysicsEngine = {
             const body = item.body;
             if (item.onBankGrid || body.isStatic) return;
             if (kinematicCapture && item.overrideTarget) return;
+            if (ActionWarehouse.stretchedNotes.has(item.noteIndex) &&
+                item.overrideTarget && blockCount >= 2) return;
 
             let vx = body.velocity.x;
             let vy = body.velocity.y;
@@ -11149,6 +11550,10 @@ const PhysicsEngine = {
                     vx = (vx / speed) * transitCap;
                     vy = (vy / speed) * transitCap;
                 }
+            } else if (item.overrideTarget && speed > transitCap * 0.52) {
+                vx = (vx / speed) * transitCap * 0.52;
+                vy = (vy / speed) * transitCap * 0.52;
+                speed = Math.hypot(vx, vy);
             } else if (speed < cfg.nearJitterSpeed) {
                 vx *= cfg.nearDamping;
                 vy *= cfg.nearDamping;
@@ -11213,8 +11618,11 @@ const PhysicsEngine = {
 
             for (let i = 0; i < dots.length; i++) {
                 for (let j = i + 1; j < dots.length; j++) {
-                    const dx = dots[i].body.position.x - dots[j].body.position.x;
-                    const dy = dots[i].body.position.y - dots[j].body.position.y;
+                    const pi = this.getItemDrawPosition(dots[i]);
+                    const pj = this.getItemDrawPosition(dots[j]);
+                    if (!pi || !pj) continue;
+                    const dx = pi.x - pj.x;
+                    const dy = pi.y - pj.y;
                     candidates.push({ i, j, distSq: dx * dx + dy * dy });
                 }
             }
@@ -11227,8 +11635,9 @@ const PhysicsEngine = {
                 const key = i < j ? `${i}-${j}` : `${j}-${i}`;
                 if (drawnPairs.has(key)) return false;
                 drawnPairs.add(key);
-                const a = dots[i].body.position;
-                const b = dots[j].body.position;
+                const a = this.getItemDrawPosition(dots[i]);
+                const b = this.getItemDrawPosition(dots[j]);
+                if (!a || !b) return false;
                 ctx.moveTo(a.x - scrollX, a.y - scrollY);
                 ctx.lineTo(b.x - scrollX, b.y - scrollY);
                 degree[i]++;
@@ -11252,8 +11661,11 @@ const PhysicsEngine = {
                     let bestDist = Infinity;
                     for (let j = 0; j < dots.length; j++) {
                         if (i === j) continue;
-                        const dx = dot.body.position.x - dots[j].body.position.x;
-                        const dy = dot.body.position.y - dots[j].body.position.y;
+                        const pi = this.getItemDrawPosition(dot);
+                        const pj = this.getItemDrawPosition(dots[j]);
+                        if (!pi || !pj) continue;
+                        const dx = pi.x - pj.x;
+                        const dy = pi.y - pj.y;
                         const distSq = dx * dx + dy * dy;
                         if (distSq < bestDist) {
                             bestDist = distSq;
@@ -11282,10 +11694,12 @@ const PhysicsEngine = {
         const groups = new Map();
         this.bodiesData.forEach(item => {
             if (item.isFiltered) return;
+            const pos = this.getItemDrawPosition(item);
+            if (!pos) return;
             if (!groups.has(item.noteIndex)) groups.set(item.noteIndex, []);
             groups.get(item.noteIndex).push({
-                x: item.body.position.x - scrollX,
-                y: item.body.position.y - scrollY,
+                x: pos.x - scrollX,
+                y: pos.y - scrollY,
                 r: item.body.circleRadius
             });
         });
@@ -11293,8 +11707,24 @@ const PhysicsEngine = {
         ctx.strokeStyle = this.linkColor;
         ctx.lineWidth = cfg.width;
 
+        const presCull = CONFIG.presentation?.outlineViewportCull &&
+            typeof isPresentationMode === 'function' && isPresentationMode();
+        const viewPad = CONFIG.outlines.padding + CONFIG.physics.body.radius + 48;
+        const vw = window.innerWidth;
+        const vh = window.innerHeight;
+
         groups.forEach((pts, noteIndex) => {
             if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
+
+            if (presCull) {
+                let cx = 0;
+                let cy = 0;
+                pts.forEach(p => { cx += p.x; cy += p.y; });
+                cx /= pts.length;
+                cy /= pts.length;
+                if (cx < -viewPad || cx > vw + viewPad || cy < -viewPad || cy > vh + viewPad) return;
+            }
+
             const isHover = noteIndex === this.hoveredNoteIndex;
             ctx.lineWidth = isHover ? (cfg.hoverWidth ?? cfg.width * 2.5) : cfg.width;
             const R = pts[0].r + cfg.padding;
@@ -11529,6 +11959,7 @@ const PhysicsEngine = {
 
         ActionWarehouse.refreshWorkspaceGrid();
         ActionWarehouse.updateDotFocusFilter();
+        this.captureRenderSnapshot();
     },
 
     getLiveWrapperOrigin(noteIndex, cache) {
@@ -11557,8 +11988,11 @@ const PhysicsEngine = {
             const origin = this.getLiveWrapperOrigin(item.noteIndex, wrapperOrigins);
             if (!origin) return;
 
-            const dx = item.body.position.x - origin.x;
-            const dy = item.body.position.y - origin.y;
+            const pos = this.getDisplayPosition(item);
+            if (!pos) return;
+
+            const dx = pos.x - origin.x;
+            const dy = pos.y - origin.y;
 
             item.element.style.setProperty('--phys-x', `${dx}px`);
             item.element.style.setProperty('--phys-y', `${dy}px`);
@@ -11573,6 +12007,7 @@ const PhysicsEngine = {
         const macroVisualActive = MacroMesoBridge.isMacroVisualActive();
         const depthFocusLinks = typeof DepthFocusLinks !== 'undefined' &&
             DepthFocusLinks.shouldDraw();
+        const skipCanvasDraw = this.shouldThrottleMacroCanvas();
 
         if (!macroVisualActive && !depthFocusLinks) {
             if (this.isActive) {
@@ -11594,6 +12029,8 @@ const PhysicsEngine = {
         } else {
             this.isActive = false;
         }
+
+        if (!this.linkCtx || skipCanvasDraw) return;
 
         this.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
@@ -14643,11 +15080,13 @@ Object.assign(ActionWarehouse, {
                 }
 
                 if (fuseStepped && d.smoothTarget) {
-                    d.smoothTarget.x = d.overrideTarget.x;
-                    d.smoothTarget.y = d.overrideTarget.y;
+                    const catchLerp = blockCount >= 6 ? 0.28 : 0.22;
+                    d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * catchLerp;
+                    d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * catchLerp;
                 } else if (rawJump > jumpCap && d.smoothTarget) {
-                    d.smoothTarget.x = d.overrideTarget.x;
-                    d.smoothTarget.y = d.overrideTarget.y;
+                    const catchLerp = 0.26;
+                    d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * catchLerp;
+                    d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * catchLerp;
                 }
             }
 
@@ -14747,32 +15186,15 @@ Object.assign(ActionWarehouse, {
 
             const isStretched = this.stretchedNotes.has(d.noteIndex);
 
-            if (isStretched && activeBlockCount >= 5) {
-                const stretchLag = Math.hypot(
-                    d.overrideTarget.x - d.smoothTarget.x,
-                    d.overrideTarget.y - d.smoothTarget.y
-                );
-                if (stretchLag > scale(10)) {
-                    d.smoothTarget.x = d.overrideTarget.x;
-                    d.smoothTarget.y = d.overrideTarget.y;
-                    return;
-                }
-            }
-
-            if (activeBlockCount >= 5) {
+            if (activeBlockCount >= 5 && !isStretched) {
                 const lag = Math.hypot(
                     d.overrideTarget.x - d.smoothTarget.x,
                     d.overrideTarget.y - d.smoothTarget.y
                 );
                 if (lag > scale(18)) {
-                    if (activeBlockCount === 5) {
-                        d.smoothTarget.x = d.overrideTarget.x;
-                        d.smoothTarget.y = d.overrideTarget.y;
-                    } else {
-                        const catchLerp = 0.22;
-                        d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * catchLerp;
-                        d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * catchLerp;
-                    }
+                    const catchLerp = activeBlockCount === 5 ? 0.16 : 0.2;
+                    d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * catchLerp;
+                    d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * catchLerp;
                     return;
                 }
                 if (lag > scale(5)) {
@@ -14789,28 +15211,20 @@ Object.assign(ActionWarehouse, {
                 }
             }
 
-            if (isStretched && activeBlockCount < 2) {
-                d.smoothTarget.x = d.overrideTarget.x;
-                d.smoothTarget.y = d.overrideTarget.y;
-                return;
-            }
-
             if (isStretched) {
-                if (activeBlockCount >= 6) {
-                    const stretchLag = Math.hypot(
-                        d.overrideTarget.x - d.smoothTarget.x,
-                        d.overrideTarget.y - d.smoothTarget.y
-                    );
-                    if (stretchLag > scale(18)) {
-                        d.smoothTarget.x = d.overrideTarget.x;
-                        d.smoothTarget.y = d.overrideTarget.y;
-                        return;
-                    }
+                if (activeBlockCount < 2) {
+                    d.smoothTarget.x = d.overrideTarget.x;
+                    d.smoothTarget.y = d.overrideTarget.y;
+                    return;
                 }
-                const heavyLerp = this.getHeavyTargetLerp(activeBlockCount);
-                const stretchLerp = heavyLerp != null
-                    ? heavyLerp * 1.15
-                    : (smoothCfg.multiBlock ?? 0.1) * 0.75;
+                let stretchLerp = smoothCfg.stretched ?? 0.22;
+                if (activeBlockCount >= 6) {
+                    const heavyLerp = this.getHeavyTargetLerp(activeBlockCount);
+                    stretchLerp = heavyLerp != null ? heavyLerp * 1.1 : stretchLerp * 0.9;
+                }
+                if (blocksDragging) {
+                    stretchLerp = Math.min(0.42, stretchLerp * 1.45);
+                }
                 d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * stretchLerp;
                 d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * stretchLerp;
                 return;
@@ -14844,6 +15258,18 @@ Object.assign(ActionWarehouse, {
                     ? heavyLerp
                     : (activeBlockCount >= 2 ? smoothCfg.multiBlock : smoothCfg.singleBlock);
             }
+            if (d.body && !d.onBankGrid) {
+                const bodyLag = Math.hypot(
+                    d.overrideTarget.x - d.body.position.x,
+                    d.overrideTarget.y - d.body.position.y
+                );
+                const pres = typeof isPresentationMode === 'function' && isPresentationMode();
+                if (bodyLag > scale(55)) {
+                    lerp = Math.min(pres ? 0.17 : 0.3, lerp * (pres ? 1.25 : 2.1));
+                } else if (bodyLag > scale(28)) {
+                    lerp = Math.min(pres ? 0.14 : 0.24, lerp * (pres ? 1.15 : 1.45));
+                }
+            }
             d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * lerp;
             d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * lerp;
         });
@@ -14858,8 +15284,8 @@ Object.assign(ActionWarehouse, {
                 );
                 if (lag > postSmoothMaxLag) postSmoothMaxLag = lag;
                 if (lag > scale(10)) {
-                    d.smoothTarget.x = d.overrideTarget.x;
-                    d.smoothTarget.y = d.overrideTarget.y;
+                    d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * 0.24;
+                    d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * 0.24;
                 }
             });
             window.__physDbgLag = { postSmoothMaxLag, ts: performance.now() };
@@ -15814,7 +16240,11 @@ Object.assign(ActionWarehouse, {
         if (molecules.length < 2) return;
 
         const gap = CONFIG.physics.hullCollision.gap;
-        const iterations = Math.max(6, Math.floor(cfg.moleculeRelaxIterations * 0.4 * iterFactor));
+        let iterations = Math.max(6, Math.floor(cfg.moleculeRelaxIterations * 0.4 * iterFactor));
+        if (typeof isPresentationMode === 'function' && isPresentationMode()) {
+            const minIter = CONFIG.presentation?.stretchRelaxMinIterations ?? 10;
+            iterations = Math.max(minIter, iterations);
+        }
 
         for (let pass = 0; pass < iterations; pass++) {
             for (let i = 0; i < molecules.length; i++) {
@@ -15922,7 +16352,10 @@ Object.assign(ActionWarehouse, {
             bodiesData.forEach(d => {
                 if (!d.overrideTarget || prevTargets.has(d)) return;
                 if (d.body && !d.onBankGrid) {
-                    const spawnBlend = this.isKinematicCaptureMode(blockCount) ? 0.2 : 0.38;
+                    let spawnBlend = this.isKinematicCaptureMode(blockCount) ? 0.2 : 0.38;
+                    if (typeof isPresentationMode === 'function' && isPresentationMode()) {
+                        spawnBlend = CONFIG.presentation?.captureSpawnBlend ?? spawnBlend * 0.45;
+                    }
                     d.overrideTarget.x = d.body.position.x +
                         (d.overrideTarget.x - d.body.position.x) * spawnBlend;
                     d.overrideTarget.y = d.body.position.y +
@@ -16198,6 +16631,12 @@ Object.assign(ActionWarehouse, {
     }
 });
 document.addEventListener('DOMContentLoaded', () => {
+    try {
+        if (typeof applyPresentationProfile === 'function') applyPresentationProfile();
+    } catch (err) {
+        console.error('Presentation profile failed:', err);
+    }
+
     try {
         applyVisualScaleTokens();
         applySiteGridTokens();

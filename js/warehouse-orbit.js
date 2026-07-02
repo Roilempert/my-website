@@ -111,11 +111,13 @@ Object.assign(ActionWarehouse, {
                 }
 
                 if (fuseStepped && d.smoothTarget) {
-                    d.smoothTarget.x = d.overrideTarget.x;
-                    d.smoothTarget.y = d.overrideTarget.y;
+                    const catchLerp = blockCount >= 6 ? 0.28 : 0.22;
+                    d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * catchLerp;
+                    d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * catchLerp;
                 } else if (rawJump > jumpCap && d.smoothTarget) {
-                    d.smoothTarget.x = d.overrideTarget.x;
-                    d.smoothTarget.y = d.overrideTarget.y;
+                    const catchLerp = 0.26;
+                    d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * catchLerp;
+                    d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * catchLerp;
                 }
             }
 
@@ -215,32 +217,15 @@ Object.assign(ActionWarehouse, {
 
             const isStretched = this.stretchedNotes.has(d.noteIndex);
 
-            if (isStretched && activeBlockCount >= 5) {
-                const stretchLag = Math.hypot(
-                    d.overrideTarget.x - d.smoothTarget.x,
-                    d.overrideTarget.y - d.smoothTarget.y
-                );
-                if (stretchLag > scale(10)) {
-                    d.smoothTarget.x = d.overrideTarget.x;
-                    d.smoothTarget.y = d.overrideTarget.y;
-                    return;
-                }
-            }
-
-            if (activeBlockCount >= 5) {
+            if (activeBlockCount >= 5 && !isStretched) {
                 const lag = Math.hypot(
                     d.overrideTarget.x - d.smoothTarget.x,
                     d.overrideTarget.y - d.smoothTarget.y
                 );
                 if (lag > scale(18)) {
-                    if (activeBlockCount === 5) {
-                        d.smoothTarget.x = d.overrideTarget.x;
-                        d.smoothTarget.y = d.overrideTarget.y;
-                    } else {
-                        const catchLerp = 0.22;
-                        d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * catchLerp;
-                        d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * catchLerp;
-                    }
+                    const catchLerp = activeBlockCount === 5 ? 0.16 : 0.2;
+                    d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * catchLerp;
+                    d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * catchLerp;
                     return;
                 }
                 if (lag > scale(5)) {
@@ -257,28 +242,20 @@ Object.assign(ActionWarehouse, {
                 }
             }
 
-            if (isStretched && activeBlockCount < 2) {
-                d.smoothTarget.x = d.overrideTarget.x;
-                d.smoothTarget.y = d.overrideTarget.y;
-                return;
-            }
-
             if (isStretched) {
-                if (activeBlockCount >= 6) {
-                    const stretchLag = Math.hypot(
-                        d.overrideTarget.x - d.smoothTarget.x,
-                        d.overrideTarget.y - d.smoothTarget.y
-                    );
-                    if (stretchLag > scale(18)) {
-                        d.smoothTarget.x = d.overrideTarget.x;
-                        d.smoothTarget.y = d.overrideTarget.y;
-                        return;
-                    }
+                if (activeBlockCount < 2) {
+                    d.smoothTarget.x = d.overrideTarget.x;
+                    d.smoothTarget.y = d.overrideTarget.y;
+                    return;
                 }
-                const heavyLerp = this.getHeavyTargetLerp(activeBlockCount);
-                const stretchLerp = heavyLerp != null
-                    ? heavyLerp * 1.15
-                    : (smoothCfg.multiBlock ?? 0.1) * 0.75;
+                let stretchLerp = smoothCfg.stretched ?? 0.22;
+                if (activeBlockCount >= 6) {
+                    const heavyLerp = this.getHeavyTargetLerp(activeBlockCount);
+                    stretchLerp = heavyLerp != null ? heavyLerp * 1.1 : stretchLerp * 0.9;
+                }
+                if (blocksDragging) {
+                    stretchLerp = Math.min(0.42, stretchLerp * 1.45);
+                }
                 d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * stretchLerp;
                 d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * stretchLerp;
                 return;
@@ -312,6 +289,18 @@ Object.assign(ActionWarehouse, {
                     ? heavyLerp
                     : (activeBlockCount >= 2 ? smoothCfg.multiBlock : smoothCfg.singleBlock);
             }
+            if (d.body && !d.onBankGrid) {
+                const bodyLag = Math.hypot(
+                    d.overrideTarget.x - d.body.position.x,
+                    d.overrideTarget.y - d.body.position.y
+                );
+                const pres = typeof isPresentationMode === 'function' && isPresentationMode();
+                if (bodyLag > scale(55)) {
+                    lerp = Math.min(pres ? 0.17 : 0.3, lerp * (pres ? 1.25 : 2.1));
+                } else if (bodyLag > scale(28)) {
+                    lerp = Math.min(pres ? 0.14 : 0.24, lerp * (pres ? 1.15 : 1.45));
+                }
+            }
             d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * lerp;
             d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * lerp;
         });
@@ -326,8 +315,8 @@ Object.assign(ActionWarehouse, {
                 );
                 if (lag > postSmoothMaxLag) postSmoothMaxLag = lag;
                 if (lag > scale(10)) {
-                    d.smoothTarget.x = d.overrideTarget.x;
-                    d.smoothTarget.y = d.overrideTarget.y;
+                    d.smoothTarget.x += (d.overrideTarget.x - d.smoothTarget.x) * 0.24;
+                    d.smoothTarget.y += (d.overrideTarget.y - d.smoothTarget.y) * 0.24;
                 }
             });
             window.__physDbgLag = { postSmoothMaxLag, ts: performance.now() };
@@ -1282,7 +1271,11 @@ Object.assign(ActionWarehouse, {
         if (molecules.length < 2) return;
 
         const gap = CONFIG.physics.hullCollision.gap;
-        const iterations = Math.max(6, Math.floor(cfg.moleculeRelaxIterations * 0.4 * iterFactor));
+        let iterations = Math.max(6, Math.floor(cfg.moleculeRelaxIterations * 0.4 * iterFactor));
+        if (typeof isPresentationMode === 'function' && isPresentationMode()) {
+            const minIter = CONFIG.presentation?.stretchRelaxMinIterations ?? 10;
+            iterations = Math.max(minIter, iterations);
+        }
 
         for (let pass = 0; pass < iterations; pass++) {
             for (let i = 0; i < molecules.length; i++) {
@@ -1390,7 +1383,10 @@ Object.assign(ActionWarehouse, {
             bodiesData.forEach(d => {
                 if (!d.overrideTarget || prevTargets.has(d)) return;
                 if (d.body && !d.onBankGrid) {
-                    const spawnBlend = this.isKinematicCaptureMode(blockCount) ? 0.2 : 0.38;
+                    let spawnBlend = this.isKinematicCaptureMode(blockCount) ? 0.2 : 0.38;
+                    if (typeof isPresentationMode === 'function' && isPresentationMode()) {
+                        spawnBlend = CONFIG.presentation?.captureSpawnBlend ?? spawnBlend * 0.45;
+                    }
                     d.overrideTarget.x = d.body.position.x +
                         (d.overrideTarget.x - d.body.position.x) * spawnBlend;
                     d.overrideTarget.y = d.body.position.y +

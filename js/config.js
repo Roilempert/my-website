@@ -31,6 +31,7 @@ const CONFIG = {
         rows: 10,
         padding: { value: 2.5, unit: 'rem' },  // design ref: 40px @ 16px root
         gap: { value: 1.25, unit: 'rem' },      // design ref: 20px @ 16px root
+        crossStep: 2,                           // intersection marks every N rows/cols
         debug: false,
         // Reference regions in grid coordinates (colEnd/rowEnd exclusive).
         // Scale/anchor tokens only — layers stay free (scroll, drag, overflow).
@@ -57,12 +58,17 @@ const CONFIG = {
         macroCanvasScrollFactor: 1.5
     },
 
-    /* --- Data Sources (published Google Sheets, CSV format) --- */
+    /* --- Data Sources (local CSV in data/; remote Google Sheets as fallback) --- */
     data: {
         urls: {
+            main: 'data/main.csv',
+            tags: 'data/tags.csv'
+        },
+        remoteUrls: {
             main: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ7yUXgr2RmRgAg9hWSPesVZsqkROq-PedKOh6KpERDO9HcC5ru11oobFPN8Mhsnruw26JKe4peAIFT/pub?gid=693502086&single=true&output=csv',
             tags: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ7yUXgr2RmRgAg9hWSPesVZsqkROq-PedKOh6KpERDO9HcC5ru11oobFPN8Mhsnruw26JKe4peAIFT/pub?gid=946159072&single=true&output=csv'
         },
+        preferLocal: true,
         // Column indices in the main CSV (zero-based)
         columns: {
             authorCode: 2,
@@ -82,15 +88,59 @@ const CONFIG = {
         idleRefreshMs: 0 // 0 = disabled; set e.g. 3 * 60 * 1000 for kiosk idle reload
     },
 
+    /* --- Exhibition / low-end profile (auto on localhost and weak hardware) --- */
+    presentation: {
+        enabled: 'auto',            // true | false | 'auto' — auto: localhost or ≤8 GB / ≤4 cores
+        targetFps: 24,              // canvas throttle when displayInterp is off
+        physicsFps: 28,
+        displayInterp: true,
+        hullCollisionShellPasses: 1,
+        hullCollisionDistanceCull: true,
+        hullCollisionViewCull: 1.45,
+        outlineViewportCull: true,
+        physicsPassCapAtBlocks: 4,
+        navMapPhysicsThrottleMs: 280,
+        orbitRelaxScale: 0.55,
+        stretchRelaxMinIterations: 10,
+        singleBlockLerp: 0.14,
+        multiBlockLerp: 0.12,
+        stretchedLerp: 0.24,
+        captureChase: 0.24,
+        capturePullFloor: 0.5,
+        captureSpawnBlend: 0.2,
+        captureTransitMaxSpeed: 4.8,
+        singleBlockCaptureDamping: 0.5,
+        multiBlockDamping: 0.52,
+        nearDamping: 0.3,
+        bodyRestitution: 0.07,
+        bodyFrictionAir: 0.086,
+        siblingDamping: 0.18,
+        dragBlockLerp: 0.21,
+        blockAttractionScale: 0.62,
+        kinematicStretchLerp: 0.15,
+        kinematicStretchLerpDrag: 0.21,
+        cooldownDelayMs: 550,
+        disableGrain: true,
+        mockShaderLiveHover: false,
+        mockShaderLiveFps: 12,
+        mockP5TextureOverscale: 1.15,
+        mockCanvasScale: 1.0,
+        mesoBuildBatchSize: 36,
+        mesoBakeStructurePerFrame: 6,
+        mesoBakeTexturePerFrame: 4,
+        mesoInitialBakeColumns: 2,
+        macroRefreshMsBlock: 320,
+        macroDotStride: 3,
+        depthMapMaxCollect: 160,
+        wanderScale: 0.85
+    },
+
     /* --- Depth Controller (Z-axis zoom levels) --- */
     depth: {
         initialLevel: 1,            // level shown on load (1 = macro / physics view)
         minLevel: 1,
         maxLevel: 3,
-        cooldownDelay: 1200,        // ms between accepted wheel gestures
-        wheelThreshold: 15,         // minimal |deltaY| to register a zoom intent
-        wheelAccumWindow: 120,      // ms - merge trackpad micro-deltas into one gesture
-        wheelZoomInvert: true,      // flip scroll-to-zoom (scroll in → deeper levels)
+        cooldownDelay: 1200,        // ms lock after level change (blocks wheel pan during transitions)
         cameraLockDuration: 650,
         macroMesoRevealDuration: 640,
         macroMesoStagger: 12,
@@ -312,6 +362,7 @@ const CONFIG = {
 
     /* --- Spatial Navigation (edge-scroll + background pan) --- */
     navigation: {
+        edgeScrollEnabled: false,   // hover near viewport edges to auto-scroll
         edgeThreshold: scale(150),    // px from viewport edge where auto-scroll activates
         maxSpeed: 12,               // px per frame at the very edge
         bottomEdgeThreshold: scale(60),
@@ -319,6 +370,9 @@ const CONFIG = {
         contentPadding: scale(120), // px; breathing room kept around content when clamping the scroll
         pan: {
             minDrag: 2                // px before pan engages (ignores micro-jitter)
+        },
+        wheel: {
+            speed: 1                  // multiplier on trackpad / mouse wheel delta
         },
         spacePanKey: 'Space'
     },
@@ -486,7 +540,8 @@ const CONFIG = {
             singleBlock: 0.18,
             multiBlock: 0.1,
             dragBlock: 0.28,
-            stretched: 1,
+            stretched: 0.22,
+            captureChase: 0.38,
             stretchJumpReset: scale(55)
         },
 
@@ -914,6 +969,43 @@ function getSiteGridActiveRegions(level = null) {
     return { ...base, ...overrides };
 }
 
+function updateSiteGridCrosses() {
+    const g = CONFIG.siteGrid;
+    if (!g || !document.body) return;
+
+    let layer = document.getElementById('site-grid-crosses');
+    if (!layer) {
+        layer = document.createElement('div');
+        layer.id = 'site-grid-crosses';
+        layer.setAttribute('aria-hidden', 'true');
+        layer.dataset.siteLayer = 'gridCrosses';
+        const nav = document.getElementById('nav-surface');
+        document.body.insertBefore(layer, nav || document.body.firstChild);
+    }
+
+    const cols = g.columns || 18;
+    const rows = g.rows || 10;
+    const step = g.crossStep ?? 2;
+    const count =
+        (Math.floor(cols / step) + 1) *
+        (Math.floor(rows / step) + 1);
+    if (layer.children.length === count && layer.dataset.crossStep === String(step)) return;
+
+    layer.dataset.crossStep = String(step);
+    layer.replaceChildren();
+    const fragment = document.createDocumentFragment();
+    for (let row = 0; row <= rows; row += step) {
+        for (let col = 0; col <= cols; col += step) {
+            const cross = document.createElement('span');
+            cross.className = 'site-grid-cross';
+            cross.style.left = `calc(var(--site-grid-padding) + ${col} * (var(--site-grid-cell-w) + var(--site-grid-gap)))`;
+            cross.style.top = `calc(var(--site-grid-padding) + ${row} * (var(--site-grid-cell-h) + var(--site-grid-gap)))`;
+            fragment.appendChild(cross);
+        }
+    }
+    layer.appendChild(fragment);
+}
+
 function updateSiteGridDebugRegions(regionNames) {
     const enabled = !!CONFIG.siteGrid?.debug;
     let layer = document.getElementById('site-grid-debug-regions');
@@ -969,6 +1061,7 @@ function applySiteGridTokens(root = document.documentElement, level = null) {
     }
 
     updateSiteGridDebugRegions(Object.keys(regions));
+    updateSiteGridCrosses();
 
     applySiteGridContentScale(root);
 
@@ -1028,4 +1121,109 @@ function applyVisualScaleTokens() {
     applyCatalogCellTokens(root);
     applyMesoAnchorTokens(root);
 }
+
+function isPresentationMode() {
+    if (CONFIG.presentation?._resolved != null) return CONFIG.presentation._resolved;
+
+    const params = new URLSearchParams(location.search);
+    if (params.has('presentation')) {
+        return params.get('presentation') !== '0';
+    }
+
+    const cfg = CONFIG.presentation?.enabled;
+    if (cfg === true) return true;
+    if (cfg === false) return false;
+
+    if (/^https?:\/\/(127\.0\.0\.1|localhost)(:\d+)?$/i.test(location.origin)) return true;
+
+    const mem = navigator.deviceMemory;
+    const cores = navigator.hardwareConcurrency;
+    if (typeof mem === 'number' && mem <= 8) return true;
+    if (typeof cores === 'number' && cores <= 4) return true;
+
+    return false;
+}
+
+function applyPresentationProfile() {
+    const on = isPresentationMode();
+    CONFIG.presentation._resolved = on;
+    if (!on) return;
+
+    const p = CONFIG.presentation;
+    CONFIG.physics.hullCollision.shellPasses = p.hullCollisionShellPasses ?? 1;
+    if (CONFIG.physics.forces && p.wanderScale) {
+        CONFIG.physics.forces.wanderStrength *= p.wanderScale;
+    }
+    const smooth = CONFIG.physics.targetSmoothing;
+    if (smooth) {
+        if (p.singleBlockLerp) smooth.singleBlock = p.singleBlockLerp;
+        if (p.multiBlockLerp) smooth.multiBlock = p.multiBlockLerp;
+        if (p.stretchedLerp) smooth.stretched = p.stretchedLerp;
+        if (p.captureChase) smooth.captureChase = p.captureChase;
+    }
+    const forces = CONFIG.physics.forces;
+    if (forces) {
+        if (p.capturePullFloor) forces.capturePullFloor = p.capturePullFloor;
+        if (p.blockAttractionScale) {
+            const s = p.blockAttractionScale;
+            forces.blockAttractionSingle *= s;
+            forces.blockAttractionMulti *= s;
+            forces.blockAttractionStretch *= s;
+        }
+    }
+    const motion = CONFIG.physics.motion;
+    if (motion) {
+        if (p.captureTransitMaxSpeed) motion.transitMaxSpeed = p.captureTransitMaxSpeed;
+        if (p.singleBlockCaptureDamping) motion.singleBlockCaptureDamping = p.singleBlockCaptureDamping;
+        if (p.multiBlockDamping) motion.multiBlockDamping = p.multiBlockDamping;
+        if (p.nearDamping) motion.nearDamping = p.nearDamping;
+    }
+    const body = CONFIG.physics.body;
+    if (body) {
+        if (p.bodyRestitution != null) body.restitution = p.bodyRestitution;
+        if (p.bodyFrictionAir != null) body.frictionAir = p.bodyFrictionAir;
+    }
+    const linkage = CONFIG.warehouse?.linkage;
+    if (linkage && p.siblingDamping) linkage.siblingDamping = p.siblingDamping;
+    if (smooth && p.dragBlockLerp) smooth.dragBlock = p.dragBlockLerp;
+    if (p.cooldownDelayMs && CONFIG.depth) {
+        CONFIG.depth.cooldownDelay = p.cooldownDelayMs;
+    }
+    if (p.mesoBuildBatchSize && CONFIG.meso) {
+        CONFIG.meso.buildBatchSize = p.mesoBuildBatchSize;
+    }
+    const orbit = CONFIG.warehouse?.orbit;
+    if (orbit && p.orbitRelaxScale) {
+        orbit.moleculeRelaxIterations = Math.max(
+            8,
+            Math.floor(orbit.moleculeRelaxIterations * p.orbitRelaxScale)
+        );
+        orbit.clusterRelaxIterations = Math.max(
+            6,
+            Math.floor(orbit.clusterRelaxIterations * p.orbitRelaxScale)
+        );
+    }
+
+    const meso = CONFIG.depth?.v2?.meso;
+    if (meso) {
+        if (p.mockShaderLiveHover === false) meso.mockShaderLiveHover = false;
+        if (p.mockShaderLiveFps) meso.mockShaderLiveFps = p.mockShaderLiveFps;
+        if (p.mockP5TextureOverscale) meso.mockP5TextureOverscale = p.mockP5TextureOverscale;
+        if (p.mockCanvasScale) meso.mockCanvasScale = p.mockCanvasScale;
+    }
+
+    const navMap = CONFIG.navigationMap;
+    if (navMap) {
+        if (p.macroRefreshMsBlock) navMap.macroRefreshMsBlock = p.macroRefreshMsBlock;
+        if (p.macroDotStride) navMap.macroDotStride = p.macroDotStride;
+        if (p.depthMapMaxCollect) navMap.depthMapMaxCollect = p.depthMapMaxCollect;
+    }
+
+    document.documentElement.classList.add('is-presentation');
+    if (document.body) document.body.classList.add('is-presentation');
+
+    console.info('Presentation mode: on (exhibition performance profile)');
+}
+
+applyPresentationProfile();
 

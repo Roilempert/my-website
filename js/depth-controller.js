@@ -8,8 +8,6 @@ const DepthController = {
     lastScrollTime: 0,
     cooldownDelay: CONFIG.depth.cooldownDelay,
     _wheelLockUntil: 0,
-    _wheelDelta: 0,
-    _wheelDeltaTimer: null,
     _levelChangeActive: false,
     _microRevealRaf: null,
     _microTransitionFrom: null,
@@ -57,35 +55,12 @@ const DepthController = {
         this.lockWheelAfterTransition();
     },
 
-    _accumulateWheelDelta(deltaY) {
-        const windowMs = CONFIG.depth.wheelAccumWindow ?? 120;
-        this._wheelDelta += deltaY;
-
-        if (this._wheelDeltaTimer) clearTimeout(this._wheelDeltaTimer);
-        this._wheelDeltaTimer = setTimeout(() => {
-            this._wheelDelta = 0;
-            this._wheelDeltaTimer = null;
-        }, windowMs);
-    },
-
-    _consumeWheelIntent(deltaY) {
-        const threshold = CONFIG.depth.wheelThreshold;
-        this._accumulateWheelDelta(deltaY);
-
-        if (Math.abs(this._wheelDelta) < threshold) return 0;
-
-        const direction = this._wheelDelta > 0 ? 1 : -1;
-        this._wheelDelta = 0;
-        if (this._wheelDeltaTimer) {
-            clearTimeout(this._wheelDeltaTimer);
-            this._wheelDeltaTimer = null;
-        }
-        return direction;
-    },
-
     syncViewLevelClass(level = this.currentLevel) {
         [1, 2, 3].forEach(l => document.body.classList.remove(`view-level-${l}`));
         document.body.classList.add(`view-level-${level}`);
+        if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.setMacroPhysicsActive) {
+            PhysicsEngine.setMacroPhysicsActive(level === 1);
+        }
         applySiteGridTokens(document.documentElement, level);
         if (typeof NavigationMap !== 'undefined') {
             NavigationMap.onLevelChange(level);
@@ -128,32 +103,6 @@ const DepthController = {
         } catch (err) {
             console.error('DepthV2.init failed:', err);
         }
-
-        window.addEventListener('wheel', (e) => {
-            if (e.ctrlKey) {
-                e.preventDefault();
-                return;
-            }
-            e.preventDefault();
-            const wheelDelta = CONFIG.depth.wheelZoomInvert ? -e.deltaY : e.deltaY;
-            if (ArtifactInspector.isActive) {
-                if (this.isWheelLocked()) return;
-                const intent = this._consumeWheelIntent(wheelDelta);
-                const zoomOutIntent = CONFIG.depth.wheelZoomInvert ? intent < 0 : intent > 0;
-                if (intent !== 0 && zoomOutIntent) {
-                    ArtifactInspector.close();
-                }
-                return;
-            }
-            if (this.isWheelLocked()) return;
-
-            const intent = this._consumeWheelIntent(wheelDelta);
-            if (intent > 0) {
-                this.zoomOut();
-            } else if (intent < 0) {
-                this.zoomIn();
-            }
-        }, { passive: false });
 
         window.addEventListener('keydown', (e) => {
             const keysToBlock = ['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight', 'PageUp', 'PageDown'];
