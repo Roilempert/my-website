@@ -1715,8 +1715,10 @@ body.view-level-3 .site-navigation-maps.is-inspector-dimmed {
 }
 
 body.site-grid .warehouse-shell {
-    left: var(--site-layer-warehouse-left);
-    width: var(--site-layer-warehouse-width);
+    position: fixed !important;
+    left: var(--site-grid-padding);
+    right: var(--site-grid-padding);
+    width: auto;
     height: var(--site-layer-warehouse-height);
     top: var(--site-layer-warehouse-top);
     bottom: auto;
