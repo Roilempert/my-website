@@ -1554,6 +1554,149 @@ const MesoGradientP5 = {
     }
 };
 /* ==========================================================================
+   03a.1 MESO SILHOUETTE CACHE — PRECOMPUTED GEOMETRY
+   ========================================================================== */
+const MesoSilhouetteCache = {
+    data: null,
+    profiles: new Map(),
+    details: new Map(),
+    ready: Promise.resolve(false),
+    loaded: false,
+
+    init() {
+        const cfg = CONFIG?.meso?.silhouetteCache || {};
+        if (window.__BUILD_MESO_SILHOUETTE_CACHE__ === true || cfg.enabled === false || !cfg.url) {
+            this.ready = Promise.resolve(false);
+            return this.ready;
+        }
+
+        this.ready = fetch(cfg.url, { cache: cfg.fetchCache || 'default' })
+            .then((res) => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            })
+            .then((data) => {
+                this.ingest(data);
+                return this.loaded;
+            })
+            .catch((err) => {
+                console.warn('Meso silhouette cache unavailable, using live geometry', err);
+                this.clear();
+                return false;
+            });
+
+        return this.ready;
+    },
+
+    clear() {
+        this.data = null;
+        this.profiles.clear();
+        this.details.clear();
+        this.loaded = false;
+    },
+
+    ingest(data) {
+        this.clear();
+        const expectedVersion = CONFIG?.meso?.silhouetteCache?.version;
+        const cacheVersion = data?.meta?.cacheVersion;
+        if (expectedVersion != null && cacheVersion != null && Number(cacheVersion) !== Number(expectedVersion)) {
+            console.warn(`Meso silhouette cache version mismatch: expected ${expectedVersion}, got ${cacheVersion}`);
+            return;
+        }
+
+        const entries = data?.entries || {};
+        Object.entries(entries).forEach(([id, entry]) => {
+            if (!id || !entry) return;
+            if (entry.profile) {
+                this.profiles.set(String(id), this.cloneProfile(entry.profile));
+            }
+            if (Array.isArray(entry.detailRects)) {
+                this.details.set(String(id), entry.detailRects
+                    .map((rect) => this.normalizeRect(rect))
+                    .filter(Boolean));
+            }
+        });
+        this.data = data;
+        this.loaded = this.profiles.size > 0 || this.details.size > 0;
+    },
+
+    normalizeRect(rect) {
+        const x = Number(rect?.x);
+        const y = Number(rect?.y);
+        const w = Number(rect?.w);
+        const h = Number(rect?.h);
+        if (![x, y, w, h].every(Number.isFinite) || w <= 0 || h <= 0) return null;
+        return {
+            x,
+            y,
+            w,
+            h,
+            kind: rect.kind || 'body'
+        };
+    },
+
+    cloneProfile(profile) {
+        if (!profile || !Array.isArray(profile.lines)) return null;
+        return {
+            ...profile,
+            lines: profile.lines.map((line) => ({ ...line }))
+        };
+    },
+
+    getEntry(noteId) {
+        const id = String(noteId || '');
+        if (!id) return null;
+        return this.data?.entries?.[id] || null;
+    },
+
+    hashTextForItem(item) {
+        const text = [
+            item?.id || '',
+            item?.title || '',
+            item?.body || ''
+        ].join('\n');
+        let hash = 2166136261;
+        for (let i = 0; i < text.length; i++) {
+            hash ^= text.charCodeAt(i);
+            hash = Math.imul(hash, 16777619);
+        }
+        return (hash >>> 0).toString(16);
+    },
+
+    isEntryFresh(noteId, item = null) {
+        const entry = this.getEntry(noteId);
+        if (!entry) return false;
+        if (!item || !entry.textHash) return true;
+        return entry.textHash === this.hashTextForItem(item);
+    },
+
+    getProfile(noteId, item = null) {
+        if (!this.isEntryFresh(noteId, item)) return null;
+        const profile = this.profiles.get(String(noteId || ''));
+        return profile ? this.cloneProfile(profile) : null;
+    },
+
+    getNormalizedDetailRects(noteId, item = null) {
+        if (!this.isEntryFresh(noteId, item)) return [];
+        const rects = this.details.get(String(noteId || ''));
+        return rects?.length ? rects.map((rect) => ({ ...rect })) : [];
+    },
+
+    getDetailRects(noteId, targetPageRect, item = null) {
+        if (!this.isEntryFresh(noteId, item)) return [];
+        const rects = this.details.get(String(noteId || ''));
+        if (!rects?.length || !targetPageRect) return [];
+
+        return rects.map((rect) => ({
+            left: targetPageRect.left + rect.x * targetPageRect.width,
+            top: targetPageRect.top + rect.y * targetPageRect.height,
+            width: rect.w * targetPageRect.width,
+            height: rect.h * targetPageRect.height,
+            kind: rect.kind
+        }));
+    }
+};
+/* ==========================================================================
    03a. MESO MOCK — הדמיית סילואטות קלה (V2 בלבד, בלי מדידה)
    ========================================================================== */
 const MesoMock = {
@@ -3493,6 +3636,11 @@ const MesoMock = {
     },
 
     buildProfile(item, wrapper = null) {
+        const cachedProfile = typeof MesoSilhouetteCache !== 'undefined'
+            ? MesoSilhouetteCache.getProfile(item?.id, item)
+            : null;
+        if (cachedProfile) return cachedProfile;
+
         const rawLines = (wrapper && this.measureProfileFromDOM(wrapper)) || this.buildTextSegments(item);
         return this.finalizeProfile(rawLines, item);
     },
@@ -8789,6 +8937,8 @@ const NavigationMap = {
             if (!this.isMapWrapperEligible(wrapper)) return;
             const noteIndex = this.getWrapperNoteIndex(wrapper);
             if (noteIndex < 0) return;
+            const noteItem = typeof AppState !== 'undefined' ? AppState.items?.[noteIndex] : null;
+            const noteId = wrapper.dataset.noteId || noteItem?.id || '';
 
             if (this._activeLevel === 1 && style.macroMapUseLayerDots === true) {
                 wrapper.querySelectorAll('.layer-dot').forEach((dot) => {
@@ -8799,6 +8949,7 @@ const NavigationMap = {
                     const top = rect.top + scrollY;
                     markers.push({
                         noteIndex,
+                        noteId,
                         x: left + rect.width / 2,
                         y: top + rect.height / 2,
                         pageRect: {
@@ -8823,6 +8974,7 @@ const NavigationMap = {
                     const top = rect.top + scrollY;
                     markers.push({
                         noteIndex,
+                        noteId,
                         isMesoFrameRect: true,
                         sourceElement: frame,
                         x: left + rect.width / 2,
@@ -8843,6 +8995,7 @@ const NavigationMap = {
             const top = rect.top + scrollY;
             markers.push({
                 noteIndex,
+                noteId,
                 x: left + rect.width / 2,
                 y: top + rect.height / 2,
                 pageRect: {
@@ -9777,14 +9930,18 @@ const NavigationMap = {
         const viewportW = Math.max(1, window.innerWidth);
         const viewportH = Math.max(1, window.innerHeight);
         let frames = this.getMapNoteWrappers()
-            .map((wrapper) => wrapper.querySelector('.depth-v2-glyph--meso .meso-mock__frame')
-                || wrapper.querySelector('.meso-mock__frame')
-                || wrapper.querySelector('.meso-silhouette')
-                || wrapper.querySelector('.depth-v2-glyph--meso'))
-            .filter(Boolean);
+            .map((wrapper) => ({
+                wrapper,
+                frame: wrapper.querySelector('.depth-v2-glyph--meso .meso-mock__frame')
+                    || wrapper.querySelector('.meso-mock__frame')
+                    || wrapper.querySelector('.meso-silhouette')
+                    || wrapper.querySelector('.depth-v2-glyph--meso')
+            }))
+            .filter((entry) => entry.frame);
         if (!frames.length) {
             frames = [...document.querySelectorAll('.depth-v2-glyph--meso')]
-                .filter((el, index, all) => all.indexOf(el) === index);
+                .filter((el, index, all) => all.indexOf(el) === index)
+                .map((frame) => ({ wrapper: frame.closest('.note-wrapper'), frame }));
         }
 
         const ctx = this.ctx;
@@ -9814,7 +9971,7 @@ const NavigationMap = {
 
         let detailCount = 0;
 
-        frames.forEach((frame) => {
+        frames.forEach(({ frame, wrapper }) => {
             const rect = frame.getBoundingClientRect();
             if (rect.width < 0.5 || rect.height < 0.5) return;
             const mappedFrame = mapRect(rect);
@@ -9822,25 +9979,51 @@ const NavigationMap = {
 
             let drewDetail = false;
             if (useDetail && detailCount < detailCap) {
-                const fragments = frame.querySelectorAll('.meso-mock__line, .meso-mock__rect');
-                if (fragments.length > 0) {
+                const noteIndex = this.getWrapperNoteIndex(wrapper);
+                const item = typeof AppState !== 'undefined' && noteIndex >= 0 ? AppState.items?.[noteIndex] : null;
+                const noteId = wrapper?.dataset?.noteId || item?.id || '';
+                const cachedFragments = typeof MesoSilhouetteCache !== 'undefined'
+                    ? MesoSilhouetteCache.getNormalizedDetailRects(noteId, item)
+                    : [];
+
+                if (cachedFragments.length > 0) {
                     drawMappedRect(mappedFrame, detailBaseFill);
+                    cachedFragments.forEach((fragment) => {
+                        if (detailCount >= detailCap) return;
+                        const relativeRect = {
+                            x: mappedFrame.x + fragment.x * mappedFrame.w,
+                            y: mappedFrame.y + fragment.y * mappedFrame.h,
+                            w: fragment.w * mappedFrame.w,
+                            h: fragment.h * mappedFrame.h
+                        };
+                        if (drawMappedRect(relativeRect, detailFill)) {
+                            detailCount += 1;
+                            drewDetail = true;
+                        }
+                    });
                 }
-                fragments.forEach((fragment) => {
-                    if (detailCount >= detailCap) return;
-                    const fragmentRect = fragment.getBoundingClientRect();
-                    if (fragmentRect.width < 0.5 || fragmentRect.height < 0.5) return;
-                    const relativeRect = {
-                        x: mappedFrame.x + ((fragmentRect.left - rect.left) / rect.width) * mappedFrame.w,
-                        y: mappedFrame.y + ((fragmentRect.top - rect.top) / rect.height) * mappedFrame.h,
-                        w: (fragmentRect.width / rect.width) * mappedFrame.w,
-                        h: (fragmentRect.height / rect.height) * mappedFrame.h
-                    };
-                    if (drawMappedRect(relativeRect, detailFill)) {
-                        detailCount += 1;
-                        drewDetail = true;
+
+                if (!drewDetail) {
+                    const fragments = frame.querySelectorAll('.meso-mock__line, .meso-mock__rect');
+                    if (fragments.length > 0) {
+                        drawMappedRect(mappedFrame, detailBaseFill);
                     }
-                });
+                    fragments.forEach((fragment) => {
+                        if (detailCount >= detailCap) return;
+                        const fragmentRect = fragment.getBoundingClientRect();
+                        if (fragmentRect.width < 0.5 || fragmentRect.height < 0.5) return;
+                        const relativeRect = {
+                            x: mappedFrame.x + ((fragmentRect.left - rect.left) / rect.width) * mappedFrame.w,
+                            y: mappedFrame.y + ((fragmentRect.top - rect.top) / rect.height) * mappedFrame.h,
+                            w: (fragmentRect.width / rect.width) * mappedFrame.w,
+                            h: (fragmentRect.height / rect.height) * mappedFrame.h
+                        };
+                        if (drawMappedRect(relativeRect, detailFill)) {
+                            detailCount += 1;
+                            drewDetail = true;
+                        }
+                    });
+                }
             }
 
             if (!drewDetail) {
@@ -10024,8 +10207,15 @@ const NavigationMap = {
         }
     },
 
-    getMesoFrameDetailRects(sourceElement, targetPageRect) {
-        if (!sourceElement || !targetPageRect) return [];
+    getMesoFrameDetailRects(sourceElement, targetPageRect, noteId = '', item = null) {
+        if (!targetPageRect) return [];
+
+        if (typeof MesoSilhouetteCache !== 'undefined' && noteId) {
+            const cachedRects = MesoSilhouetteCache.getDetailRects(noteId, targetPageRect, item);
+            if (cachedRects.length) return cachedRects;
+        }
+
+        if (!sourceElement) return [];
 
         const sourceRect = this.pageRectFromElement(sourceElement);
         if (!sourceRect || sourceRect.width <= 0 || sourceRect.height <= 0) return [];
@@ -10050,7 +10240,8 @@ const NavigationMap = {
     drawMesoFrameDetailMarker(ctx, t, marker, fill, baseFill) {
         if (!marker?.pageRect) return false;
 
-        const detailRects = this.getMesoFrameDetailRects(marker.sourceElement, marker.pageRect);
+        const item = typeof AppState !== 'undefined' ? AppState.items?.[marker.noteIndex] : null;
+        const detailRects = this.getMesoFrameDetailRects(marker.sourceElement, marker.pageRect, marker.noteId, item);
         if (!detailRects.length) {
             return false;
         }
@@ -17133,6 +17324,12 @@ document.addEventListener('DOMContentLoaded', () => {
         DepthController.init();
     } catch (err) {
         console.error('DepthController.init failed:', err);
+    }
+
+    try {
+        MesoSilhouetteCache.init();
+    } catch (err) {
+        console.error('MesoSilhouetteCache.init failed:', err);
     }
 
     SilhouetteEngine.init();

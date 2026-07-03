@@ -324,6 +324,12 @@ const CONFIG = {
 
     /* --- Meso layer (level 2) — vector silhouettes from line metrics --- */
     meso: {
+        silhouetteCache: {
+            enabled: true,
+            url: 'assets/cache/meso-silhouettes.json',
+            fetchCache: 'default',
+            version: 1
+        },
         includeTitle: true,
         includeBody: true,
         includeTags: false,

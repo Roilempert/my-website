@@ -18,6 +18,12 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error('DepthController.init failed:', err);
     }
 
+    try {
+        MesoSilhouetteCache.init();
+    } catch (err) {
+        console.error('MesoSilhouetteCache.init failed:', err);
+    }
+
     SilhouetteEngine.init();
     SpatialNavigation.init();
     ArtifactInspector.init();

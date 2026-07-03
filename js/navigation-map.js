@@ -608,6 +608,8 @@ const NavigationMap = {
             if (!this.isMapWrapperEligible(wrapper)) return;
             const noteIndex = this.getWrapperNoteIndex(wrapper);
             if (noteIndex < 0) return;
+            const noteItem = typeof AppState !== 'undefined' ? AppState.items?.[noteIndex] : null;
+            const noteId = wrapper.dataset.noteId || noteItem?.id || '';
 
             if (this._activeLevel === 1 && style.macroMapUseLayerDots === true) {
                 wrapper.querySelectorAll('.layer-dot').forEach((dot) => {
@@ -618,6 +620,7 @@ const NavigationMap = {
                     const top = rect.top + scrollY;
                     markers.push({
                         noteIndex,
+                        noteId,
                         x: left + rect.width / 2,
                         y: top + rect.height / 2,
                         pageRect: {
@@ -642,6 +645,7 @@ const NavigationMap = {
                     const top = rect.top + scrollY;
                     markers.push({
                         noteIndex,
+                        noteId,
                         isMesoFrameRect: true,
                         sourceElement: frame,
                         x: left + rect.width / 2,
@@ -662,6 +666,7 @@ const NavigationMap = {
             const top = rect.top + scrollY;
             markers.push({
                 noteIndex,
+                noteId,
                 x: left + rect.width / 2,
                 y: top + rect.height / 2,
                 pageRect: {
@@ -1596,14 +1601,18 @@ const NavigationMap = {
         const viewportW = Math.max(1, window.innerWidth);
         const viewportH = Math.max(1, window.innerHeight);
         let frames = this.getMapNoteWrappers()
-            .map((wrapper) => wrapper.querySelector('.depth-v2-glyph--meso .meso-mock__frame')
-                || wrapper.querySelector('.meso-mock__frame')
-                || wrapper.querySelector('.meso-silhouette')
-                || wrapper.querySelector('.depth-v2-glyph--meso'))
-            .filter(Boolean);
+            .map((wrapper) => ({
+                wrapper,
+                frame: wrapper.querySelector('.depth-v2-glyph--meso .meso-mock__frame')
+                    || wrapper.querySelector('.meso-mock__frame')
+                    || wrapper.querySelector('.meso-silhouette')
+                    || wrapper.querySelector('.depth-v2-glyph--meso')
+            }))
+            .filter((entry) => entry.frame);
         if (!frames.length) {
             frames = [...document.querySelectorAll('.depth-v2-glyph--meso')]
-                .filter((el, index, all) => all.indexOf(el) === index);
+                .filter((el, index, all) => all.indexOf(el) === index)
+                .map((frame) => ({ wrapper: frame.closest('.note-wrapper'), frame }));
         }
 
         const ctx = this.ctx;
@@ -1633,7 +1642,7 @@ const NavigationMap = {
 
         let detailCount = 0;
 
-        frames.forEach((frame) => {
+        frames.forEach(({ frame, wrapper }) => {
             const rect = frame.getBoundingClientRect();
             if (rect.width < 0.5 || rect.height < 0.5) return;
             const mappedFrame = mapRect(rect);
@@ -1641,25 +1650,51 @@ const NavigationMap = {
 
             let drewDetail = false;
             if (useDetail && detailCount < detailCap) {
-                const fragments = frame.querySelectorAll('.meso-mock__line, .meso-mock__rect');
-                if (fragments.length > 0) {
+                const noteIndex = this.getWrapperNoteIndex(wrapper);
+                const item = typeof AppState !== 'undefined' && noteIndex >= 0 ? AppState.items?.[noteIndex] : null;
+                const noteId = wrapper?.dataset?.noteId || item?.id || '';
+                const cachedFragments = typeof MesoSilhouetteCache !== 'undefined'
+                    ? MesoSilhouetteCache.getNormalizedDetailRects(noteId, item)
+                    : [];
+
+                if (cachedFragments.length > 0) {
                     drawMappedRect(mappedFrame, detailBaseFill);
+                    cachedFragments.forEach((fragment) => {
+                        if (detailCount >= detailCap) return;
+                        const relativeRect = {
+                            x: mappedFrame.x + fragment.x * mappedFrame.w,
+                            y: mappedFrame.y + fragment.y * mappedFrame.h,
+                            w: fragment.w * mappedFrame.w,
+                            h: fragment.h * mappedFrame.h
+                        };
+                        if (drawMappedRect(relativeRect, detailFill)) {
+                            detailCount += 1;
+                            drewDetail = true;
+                        }
+                    });
                 }
-                fragments.forEach((fragment) => {
-                    if (detailCount >= detailCap) return;
-                    const fragmentRect = fragment.getBoundingClientRect();
-                    if (fragmentRect.width < 0.5 || fragmentRect.height < 0.5) return;
-                    const relativeRect = {
-                        x: mappedFrame.x + ((fragmentRect.left - rect.left) / rect.width) * mappedFrame.w,
-                        y: mappedFrame.y + ((fragmentRect.top - rect.top) / rect.height) * mappedFrame.h,
-                        w: (fragmentRect.width / rect.width) * mappedFrame.w,
-                        h: (fragmentRect.height / rect.height) * mappedFrame.h
-                    };
-                    if (drawMappedRect(relativeRect, detailFill)) {
-                        detailCount += 1;
-                        drewDetail = true;
+
+                if (!drewDetail) {
+                    const fragments = frame.querySelectorAll('.meso-mock__line, .meso-mock__rect');
+                    if (fragments.length > 0) {
+                        drawMappedRect(mappedFrame, detailBaseFill);
                     }
-                });
+                    fragments.forEach((fragment) => {
+                        if (detailCount >= detailCap) return;
+                        const fragmentRect = fragment.getBoundingClientRect();
+                        if (fragmentRect.width < 0.5 || fragmentRect.height < 0.5) return;
+                        const relativeRect = {
+                            x: mappedFrame.x + ((fragmentRect.left - rect.left) / rect.width) * mappedFrame.w,
+                            y: mappedFrame.y + ((fragmentRect.top - rect.top) / rect.height) * mappedFrame.h,
+                            w: (fragmentRect.width / rect.width) * mappedFrame.w,
+                            h: (fragmentRect.height / rect.height) * mappedFrame.h
+                        };
+                        if (drawMappedRect(relativeRect, detailFill)) {
+                            detailCount += 1;
+                            drewDetail = true;
+                        }
+                    });
+                }
             }
 
             if (!drewDetail) {
@@ -1843,8 +1878,15 @@ const NavigationMap = {
         }
     },
 
-    getMesoFrameDetailRects(sourceElement, targetPageRect) {
-        if (!sourceElement || !targetPageRect) return [];
+    getMesoFrameDetailRects(sourceElement, targetPageRect, noteId = '', item = null) {
+        if (!targetPageRect) return [];
+
+        if (typeof MesoSilhouetteCache !== 'undefined' && noteId) {
+            const cachedRects = MesoSilhouetteCache.getDetailRects(noteId, targetPageRect, item);
+            if (cachedRects.length) return cachedRects;
+        }
+
+        if (!sourceElement) return [];
 
         const sourceRect = this.pageRectFromElement(sourceElement);
         if (!sourceRect || sourceRect.width <= 0 || sourceRect.height <= 0) return [];
@@ -1869,7 +1911,8 @@ const NavigationMap = {
     drawMesoFrameDetailMarker(ctx, t, marker, fill, baseFill) {
         if (!marker?.pageRect) return false;
 
-        const detailRects = this.getMesoFrameDetailRects(marker.sourceElement, marker.pageRect);
+        const item = typeof AppState !== 'undefined' ? AppState.items?.[marker.noteIndex] : null;
+        const detailRects = this.getMesoFrameDetailRects(marker.sourceElement, marker.pageRect, marker.noteId, item);
         if (!detailRects.length) {
             return false;
         }

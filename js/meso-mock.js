@@ -1938,6 +1938,11 @@ const MesoMock = {
     },
 
     buildProfile(item, wrapper = null) {
+        const cachedProfile = typeof MesoSilhouetteCache !== 'undefined'
+            ? MesoSilhouetteCache.getProfile(item?.id, item)
+            : null;
+        if (cachedProfile) return cachedProfile;
+
         const rawLines = (wrapper && this.measureProfileFromDOM(wrapper)) || this.buildTextSegments(item);
         return this.finalizeProfile(rawLines, item);
     },
