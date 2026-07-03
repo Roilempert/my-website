@@ -19,7 +19,6 @@ const PhysicsEngine = {
     hoveredNoteIndex: -1,
     repulsionHoldNoteIndex: -1,
     moleculeClickIntent: null,
-    moleculeIdBadge: null,
     transitionFrozen: false,
     runnerEnabled: false,
     syncLoopLastTs: 0,
@@ -125,16 +124,11 @@ const PhysicsEngine = {
             this.mouseClientX = e.clientX;
             this.mouseClientY = e.clientY;
             if (DepthController.currentLevel === 1 && this.bodiesData.length > 0) {
-                this.updateMoleculeHoverId();
+                this.updateMoleculeHoverState();
             }
         });
 
         this.initMoleculePointer();
-
-        this.moleculeIdBadge = document.createElement('div');
-        this.moleculeIdBadge.className = 'molecule-hover-id site-type';
-        this.moleculeIdBadge.setAttribute('aria-hidden', 'true');
-        document.body.appendChild(this.moleculeIdBadge);
 
         window.addEventListener('resize', () => {
             clearTimeout(this.resizeTimer);
@@ -1096,15 +1090,10 @@ const PhysicsEngine = {
 
     /* --- Note molecule outlines --- */
 
-    drawNoteOutlines() {
-        const cfg = CONFIG.outlines;
-        if (cfg.mode === 'off' || this.bodiesData.length === 0) return;
-
-        const ctx = this.linkCtx;
+    collectNoteOutlineGroups() {
         const scrollX = window.pageXOffset;
         const scrollY = window.pageYOffset;
 
-        // Group live dot positions (viewport coords) by note
         const groups = new Map();
         this.bodiesData.forEach(item => {
             if (item.isFiltered) return;
@@ -1118,26 +1107,68 @@ const PhysicsEngine = {
             });
         });
 
-        ctx.strokeStyle = this.linkColor;
-        ctx.lineWidth = cfg.width;
+        return groups;
+    },
 
+    shouldCullOutlineGroup(pts) {
         const presCull = CONFIG.presentation?.outlineViewportCull &&
             typeof isPresentationMode === 'function' && isPresentationMode();
+        if (!presCull) return false;
+
         const viewPad = CONFIG.outlines.padding + CONFIG.physics.body.radius + 48;
         const vw = window.innerWidth;
         const vh = window.innerHeight;
+        let cx = 0;
+        let cy = 0;
+        pts.forEach(p => { cx += p.x; cy += p.y; });
+        cx /= pts.length;
+        cy /= pts.length;
+        return cx < -viewPad || cx > vw + viewPad || cy < -viewPad || cy > vh + viewPad;
+    },
+
+    getMoleculeBackingFill() {
+        return CONFIG.outlines.backingFill ||
+            getComputedStyle(document.documentElement).getPropertyValue('--bg-main').trim() ||
+            '#F2F0EE';
+    },
+
+    drawNoteBackings() {
+        const cfg = CONFIG.outlines;
+        if (cfg.mode === 'off' || cfg.backing === false || this.bodiesData.length === 0) return;
+        if (!this.linkCtx) return;
+
+        const ctx = this.linkCtx;
+        const groups = this.collectNoteOutlineGroups();
+        ctx.save();
+        ctx.fillStyle = this.getMoleculeBackingFill();
 
         groups.forEach((pts, noteIndex) => {
             if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
+            if (this.shouldCullOutlineGroup(pts)) return;
 
-            if (presCull) {
-                let cx = 0;
-                let cy = 0;
-                pts.forEach(p => { cx += p.x; cy += p.y; });
-                cx /= pts.length;
-                cy /= pts.length;
-                if (cx < -viewPad || cx > vw + viewPad || cy < -viewPad || cy > vh + viewPad) return;
+            const R = pts[0].r + cfg.padding;
+            const useHull = cfg.mode === 'hull' ||
+                           (cfg.mode === 'compare' && noteIndex % 2 === 0);
+            if (useHull) {
+                this.fillHullOutline(pts, R, ctx);
             }
+        });
+
+        ctx.restore();
+    },
+
+    drawNoteOutlines() {
+        const cfg = CONFIG.outlines;
+        if (cfg.mode === 'off' || this.bodiesData.length === 0) return;
+
+        const ctx = this.linkCtx;
+        const groups = this.collectNoteOutlineGroups();
+        ctx.strokeStyle = this.linkColor;
+        ctx.lineWidth = cfg.width;
+
+        groups.forEach((pts, noteIndex) => {
+            if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
+            if (this.shouldCullOutlineGroup(pts)) return;
 
             const isHover = noteIndex === this.hoveredNoteIndex;
             ctx.lineWidth = isHover ? (cfg.hoverWidth ?? cfg.width * 2.5) : cfg.width;
@@ -1155,14 +1186,13 @@ const PhysicsEngine = {
 
     // Option A: rounded convex hull membrane (offset polygon: arcs at vertices,
     // straight tangents along edges)
-    strokeHullOutline(pts, R, ctx) {
+    traceHullOutlinePath(pts, R, ctx) {
         const hull = pts.length <= 2 ? pts : this.convexHull(pts);
 
         ctx.beginPath();
         if (hull.length === 1) {
             ctx.arc(hull[0].x, hull[0].y, R, 0, Math.PI * 2);
-            ctx.stroke();
-            return;
+            return true;
         }
 
         const n = hull.length;
@@ -1176,7 +1206,17 @@ const PhysicsEngine = {
             ctx.arc(p.x, p.y, R, a1, a2);
         }
         ctx.closePath();
+        return true;
+    },
+
+    strokeHullOutline(pts, R, ctx) {
+        if (!this.traceHullOutlinePath(pts, R, ctx)) return;
         ctx.stroke();
+    },
+
+    fillHullOutline(pts, R, ctx) {
+        if (!this.traceHullOutlinePath(pts, R, ctx)) return;
+        ctx.fill();
     },
 
     // Monotone chain; returns hull ordered clockwise in screen coords
@@ -1449,12 +1489,13 @@ const PhysicsEngine = {
         this.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
         if (macroVisualActive) {
+            this.drawNoteBackings();
             this.drawSiblingLinks();
             if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
                 DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
             }
             this.drawNoteOutlines();
-            this.updateMoleculeHoverId();
+            this.updateMoleculeHoverState();
         }
 
         if (depthFocusLinks) {
@@ -1465,6 +1506,7 @@ const PhysicsEngine = {
     flushMacroCanvas() {
         if (!this.linkCtx) return;
         this.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+        this.drawNoteBackings();
         this.drawSiblingLinks();
         if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
             DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
@@ -1599,12 +1641,8 @@ const PhysicsEngine = {
         document.addEventListener('pointercancel', this.onMoleculePointerUp);
     },
 
-    updateMoleculeHoverId() {
-        const badge = this.moleculeIdBadge;
-        if (!badge) return;
-
+    updateMoleculeHoverState() {
         if (DepthController.currentLevel !== 1 || this.bodiesData.length === 0) {
-            badge.classList.remove('is-visible');
             this.hoveredNoteIndex = -1;
             document.body.classList.remove('is-molecule-hover');
             return;
@@ -1612,7 +1650,6 @@ const PhysicsEngine = {
 
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(this.mouseClientX, this.mouseClientY)) {
-            badge.classList.remove('is-visible');
             this.hoveredNoteIndex = -1;
             document.body.classList.remove('is-molecule-hover');
             return;
@@ -1621,25 +1658,6 @@ const PhysicsEngine = {
         const noteIndex = this.hitTestMolecule(this.mouseClientX, this.mouseClientY);
         this.hoveredNoteIndex = noteIndex;
         document.body.classList.toggle('is-molecule-hover', noteIndex >= 0);
-
-        if (noteIndex < 0) {
-            badge.classList.remove('is-visible');
-            return;
-        }
-
-        const bounds = this.moleculeViewportBounds(noteIndex);
-        const wrappers = document.querySelectorAll('.note-wrapper');
-        const wrapper = wrappers[noteIndex];
-        const noteId = wrapper?.dataset.noteId;
-        if (!bounds || !noteId) {
-            badge.classList.remove('is-visible');
-            return;
-        }
-
-        badge.textContent = noteId;
-        badge.style.left = `${bounds.maxX}px`;
-        badge.style.top = `${bounds.minY}px`;
-        badge.classList.add('is-visible');
     }
 };
 

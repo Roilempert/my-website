@@ -29,7 +29,7 @@ const MicroMock = {
     buildTagsHTML(tags, options = {}) {
         const pillClass = options.noteStyle
             ? 'micro-mock__tag-pill general-t'
-            : 'action-block micro-mock__tag-block site-type';
+            : 'action-block micro-mock__tag-block general-t';
         if (!tags?.length) {
             return `<span class="${pillClass}">` +
                 `<span class="block-glyph" style="background-color:var(--color-4)"></span>` +

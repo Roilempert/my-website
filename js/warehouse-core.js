@@ -56,6 +56,10 @@ const ActionWarehouse = {
             <div class="depth-block-bar" aria-hidden="true"></div>
             <div class="warehouse-layout">
                 <div class="warehouse-dock">
+                    <div class="warehouse-panel-corners warehouse-panel-corners--dock" aria-hidden="true">
+                        <span class="warehouse-panel-corner warehouse-panel-corner--tr"></span>
+                        <span class="warehouse-panel-corner warehouse-panel-corner--br"></span>
+                    </div>
                     <div class="warehouse-statistics general-t" aria-live="polite"></div>
                     <div class="warehouse-message-port general-t">${messageText}</div>
                     <div class="action-warehouse">
@@ -68,7 +72,12 @@ const ActionWarehouse = {
                         </div>
                     </div>
                 </div>
-                <div class="warehouse-map" id="warehouse-map-mount" aria-hidden="true"></div>
+                <div class="warehouse-map" id="warehouse-map-mount" aria-hidden="true">
+                    <div class="warehouse-panel-corners warehouse-panel-corners--map" aria-hidden="true">
+                        <span class="warehouse-panel-corner warehouse-panel-corner--tl"></span>
+                        <span class="warehouse-panel-corner warehouse-panel-corner--bl"></span>
+                    </div>
+                </div>
             </div>
         `;
         this.dockElement = this.shellElement.querySelector('.action-warehouse');
@@ -291,7 +300,7 @@ const ActionWarehouse = {
 
         const el = document.createElement('div');
         const isAuthor = def.type === 'author';
-        el.classList.add('action-block', 'site-type');
+        el.classList.add('action-block', 'general-t');
         if (isAuthor) el.classList.add('action-block--author');
         el.dataset.type = def.type || 'tag';
 
@@ -334,7 +343,7 @@ const ActionWarehouse = {
 
         const el = document.createElement('div');
         const frameKind = def.frameKind || 'filter';
-        el.classList.add('action-block', 'action-block--frame', 'site-type');
+        el.classList.add('action-block', 'action-block--frame', 'general-t');
         if (frameKind === 'filter') el.classList.add('action-block--frame-filter');
         el.dataset.type = 'frame';
         el.dataset.frameKind = frameKind;

@@ -10,7 +10,13 @@ alwaysApply: false
 
 Read [`docs/visual-language.md`](../../docs/visual-language.md) for locked colors, type classes, spacing, grid marks, and component rules (warehouse, layer nav, L3 notes, inspector).
 
-Target: **21.5″ iMac @ 1920×1080**. Use `rem` / site-grid units — not raw px in CSS. Shell sizes use **`VISUAL_SCALE = 1.0`** (see doc).
+Target: **21.5″ iMac @ 1920×1080**. Shell sizes use **`VISUAL_SCALE = 1.0`** (see doc).
+
+When the user gives Figma measurements in `px`, translate them automatically:
+
+- Component spacing/padding/insets/radii in 5px jumps → `--space-*` tokens (`5px` → `var(--space-5)`, `10px` → `var(--space-10)`, `15px` → `var(--space-15)`, `20px` → `var(--space-20)`, `30px` → `var(--space-30)`, `40px` → `var(--space-40)`, `60px` → `var(--space-60)`).
+- Shell/grid layout → `--site-grid-*` or `calc(N * var(--site-grid-cell-w))`.
+- Raw `px` is acceptable only for hairlines/borders, SVG primitives, physics/canvas coordinates, and tiny debug-only values.
 
 ## After any visual change
 

@@ -39,7 +39,7 @@
 
         const el = document.createElement('div');
         const frameKind = def.frameKind || 'filter';
-        el.classList.add('action-block', 'action-block--frame', 'site-type');
+        el.classList.add('action-block', 'action-block--frame', 'general-t');
         if (frameKind === 'filter') el.classList.add('action-block--frame-filter');
         el.dataset.type = 'frame';
         el.dataset.frameKind = frameKind;

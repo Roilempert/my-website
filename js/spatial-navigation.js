@@ -148,7 +148,7 @@ const SpatialNavigation = {
         this._constraining = false;
     },
 
-    getViewportClampLimits() {
+    getViewportClampLimits(forLevel = DepthController.currentLevel) {
         const app = document.getElementById('app');
         if (!app) return null;
 
@@ -156,7 +156,7 @@ const SpatialNavigation = {
         const pad = CONFIG.navigation.contentPadding;
         const vw = window.innerWidth;
         const vh = window.innerHeight;
-        const bottomPad = pad + (DepthController.currentLevel === 1 ? ActionWarehouse.getScrollReserve() : 0);
+        const bottomPad = pad + (forLevel === 1 ? ActionWarehouse.getScrollReserve() : 0);
 
         return {
             rect,
@@ -491,15 +491,28 @@ const SpatialNavigation = {
         return this.getCatalogViewportPageRect(forLevel);
     },
 
+    // Minimap marker viewport — match the raw browser viewport, including partially covered rows.
+    getNavigationMapViewportPageRect(forLevel = DepthController.currentLevel) {
+        void forLevel;
+
+        return {
+            left: window.pageXOffset,
+            top: window.pageYOffset,
+            width: window.innerWidth,
+            height: window.innerHeight
+        };
+    },
+
     // Page-rect span of the catalog viewport at scroll extremes; keeps minimap pan aligned with scroll clamp.
     getScrollAlignedMapBounds(forLevel = DepthController.currentLevel) {
-        const pad = CONFIG.navigation.contentPadding;
-        const vpW = Math.max(0, window.innerWidth - 2 * pad);
-        const vpH = Math.max(0, window.innerHeight - pad);
-        const limits = this.getViewportClampLimits();
+        const vp = this.getNavigationMapViewportPageRect(forLevel);
+        const vpW = vp.width;
+        const vpH = vp.height;
+        const viewportOffsetX = vp.left - window.pageXOffset;
+        const viewportOffsetY = vp.top - window.pageYOffset;
+        const limits = this.getViewportClampLimits(forLevel);
 
         if (!limits) {
-            const vp = this.getCatalogViewportPageRect(forLevel);
             return {
                 minX: vp.left,
                 maxX: vp.left + vp.width,
@@ -530,10 +543,10 @@ const SpatialNavigation = {
         const achievableScrollXRight = Math.max(achievableScrollXLeft, scrollXAtRight);
 
         return {
-            minX: achievableScrollXLeft + pad,
-            maxX: achievableScrollXRight + pad + vpW,
-            minY: achievableScrollYTop + pad,
-            maxY: achievableScrollYBottom + pad + vpH
+            minX: achievableScrollXLeft + viewportOffsetX,
+            maxX: achievableScrollXRight + viewportOffsetX + vpW,
+            minY: achievableScrollYTop + viewportOffsetY,
+            maxY: achievableScrollYBottom + viewportOffsetY + vpH
         };
     },
 

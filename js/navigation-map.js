@@ -39,6 +39,7 @@ const NavigationMap = {
     _depthMapMarkersDirty: true,
     _resizeScheduled: false,
     _layoutSettleTimer: null,
+    _viewportEchoSettleTimer: null,
 
     layerMarker: null,
     _layerMarkerLoaded: false,
@@ -517,8 +518,12 @@ const NavigationMap = {
         }
 
         if (this._activeLevel === 2) {
+            const style = this.getMapStyle();
             const frame = wrapper.querySelector('.depth-v2-glyph--meso .meso-mock__frame')
                 || wrapper.querySelector('.meso-mock__frame');
+            if (frame && style.mesoMapUseFrameRects === true) {
+                return this.pageRectFromElement(frame);
+            }
             if (frame) {
                 let minX = Infinity;
                 let maxX = -Infinity;
@@ -588,7 +593,11 @@ const NavigationMap = {
         }
 
         const style = this.getMapStyle();
-        const maxCollect = Math.max(1, style.depthMapMaxCollect ?? 320);
+        const maxCollect = this._activeLevel === 1 && style.macroMapUseLayerDots === true
+            ? Math.max(1, style.macroMapMaxDots ?? 900)
+            : this._activeLevel === 2 && style.mesoMapUseFrameRects === true
+                ? Math.max(1, style.mesoMapMaxFrameRects ?? style.depthMapMaxCollect ?? 320)
+                : Math.max(1, style.depthMapMaxCollect ?? 320);
         const markers = [];
         const scrollX = window.pageXOffset;
         const scrollY = window.pageYOffset;
@@ -599,6 +608,54 @@ const NavigationMap = {
             if (!this.isMapWrapperEligible(wrapper)) return;
             const noteIndex = this.getWrapperNoteIndex(wrapper);
             if (noteIndex < 0) return;
+
+            if (this._activeLevel === 1 && style.macroMapUseLayerDots === true) {
+                wrapper.querySelectorAll('.layer-dot').forEach((dot) => {
+                    if (markers.length >= maxCollect) return;
+                    const rect = dot.getBoundingClientRect();
+                    if (rect.width < 0.5 || rect.height < 0.5) return;
+                    const left = rect.left + scrollX;
+                    const top = rect.top + scrollY;
+                    markers.push({
+                        noteIndex,
+                        x: left + rect.width / 2,
+                        y: top + rect.height / 2,
+                        pageRect: {
+                            left,
+                            top,
+                            width: rect.width,
+                            height: rect.height
+                        }
+                    });
+                });
+                return;
+            }
+
+            if (this._activeLevel === 2 && style.mesoMapUseFrameRects === true) {
+                const frame = wrapper.querySelector('.depth-v2-glyph--meso .meso-mock__frame')
+                    || wrapper.querySelector('.meso-mock__frame')
+                    || wrapper.querySelector('.meso-silhouette')
+                    || wrapper.querySelector('.depth-v2-glyph--meso');
+                const rect = frame?.getBoundingClientRect();
+                if (rect && rect.width >= 0.5 && rect.height >= 0.5) {
+                    const left = rect.left + scrollX;
+                    const top = rect.top + scrollY;
+                    markers.push({
+                        noteIndex,
+                        isMesoFrameRect: true,
+                        x: left + rect.width / 2,
+                        y: top + rect.height / 2,
+                        pageRect: {
+                            left,
+                            top,
+                            width: rect.width,
+                            height: rect.height
+                        }
+                    });
+                    return;
+                }
+            }
+
             const rect = wrapper.getBoundingClientRect();
             const left = rect.left + scrollX;
             const top = rect.top + scrollY;
@@ -666,8 +723,16 @@ const NavigationMap = {
             const focusColor = focus.active
                 ? this.resolveNoteFocusColor(noteIndex, null, focus.blocks)
                 : null;
-            const fill = focusColor || (focus.active ? mutedFill : defaultFill);
-            const pageRect = this.scaleMapPageRect(marker.pageRect, glyphScale);
+            const frameFill = level === 2 && marker.isMesoFrameRect
+                ? (style.mesoFrameFill ?? defaultFill)
+                : defaultFill;
+            const frameMutedFill = level === 2 && marker.isMesoFrameRect
+                ? (style.mesoFrameMutedFill ?? mutedFill)
+                : mutedFill;
+            const fill = focusColor || (focus.active ? frameMutedFill : frameFill);
+            const pageRect = marker.isMesoFrameRect
+                ? marker.pageRect
+                : this.scaleMapPageRect(marker.pageRect, glyphScale);
             this.drawMapPageRect(ctx, t, pageRect, fill);
 
             if (focus.active) {
@@ -802,7 +867,8 @@ const NavigationMap = {
     },
 
     getMapViewportMarkerRect() {
-        return SpatialNavigation.getViewportPageRect(this._activeLevel);
+        return SpatialNavigation.getNavigationMapViewportPageRect?.(this._activeLevel)
+            || SpatialNavigation.getViewportPageRect(this._activeLevel);
     },
 
     getMapDrawBounds() {
@@ -1378,7 +1444,7 @@ const NavigationMap = {
         const panBounds = base.panBounds || base.contentBounds;
         if (!panBounds) return;
 
-        const vp = SpatialNavigation.getViewportPageRect(this._activeLevel);
+        const vp = this.getMapViewportMarkerRect();
         const style = this.getMapStyle();
 
         let panX = 0;
@@ -1403,6 +1469,15 @@ const NavigationMap = {
         this.applyCanvasPan();
         this.updateViewportMarker(base, vp);
         this.syncLastTransform(this._activeLevel, base.contentBounds, vp);
+        const shouldEcho = this.shouldDrawViewportMarkerEcho();
+        if (shouldEcho) {
+            this.drawMapContent(this.ctx, base, this._activeLevel);
+            const echoMotionActive = this.isViewportEchoMotionActive();
+            this.drawViewportMarkerEcho({ detail: !echoMotionActive });
+            if (echoMotionActive) {
+                this.scheduleViewportEchoSettle();
+            }
+        }
     },
 
     drawMapContent(ctx, t, level) {
@@ -1430,6 +1505,140 @@ const NavigationMap = {
 
         const markers = SpatialNavigation.getContentMarkersForLevel(level);
         this.drawLevelContent(ctx, t, level, markers);
+    },
+
+    shouldDrawViewportMarkerEcho() {
+        const style = this.getMapStyle();
+        return this._activeLevel === 2 &&
+            style.mesoMapViewportEcho === true &&
+            !!this.ctx &&
+            !!this.canvas &&
+            !!this.viewportMarker &&
+            !this.viewportMarker.classList.contains('is-hidden');
+    },
+
+    isViewportEchoMotionActive() {
+        const spatialActive = typeof SpatialNavigation !== 'undefined' &&
+            (SpatialNavigation.isScrolling === true || SpatialNavigation.pan?.active === true);
+        const depthActive = typeof DepthController !== 'undefined' &&
+            DepthController.isAnyTransitionActive?.() === true;
+        return this._navDragActive ||
+            spatialActive ||
+            depthActive;
+    },
+
+    scheduleViewportEchoSettle() {
+        clearTimeout(this._viewportEchoSettleTimer);
+        const delay = this.getMapStyle().mesoMapEchoSettleMs ?? 120;
+        this._viewportEchoSettleTimer = setTimeout(() => {
+            this._viewportEchoSettleTimer = null;
+            if (!this.shouldDrawViewportMarkerEcho() || this.isViewportEchoMotionActive()) return;
+            if (this._baseTransform && this.ctx) {
+                this.drawMapContent(this.ctx, this._baseTransform, this._activeLevel);
+                this.drawViewportMarkerEcho({ detail: true });
+            }
+        }, delay);
+    },
+
+    drawViewportMarkerEcho(options = {}) {
+        if (!this.shouldDrawViewportMarkerEcho()) {
+            return;
+        }
+
+        const style = this.getMapStyle();
+
+        const markerRect = this.viewportMarker.getBoundingClientRect();
+        const canvasRect = this.canvas.getBoundingClientRect();
+        const mapWrapRect = this.mapWrap?.getBoundingClientRect();
+        if (
+            markerRect.width < 1 ||
+            markerRect.height < 1 ||
+            canvasRect.width < 1 ||
+            canvasRect.height < 1 ||
+            !mapWrapRect ||
+            mapWrapRect.width < 1 ||
+            mapWrapRect.height < 1
+        ) {
+            return;
+        }
+
+        const markerX = markerRect.left - canvasRect.left;
+        const markerY = markerRect.top - canvasRect.top;
+        const markerW = markerRect.width;
+        const markerH = markerRect.height;
+        const clipX = mapWrapRect.left - canvasRect.left;
+        const clipY = mapWrapRect.top - canvasRect.top;
+        const clipW = mapWrapRect.width;
+        const clipH = mapWrapRect.height;
+        const fill = style.mesoFrameEchoFill
+            ?? style.mesoFrameFill
+            ?? style.mesoLineFill
+            ?? 'rgba(16, 16, 16, 0.62)';
+        const detailFill = style.mesoSilhouetteDetailFill ?? fill;
+        const useDetail = options.detail !== false && style.mesoMapSilhouetteDetail === true;
+        const detailCap = Math.max(0, style.mesoMapMaxDetailRects ?? 220);
+        const viewportW = Math.max(1, window.innerWidth);
+        const viewportH = Math.max(1, window.innerHeight);
+        let frames = [...document.querySelectorAll('.meso-mock__frame, .meso-silhouette')]
+            .filter((el, index, all) => all.indexOf(el) === index);
+        if (!frames.length) {
+            frames = [...document.querySelectorAll('.depth-v2-glyph--meso')]
+                .filter((el, index, all) => all.indexOf(el) === index);
+        }
+
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.clearRect(clipX, clipY, clipW, clipH);
+        ctx.beginPath();
+        ctx.rect(clipX, clipY, clipW, clipH);
+        ctx.clip();
+
+        const mapRect = (rect) => {
+            const x = markerX + (rect.left / viewportW) * markerW;
+            const y = markerY + (rect.top / viewportH) * markerH;
+            const w = (rect.width / viewportW) * markerW;
+            const h = (rect.height / viewportH) * markerH;
+            return { x, y, w, h };
+        };
+
+        const intersectsClip = ({ x, y, w, h }) =>
+            x + w >= clipX && x <= clipX + clipW && y + h >= clipY && y <= clipY + clipH;
+
+        const drawMappedRect = ({ x, y, w, h }, rectFill) => {
+            if (w <= 0 || h <= 0 || !intersectsClip({ x, y, w, h })) return false;
+            ctx.fillStyle = rectFill;
+            ctx.fillRect(x, y, w, h);
+            return true;
+        };
+
+        let detailCount = 0;
+
+        frames.forEach((frame) => {
+            const rect = frame.getBoundingClientRect();
+            if (rect.width < 0.5 || rect.height < 0.5) return;
+            const mappedFrame = mapRect(rect);
+            if (!intersectsClip(mappedFrame)) return;
+
+            let drewDetail = false;
+            if (useDetail && detailCount < detailCap) {
+                const fragments = frame.querySelectorAll('.meso-mock__line, .meso-mock__rect');
+                fragments.forEach((fragment) => {
+                    if (detailCount >= detailCap) return;
+                    const fragmentRect = fragment.getBoundingClientRect();
+                    if (fragmentRect.width < 0.5 || fragmentRect.height < 0.5) return;
+                    if (drawMappedRect(mapRect(fragmentRect), detailFill)) {
+                        detailCount += 1;
+                        drewDetail = true;
+                    }
+                });
+            }
+
+            if (!drewDetail) {
+                drawMappedRect(mappedFrame, fill);
+            }
+        });
+
+        ctx.restore();
     },
 
     render() {
@@ -1461,7 +1670,7 @@ const NavigationMap = {
             const panBounds = this.getMapPanBounds();
             if (!frameBounds || !panBounds) return;
 
-            const vp = SpatialNavigation.getViewportPageRect(level);
+            const vp = this.getMapViewportMarkerRect();
 
             this._cachedContentBounds = frameBounds;
             this._baseTransform = this.computeTransform(
@@ -1941,9 +2150,63 @@ const NavigationMap = {
     },
 
     drawMesoLineRects(ctx, t, root, fill) {
-        root.querySelectorAll('.meso-mock__line, .meso-mock__rect').forEach((lineEl) => {
-            const pageRect = this.pageRectFromElement(lineEl);
-            if (pageRect) this.drawMapPageRect(ctx, t, pageRect, fill);
+        const lineRects = [...root.querySelectorAll('.meso-mock__line, .meso-mock__rect')]
+            .map((lineEl) => this.pageRectFromElement(lineEl))
+            .filter(Boolean);
+        if (!lineRects.length) return;
+
+        const style = this.getMapStyle();
+        const glyphScale = style.mesoMapSilhouetteFragmentScale ?? this.getLevelGlyphScale(2);
+        const shouldScale = style.mesoMapScaleSilhouetteFragments !== false && glyphScale !== 1;
+        const frameRect = style.mesoMapCenterSilhouetteFragments === true || shouldScale
+            ? this.pageRectFromElement(root)
+            : null;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        if (frameRect) {
+            let minX = Infinity;
+            let maxX = -Infinity;
+            let minY = Infinity;
+            let maxY = -Infinity;
+
+            lineRects.forEach((rect) => {
+                minX = Math.min(minX, rect.left);
+                maxX = Math.max(maxX, rect.left + rect.width);
+                minY = Math.min(minY, rect.top);
+                maxY = Math.max(maxY, rect.top + rect.height);
+            });
+
+            if (Number.isFinite(minX)) {
+                const linesCx = (minX + maxX) / 2;
+                const linesCy = (minY + maxY) / 2;
+                const frameCx = frameRect.left + frameRect.width / 2;
+                const frameCy = frameRect.top + frameRect.height / 2;
+                offsetX = frameCx - linesCx;
+                offsetY = frameCy - linesCy;
+            }
+        }
+
+        const scaleAroundFrame = (rect) => {
+            if (!frameRect || !shouldScale) return rect;
+            const frameCx = frameRect.left + frameRect.width / 2;
+            const frameCy = frameRect.top + frameRect.height / 2;
+            return {
+                left: frameCx + (rect.left - frameCx) * glyphScale,
+                top: frameCy + (rect.top - frameCy) * glyphScale,
+                width: rect.width * glyphScale,
+                height: rect.height * glyphScale
+            };
+        };
+
+        lineRects.forEach((pageRect) => {
+            const adjustedRect = scaleAroundFrame({
+                left: pageRect.left + offsetX,
+                top: pageRect.top + offsetY,
+                width: pageRect.width,
+                height: pageRect.height
+            });
+            this.drawMapPageRect(ctx, t, adjustedRect, fill);
         });
     },
 
@@ -1975,10 +2238,16 @@ const NavigationMap = {
 
     drawMesoSilhouettes(ctx, t) {
         const style = this.getMapStyle();
-        const defaultFill = style.mesoLineFill ?? 'rgba(16, 16, 16, 0.62)';
+        if (style.mesoMapUseFrameRects === true) {
+            this.drawDepthMapMarkers(ctx, t, 2);
+            return;
+        }
+
+        const defaultFill = style.mesoSilhouetteDetailFill
+            ?? style.mesoLineFill
+            ?? 'rgba(16, 16, 16, 0.62)';
         const mutedFill = style.mesoLineMutedFill ?? 'rgba(16, 16, 16, 0.14)';
         const focus = this.getBlockFocusState();
-        const glyphScale = this.getLevelGlyphScale(2);
         const wrappers = this.getMapNoteWrappers();
         if (!wrappers.length) {
             this.drawDepthMapMarkers(ctx, t, 2);
@@ -2027,17 +2296,18 @@ const NavigationMap = {
                 return;
             }
 
-            const host = wrapper.querySelector('.meso-silhouette')
-                || wrapper.querySelector('.depth-v2-glyph--meso');
+            if (style.mesoMapAllowFrameFallback !== true) return;
+
+            const host = wrapper.querySelector('.depth-v2-glyph--meso');
             const pageRect = this.pageRectFromElement(host || wrapper);
-            if (pageRect) {
-                this.drawMapPageRect(ctx, t, this.scaleMapPageRect(pageRect, glyphScale), fill);
-                if (matchBlock) {
-                    this.drawFocusConnector(ctx, t, {
-                        x: pageRect.left + pageRect.width / 2,
-                        y: pageRect.top + pageRect.height / 2
-                    }, matchBlock);
-                }
+            if (!pageRect) return;
+
+            this.drawMapPageRect(ctx, t, pageRect, fill);
+            if (matchBlock) {
+                this.drawFocusConnector(ctx, t, {
+                    x: pageRect.left + pageRect.width / 2,
+                    y: pageRect.top + pageRect.height / 2
+                }, matchBlock);
             }
         });
 
@@ -2137,7 +2407,7 @@ const NavigationMap = {
         if (!base) return { x: panX, y: panY };
 
         const panBounds = base.panBounds || base.contentBounds;
-        const vp = SpatialNavigation.getViewportPageRect(this._activeLevel);
+        const vp = this.getMapViewportMarkerRect();
         const scrollPan = this.getScrollPanLimits(base, panBounds, base.scale, vp);
         if (!scrollPan) return { x: panX, y: panY };
 
@@ -2280,7 +2550,7 @@ const NavigationMap = {
                 const mx = e.clientX - rect.left;
                 const my = e.clientY - rect.top;
                 const page = this.mapPointToPage(mx, my, t, contentBounds);
-                const vp = SpatialNavigation.getViewportPageRect(this._activeLevel);
+                const vp = this.getMapViewportMarkerRect();
                 this.scrollViewportTo(page.x - vp.width / 2, page.y - vp.height / 2);
             }
         }

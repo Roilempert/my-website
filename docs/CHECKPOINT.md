@@ -112,8 +112,10 @@ navigation.contentPadding: scale(120)
 
 - **Fixed marker:** `viewportMarkerMode: 'fixed'` — same marker size L1/L2/L3; map pans under center
 - **Scale:** marker-driven via `computeFixedMarkerScale`; L3 trim `levelMapScaleAdjust: { 3: 0.92 }`
-- **Viewport rect:** `getCatalogViewportPageRect()` — includes bottom chrome; do not subtract scroll reserve from height
-- **L3 bounds:** `getDepthMapMarkerBounds()` (note cards + pad), not raw `#app` alone
+- **Viewport rect:** `getCatalogViewportPageRect()` stays unchanged for general catalog math; `getNavigationMapViewportPageRect()` is minimap-only and tracks the raw browser viewport
+- **L1 markers:** `macroMapUseLayerDots: true` — draw live `.layer-dot` positions so the marker visually matches dense macro rows
+- **L2 markers:** `mesoMapUseFrameRects: true` + `mesoMapViewportEcho: true` + `mesoMapSilhouetteDetail: false` — draw stable `.meso-mock__frame` rectangles plus the viewport echo; do not use internal line fragments because they caused missing/overlapping markers
+- **L2/L3 bounds:** `getDepthMapMarkerBounds()` (drawn glyph/card rects + pad), not raw `#app` alone
 - **Do not** drive fixed-mode scale from `levelMapOverscan` alone — causes edge slack / marker outside map
 
 ## Fixed bugs (do not reintroduce)

@@ -8,14 +8,14 @@ const scale = (px) => Math.round(px * VISUAL_SCALE);
 /* Exhibition type scale — keep in sync with .general-h/t, .note-h/t in styles.css */
 const TYPE_SCALE = {
     generalH: { sizePt: 66, linePt: 56, weight: 700 },
-    generalT: { sizePt: 20, linePt: 20, weight: 700 },
+    generalT: { sizeRem: 1, line: 1, weight: 700 },
     noteH:    { sizePt: 86, line: 0.9, weight: 700, style: 'italic', letterSpacing: '-0.01em' },
     noteT:    { sizePt: 18, line: 1.2, weight: 400 },
     /* Legacy aliases for gradual migration */
     display: { sizeRem: 5.375, sizePx: 86, line: 0.9, weight: 700, style: 'italic' },
     body:    { sizeRem: 1.125, sizePx: 18, line: 1.2, weight: 400, maxCh: 55 },
-    meta:    { sizeRem: 1.25, sizePx: 20, line: 1, weight: 700 },
-    ui:      { sizePt: 20, line: 1, weight: 700 },
+    meta:    { sizeRem: 1, sizePx: 16, line: 1, weight: 700 },
+    ui:      { sizeRem: 1, line: 1, weight: 700 },
     nav:     { sizeRem: 4.125, line: 0.848, weight: 700, weightActive: 700 },
     debug:   { sizePx: 9 }
 };
@@ -36,7 +36,7 @@ const CONFIG = {
         rows: 10,
         padding: { value: 1.25, unit: 'rem' },  // exhibition: 20px @ 16px root
         gap: { value: 1.25, unit: 'rem' },
-        crossStep: 1,                           // mark at every intersection
+        crossStep: 2,                           // mark every second row/column intersection
         debug: false,
         // Reference regions in grid coordinates (colEnd/rowEnd exclusive).
         // Scale/anchor tokens only — layers stay free (scroll, drag, overflow).
@@ -441,10 +441,23 @@ const CONFIG = {
         macroFocusDetailsWhenBlocks: true,
         macroFocusConnectors: false,
         macroBlockMarkers: true,
-        macroDotRadius: 1.5,
+        macroDotRadius: 1.15,
         macroDotFill: 'rgba(45, 45, 45, 0.45)',
         macroDotMutedFill: 'rgba(45, 45, 45, 0.14)',
         mesoMapDetailed: true,
+        mesoMapUseFrameRects: true,
+        mesoMapMaxFrameRects: 320,
+        mesoMapViewportEcho: true,
+        mesoMapSilhouetteDetail: false,
+        mesoMapCenterSilhouetteFragments: false,
+        mesoMapScaleSilhouetteFragments: false,
+        mesoMapSilhouetteFragmentScale: 1,
+        mesoMapMaxDetailRects: 220,
+        mesoMapEchoSettleMs: 120,
+        mesoFrameFill: 'rgba(45, 45, 45, 0.28)',
+        mesoFrameMutedFill: 'rgba(45, 45, 45, 0.1)',
+        mesoFrameEchoFill: 'rgba(45, 45, 45, 0.32)',
+        mesoSilhouetteDetailFill: 'rgba(45, 45, 45, 0.34)',
         mesoLineFill: 'rgba(45, 45, 45, 0.18)',
         mesoLineMutedFill: 'rgba(45, 45, 45, 0.08)',
         mesoPathFill: 'rgba(45, 45, 45, 0.14)',
@@ -453,20 +466,22 @@ const CONFIG = {
         noteCardStroke: 'rgba(45, 45, 45, 0.12)',
         noteBlockFill: 'rgba(45, 45, 45, 0.22)',
         noteBlockMutedFill: 'rgba(45, 45, 45, 0.09)',
-        noteBlockMinHeight: 0.75,
-        blockMarkerSize: 3.5,
+        noteBlockMinHeight: 0.5,
+        blockMarkerSize: 2.5,
         blockConnectorAlpha: 0.28,
         authorBlockColor: '#2D2D2D',
-        /* L1 minimap — DOM wrapper centers match on-screen notes (not physics-only) */
+        /* L1 minimap — live DOM layer dots match the visible macro field (not physics-only) */
         macroMapUseDomPositions: true,
+        macroMapUseLayerDots: true,
+        macroMapMaxDots: 900,
         /* Shared macro coordinate frame on L1 only; L2/L3 fit active grid layout */
         sharedReferenceScale: true,
-        /* Fixed viewport marker UI size; map scale per layer via levelMapOverscan */
+        /* Fixed viewport marker UI size; map scale follows the visible map viewport */
         viewportMarkerMode: 'fixed',
-        viewportMarkerWidthRatio: 0.92,
-        viewportMarkerHeightRatio: 0.56,
+        viewportMarkerWidthRatio: 0.72,
+        viewportMarkerHeightRatio: 0.4,
         /* Per-layer glyph size on the shared frame (not map scale) */
-        levelGlyphScale: { 1: 1, 2: 1, 3: 1 },
+        levelGlyphScale: { 1: 0.78, 2: 0.72, 3: 0.7 },
         /* L2/L3 minimap — cell rects from one batched DOM read; no full silhouette bake */
         depthMapLayoutSettleMs: 480,
         depthMapMaxCollect: 320,
@@ -592,7 +607,7 @@ const CONFIG = {
     /* --- Action Warehouse (bottom portal dock) --- */
     warehouse: {
         blockHeight: 26,            // px; pill height — fits .site-type
-        blockGlyphSize: 12,         // px; colored tag circle inside the pill
+        blockGlyphSize: 10,         // px; matches L1 molecule dot size on exhibition iMac
         // Black filter/deletion frame in tray — archived: js/archive/warehouse-filter-frame.js
         enableFilterFrame: false,
         // Block cap — policy: docs/block-cap-policy.md (hard limit 5; kinematic at 6+ deferred)
@@ -1097,7 +1112,7 @@ function applyTypographyTokens() {
     root.style.setProperty('--type-display-size', `${t.display.sizeRem}rem`);
     root.style.setProperty('--type-body-size', `${t.body.sizeRem}rem`);
     root.style.setProperty('--type-meta-size', `${t.meta.sizeRem}rem`);
-    root.style.setProperty('--type-ui-size', `${t.ui.sizePt}pt`);
+    root.style.setProperty('--type-ui-size', `${t.ui.sizeRem}rem`);
     root.style.setProperty('--type-nav-size', `${t.nav.sizeRem}rem`);
     root.style.setProperty('--type-debug-size', `${t.debug.sizePx}px`);
 }

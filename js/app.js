@@ -3897,7 +3897,7 @@ const MicroMock = {
     buildTagsHTML(tags, options = {}) {
         const pillClass = options.noteStyle
             ? 'micro-mock__tag-pill general-t'
-            : 'action-block micro-mock__tag-block site-type';
+            : 'action-block micro-mock__tag-block general-t';
         if (!tags?.length) {
             return `<span class="${pillClass}">` +
                 `<span class="block-glyph" style="background-color:var(--color-4)"></span>` +
@@ -7459,7 +7459,7 @@ const SpatialNavigation = {
         this._constraining = false;
     },
 
-    getViewportClampLimits() {
+    getViewportClampLimits(forLevel = DepthController.currentLevel) {
         const app = document.getElementById('app');
         if (!app) return null;
 
@@ -7467,7 +7467,7 @@ const SpatialNavigation = {
         const pad = CONFIG.navigation.contentPadding;
         const vw = window.innerWidth;
         const vh = window.innerHeight;
-        const bottomPad = pad + (DepthController.currentLevel === 1 ? ActionWarehouse.getScrollReserve() : 0);
+        const bottomPad = pad + (forLevel === 1 ? ActionWarehouse.getScrollReserve() : 0);
 
         return {
             rect,
@@ -7802,15 +7802,28 @@ const SpatialNavigation = {
         return this.getCatalogViewportPageRect(forLevel);
     },
 
+    // Minimap marker viewport — match the raw browser viewport, including partially covered rows.
+    getNavigationMapViewportPageRect(forLevel = DepthController.currentLevel) {
+        void forLevel;
+
+        return {
+            left: window.pageXOffset,
+            top: window.pageYOffset,
+            width: window.innerWidth,
+            height: window.innerHeight
+        };
+    },
+
     // Page-rect span of the catalog viewport at scroll extremes; keeps minimap pan aligned with scroll clamp.
     getScrollAlignedMapBounds(forLevel = DepthController.currentLevel) {
-        const pad = CONFIG.navigation.contentPadding;
-        const vpW = Math.max(0, window.innerWidth - 2 * pad);
-        const vpH = Math.max(0, window.innerHeight - pad);
-        const limits = this.getViewportClampLimits();
+        const vp = this.getNavigationMapViewportPageRect(forLevel);
+        const vpW = vp.width;
+        const vpH = vp.height;
+        const viewportOffsetX = vp.left - window.pageXOffset;
+        const viewportOffsetY = vp.top - window.pageYOffset;
+        const limits = this.getViewportClampLimits(forLevel);
 
         if (!limits) {
-            const vp = this.getCatalogViewportPageRect(forLevel);
             return {
                 minX: vp.left,
                 maxX: vp.left + vp.width,
@@ -7841,10 +7854,10 @@ const SpatialNavigation = {
         const achievableScrollXRight = Math.max(achievableScrollXLeft, scrollXAtRight);
 
         return {
-            minX: achievableScrollXLeft + pad,
-            maxX: achievableScrollXRight + pad + vpW,
-            minY: achievableScrollYTop + pad,
-            maxY: achievableScrollYBottom + pad + vpH
+            minX: achievableScrollXLeft + viewportOffsetX,
+            maxX: achievableScrollXRight + viewportOffsetX + vpW,
+            minY: achievableScrollYTop + viewportOffsetY,
+            maxY: achievableScrollYBottom + viewportOffsetY + vpH
         };
     },
 
@@ -8207,6 +8220,7 @@ const NavigationMap = {
     _depthMapMarkersDirty: true,
     _resizeScheduled: false,
     _layoutSettleTimer: null,
+    _viewportEchoSettleTimer: null,
 
     layerMarker: null,
     _layerMarkerLoaded: false,
@@ -8685,8 +8699,12 @@ const NavigationMap = {
         }
 
         if (this._activeLevel === 2) {
+            const style = this.getMapStyle();
             const frame = wrapper.querySelector('.depth-v2-glyph--meso .meso-mock__frame')
                 || wrapper.querySelector('.meso-mock__frame');
+            if (frame && style.mesoMapUseFrameRects === true) {
+                return this.pageRectFromElement(frame);
+            }
             if (frame) {
                 let minX = Infinity;
                 let maxX = -Infinity;
@@ -8756,7 +8774,11 @@ const NavigationMap = {
         }
 
         const style = this.getMapStyle();
-        const maxCollect = Math.max(1, style.depthMapMaxCollect ?? 320);
+        const maxCollect = this._activeLevel === 1 && style.macroMapUseLayerDots === true
+            ? Math.max(1, style.macroMapMaxDots ?? 900)
+            : this._activeLevel === 2 && style.mesoMapUseFrameRects === true
+                ? Math.max(1, style.mesoMapMaxFrameRects ?? style.depthMapMaxCollect ?? 320)
+                : Math.max(1, style.depthMapMaxCollect ?? 320);
         const markers = [];
         const scrollX = window.pageXOffset;
         const scrollY = window.pageYOffset;
@@ -8767,6 +8789,54 @@ const NavigationMap = {
             if (!this.isMapWrapperEligible(wrapper)) return;
             const noteIndex = this.getWrapperNoteIndex(wrapper);
             if (noteIndex < 0) return;
+
+            if (this._activeLevel === 1 && style.macroMapUseLayerDots === true) {
+                wrapper.querySelectorAll('.layer-dot').forEach((dot) => {
+                    if (markers.length >= maxCollect) return;
+                    const rect = dot.getBoundingClientRect();
+                    if (rect.width < 0.5 || rect.height < 0.5) return;
+                    const left = rect.left + scrollX;
+                    const top = rect.top + scrollY;
+                    markers.push({
+                        noteIndex,
+                        x: left + rect.width / 2,
+                        y: top + rect.height / 2,
+                        pageRect: {
+                            left,
+                            top,
+                            width: rect.width,
+                            height: rect.height
+                        }
+                    });
+                });
+                return;
+            }
+
+            if (this._activeLevel === 2 && style.mesoMapUseFrameRects === true) {
+                const frame = wrapper.querySelector('.depth-v2-glyph--meso .meso-mock__frame')
+                    || wrapper.querySelector('.meso-mock__frame')
+                    || wrapper.querySelector('.meso-silhouette')
+                    || wrapper.querySelector('.depth-v2-glyph--meso');
+                const rect = frame?.getBoundingClientRect();
+                if (rect && rect.width >= 0.5 && rect.height >= 0.5) {
+                    const left = rect.left + scrollX;
+                    const top = rect.top + scrollY;
+                    markers.push({
+                        noteIndex,
+                        isMesoFrameRect: true,
+                        x: left + rect.width / 2,
+                        y: top + rect.height / 2,
+                        pageRect: {
+                            left,
+                            top,
+                            width: rect.width,
+                            height: rect.height
+                        }
+                    });
+                    return;
+                }
+            }
+
             const rect = wrapper.getBoundingClientRect();
             const left = rect.left + scrollX;
             const top = rect.top + scrollY;
@@ -8834,8 +8904,16 @@ const NavigationMap = {
             const focusColor = focus.active
                 ? this.resolveNoteFocusColor(noteIndex, null, focus.blocks)
                 : null;
-            const fill = focusColor || (focus.active ? mutedFill : defaultFill);
-            const pageRect = this.scaleMapPageRect(marker.pageRect, glyphScale);
+            const frameFill = level === 2 && marker.isMesoFrameRect
+                ? (style.mesoFrameFill ?? defaultFill)
+                : defaultFill;
+            const frameMutedFill = level === 2 && marker.isMesoFrameRect
+                ? (style.mesoFrameMutedFill ?? mutedFill)
+                : mutedFill;
+            const fill = focusColor || (focus.active ? frameMutedFill : frameFill);
+            const pageRect = marker.isMesoFrameRect
+                ? marker.pageRect
+                : this.scaleMapPageRect(marker.pageRect, glyphScale);
             this.drawMapPageRect(ctx, t, pageRect, fill);
 
             if (focus.active) {
@@ -8970,7 +9048,8 @@ const NavigationMap = {
     },
 
     getMapViewportMarkerRect() {
-        return SpatialNavigation.getViewportPageRect(this._activeLevel);
+        return SpatialNavigation.getNavigationMapViewportPageRect?.(this._activeLevel)
+            || SpatialNavigation.getViewportPageRect(this._activeLevel);
     },
 
     getMapDrawBounds() {
@@ -9546,7 +9625,7 @@ const NavigationMap = {
         const panBounds = base.panBounds || base.contentBounds;
         if (!panBounds) return;
 
-        const vp = SpatialNavigation.getViewportPageRect(this._activeLevel);
+        const vp = this.getMapViewportMarkerRect();
         const style = this.getMapStyle();
 
         let panX = 0;
@@ -9571,6 +9650,15 @@ const NavigationMap = {
         this.applyCanvasPan();
         this.updateViewportMarker(base, vp);
         this.syncLastTransform(this._activeLevel, base.contentBounds, vp);
+        const shouldEcho = this.shouldDrawViewportMarkerEcho();
+        if (shouldEcho) {
+            this.drawMapContent(this.ctx, base, this._activeLevel);
+            const echoMotionActive = this.isViewportEchoMotionActive();
+            this.drawViewportMarkerEcho({ detail: !echoMotionActive });
+            if (echoMotionActive) {
+                this.scheduleViewportEchoSettle();
+            }
+        }
     },
 
     drawMapContent(ctx, t, level) {
@@ -9598,6 +9686,140 @@ const NavigationMap = {
 
         const markers = SpatialNavigation.getContentMarkersForLevel(level);
         this.drawLevelContent(ctx, t, level, markers);
+    },
+
+    shouldDrawViewportMarkerEcho() {
+        const style = this.getMapStyle();
+        return this._activeLevel === 2 &&
+            style.mesoMapViewportEcho === true &&
+            !!this.ctx &&
+            !!this.canvas &&
+            !!this.viewportMarker &&
+            !this.viewportMarker.classList.contains('is-hidden');
+    },
+
+    isViewportEchoMotionActive() {
+        const spatialActive = typeof SpatialNavigation !== 'undefined' &&
+            (SpatialNavigation.isScrolling === true || SpatialNavigation.pan?.active === true);
+        const depthActive = typeof DepthController !== 'undefined' &&
+            DepthController.isAnyTransitionActive?.() === true;
+        return this._navDragActive ||
+            spatialActive ||
+            depthActive;
+    },
+
+    scheduleViewportEchoSettle() {
+        clearTimeout(this._viewportEchoSettleTimer);
+        const delay = this.getMapStyle().mesoMapEchoSettleMs ?? 120;
+        this._viewportEchoSettleTimer = setTimeout(() => {
+            this._viewportEchoSettleTimer = null;
+            if (!this.shouldDrawViewportMarkerEcho() || this.isViewportEchoMotionActive()) return;
+            if (this._baseTransform && this.ctx) {
+                this.drawMapContent(this.ctx, this._baseTransform, this._activeLevel);
+                this.drawViewportMarkerEcho({ detail: true });
+            }
+        }, delay);
+    },
+
+    drawViewportMarkerEcho(options = {}) {
+        if (!this.shouldDrawViewportMarkerEcho()) {
+            return;
+        }
+
+        const style = this.getMapStyle();
+
+        const markerRect = this.viewportMarker.getBoundingClientRect();
+        const canvasRect = this.canvas.getBoundingClientRect();
+        const mapWrapRect = this.mapWrap?.getBoundingClientRect();
+        if (
+            markerRect.width < 1 ||
+            markerRect.height < 1 ||
+            canvasRect.width < 1 ||
+            canvasRect.height < 1 ||
+            !mapWrapRect ||
+            mapWrapRect.width < 1 ||
+            mapWrapRect.height < 1
+        ) {
+            return;
+        }
+
+        const markerX = markerRect.left - canvasRect.left;
+        const markerY = markerRect.top - canvasRect.top;
+        const markerW = markerRect.width;
+        const markerH = markerRect.height;
+        const clipX = mapWrapRect.left - canvasRect.left;
+        const clipY = mapWrapRect.top - canvasRect.top;
+        const clipW = mapWrapRect.width;
+        const clipH = mapWrapRect.height;
+        const fill = style.mesoFrameEchoFill
+            ?? style.mesoFrameFill
+            ?? style.mesoLineFill
+            ?? 'rgba(16, 16, 16, 0.62)';
+        const detailFill = style.mesoSilhouetteDetailFill ?? fill;
+        const useDetail = options.detail !== false && style.mesoMapSilhouetteDetail === true;
+        const detailCap = Math.max(0, style.mesoMapMaxDetailRects ?? 220);
+        const viewportW = Math.max(1, window.innerWidth);
+        const viewportH = Math.max(1, window.innerHeight);
+        let frames = [...document.querySelectorAll('.meso-mock__frame, .meso-silhouette')]
+            .filter((el, index, all) => all.indexOf(el) === index);
+        if (!frames.length) {
+            frames = [...document.querySelectorAll('.depth-v2-glyph--meso')]
+                .filter((el, index, all) => all.indexOf(el) === index);
+        }
+
+        const ctx = this.ctx;
+        ctx.save();
+        ctx.clearRect(clipX, clipY, clipW, clipH);
+        ctx.beginPath();
+        ctx.rect(clipX, clipY, clipW, clipH);
+        ctx.clip();
+
+        const mapRect = (rect) => {
+            const x = markerX + (rect.left / viewportW) * markerW;
+            const y = markerY + (rect.top / viewportH) * markerH;
+            const w = (rect.width / viewportW) * markerW;
+            const h = (rect.height / viewportH) * markerH;
+            return { x, y, w, h };
+        };
+
+        const intersectsClip = ({ x, y, w, h }) =>
+            x + w >= clipX && x <= clipX + clipW && y + h >= clipY && y <= clipY + clipH;
+
+        const drawMappedRect = ({ x, y, w, h }, rectFill) => {
+            if (w <= 0 || h <= 0 || !intersectsClip({ x, y, w, h })) return false;
+            ctx.fillStyle = rectFill;
+            ctx.fillRect(x, y, w, h);
+            return true;
+        };
+
+        let detailCount = 0;
+
+        frames.forEach((frame) => {
+            const rect = frame.getBoundingClientRect();
+            if (rect.width < 0.5 || rect.height < 0.5) return;
+            const mappedFrame = mapRect(rect);
+            if (!intersectsClip(mappedFrame)) return;
+
+            let drewDetail = false;
+            if (useDetail && detailCount < detailCap) {
+                const fragments = frame.querySelectorAll('.meso-mock__line, .meso-mock__rect');
+                fragments.forEach((fragment) => {
+                    if (detailCount >= detailCap) return;
+                    const fragmentRect = fragment.getBoundingClientRect();
+                    if (fragmentRect.width < 0.5 || fragmentRect.height < 0.5) return;
+                    if (drawMappedRect(mapRect(fragmentRect), detailFill)) {
+                        detailCount += 1;
+                        drewDetail = true;
+                    }
+                });
+            }
+
+            if (!drewDetail) {
+                drawMappedRect(mappedFrame, fill);
+            }
+        });
+
+        ctx.restore();
     },
 
     render() {
@@ -9629,7 +9851,7 @@ const NavigationMap = {
             const panBounds = this.getMapPanBounds();
             if (!frameBounds || !panBounds) return;
 
-            const vp = SpatialNavigation.getViewportPageRect(level);
+            const vp = this.getMapViewportMarkerRect();
 
             this._cachedContentBounds = frameBounds;
             this._baseTransform = this.computeTransform(
@@ -10109,9 +10331,63 @@ const NavigationMap = {
     },
 
     drawMesoLineRects(ctx, t, root, fill) {
-        root.querySelectorAll('.meso-mock__line, .meso-mock__rect').forEach((lineEl) => {
-            const pageRect = this.pageRectFromElement(lineEl);
-            if (pageRect) this.drawMapPageRect(ctx, t, pageRect, fill);
+        const lineRects = [...root.querySelectorAll('.meso-mock__line, .meso-mock__rect')]
+            .map((lineEl) => this.pageRectFromElement(lineEl))
+            .filter(Boolean);
+        if (!lineRects.length) return;
+
+        const style = this.getMapStyle();
+        const glyphScale = style.mesoMapSilhouetteFragmentScale ?? this.getLevelGlyphScale(2);
+        const shouldScale = style.mesoMapScaleSilhouetteFragments !== false && glyphScale !== 1;
+        const frameRect = style.mesoMapCenterSilhouetteFragments === true || shouldScale
+            ? this.pageRectFromElement(root)
+            : null;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        if (frameRect) {
+            let minX = Infinity;
+            let maxX = -Infinity;
+            let minY = Infinity;
+            let maxY = -Infinity;
+
+            lineRects.forEach((rect) => {
+                minX = Math.min(minX, rect.left);
+                maxX = Math.max(maxX, rect.left + rect.width);
+                minY = Math.min(minY, rect.top);
+                maxY = Math.max(maxY, rect.top + rect.height);
+            });
+
+            if (Number.isFinite(minX)) {
+                const linesCx = (minX + maxX) / 2;
+                const linesCy = (minY + maxY) / 2;
+                const frameCx = frameRect.left + frameRect.width / 2;
+                const frameCy = frameRect.top + frameRect.height / 2;
+                offsetX = frameCx - linesCx;
+                offsetY = frameCy - linesCy;
+            }
+        }
+
+        const scaleAroundFrame = (rect) => {
+            if (!frameRect || !shouldScale) return rect;
+            const frameCx = frameRect.left + frameRect.width / 2;
+            const frameCy = frameRect.top + frameRect.height / 2;
+            return {
+                left: frameCx + (rect.left - frameCx) * glyphScale,
+                top: frameCy + (rect.top - frameCy) * glyphScale,
+                width: rect.width * glyphScale,
+                height: rect.height * glyphScale
+            };
+        };
+
+        lineRects.forEach((pageRect) => {
+            const adjustedRect = scaleAroundFrame({
+                left: pageRect.left + offsetX,
+                top: pageRect.top + offsetY,
+                width: pageRect.width,
+                height: pageRect.height
+            });
+            this.drawMapPageRect(ctx, t, adjustedRect, fill);
         });
     },
 
@@ -10143,10 +10419,16 @@ const NavigationMap = {
 
     drawMesoSilhouettes(ctx, t) {
         const style = this.getMapStyle();
-        const defaultFill = style.mesoLineFill ?? 'rgba(16, 16, 16, 0.62)';
+        if (style.mesoMapUseFrameRects === true) {
+            this.drawDepthMapMarkers(ctx, t, 2);
+            return;
+        }
+
+        const defaultFill = style.mesoSilhouetteDetailFill
+            ?? style.mesoLineFill
+            ?? 'rgba(16, 16, 16, 0.62)';
         const mutedFill = style.mesoLineMutedFill ?? 'rgba(16, 16, 16, 0.14)';
         const focus = this.getBlockFocusState();
-        const glyphScale = this.getLevelGlyphScale(2);
         const wrappers = this.getMapNoteWrappers();
         if (!wrappers.length) {
             this.drawDepthMapMarkers(ctx, t, 2);
@@ -10195,17 +10477,18 @@ const NavigationMap = {
                 return;
             }
 
-            const host = wrapper.querySelector('.meso-silhouette')
-                || wrapper.querySelector('.depth-v2-glyph--meso');
+            if (style.mesoMapAllowFrameFallback !== true) return;
+
+            const host = wrapper.querySelector('.depth-v2-glyph--meso');
             const pageRect = this.pageRectFromElement(host || wrapper);
-            if (pageRect) {
-                this.drawMapPageRect(ctx, t, this.scaleMapPageRect(pageRect, glyphScale), fill);
-                if (matchBlock) {
-                    this.drawFocusConnector(ctx, t, {
-                        x: pageRect.left + pageRect.width / 2,
-                        y: pageRect.top + pageRect.height / 2
-                    }, matchBlock);
-                }
+            if (!pageRect) return;
+
+            this.drawMapPageRect(ctx, t, pageRect, fill);
+            if (matchBlock) {
+                this.drawFocusConnector(ctx, t, {
+                    x: pageRect.left + pageRect.width / 2,
+                    y: pageRect.top + pageRect.height / 2
+                }, matchBlock);
             }
         });
 
@@ -10305,7 +10588,7 @@ const NavigationMap = {
         if (!base) return { x: panX, y: panY };
 
         const panBounds = base.panBounds || base.contentBounds;
-        const vp = SpatialNavigation.getViewportPageRect(this._activeLevel);
+        const vp = this.getMapViewportMarkerRect();
         const scrollPan = this.getScrollPanLimits(base, panBounds, base.scale, vp);
         if (!scrollPan) return { x: panX, y: panY };
 
@@ -10448,7 +10731,7 @@ const NavigationMap = {
                 const mx = e.clientX - rect.left;
                 const my = e.clientY - rect.top;
                 const page = this.mapPointToPage(mx, my, t, contentBounds);
-                const vp = SpatialNavigation.getViewportPageRect(this._activeLevel);
+                const vp = this.getMapViewportMarkerRect();
                 this.scrollViewportTo(page.x - vp.width / 2, page.y - vp.height / 2);
             }
         }
@@ -10690,7 +10973,6 @@ const PhysicsEngine = {
     hoveredNoteIndex: -1,
     repulsionHoldNoteIndex: -1,
     moleculeClickIntent: null,
-    moleculeIdBadge: null,
     transitionFrozen: false,
     runnerEnabled: false,
     syncLoopLastTs: 0,
@@ -10796,16 +11078,11 @@ const PhysicsEngine = {
             this.mouseClientX = e.clientX;
             this.mouseClientY = e.clientY;
             if (DepthController.currentLevel === 1 && this.bodiesData.length > 0) {
-                this.updateMoleculeHoverId();
+                this.updateMoleculeHoverState();
             }
         });
 
         this.initMoleculePointer();
-
-        this.moleculeIdBadge = document.createElement('div');
-        this.moleculeIdBadge.className = 'molecule-hover-id site-type';
-        this.moleculeIdBadge.setAttribute('aria-hidden', 'true');
-        document.body.appendChild(this.moleculeIdBadge);
 
         window.addEventListener('resize', () => {
             clearTimeout(this.resizeTimer);
@@ -11767,15 +12044,10 @@ const PhysicsEngine = {
 
     /* --- Note molecule outlines --- */
 
-    drawNoteOutlines() {
-        const cfg = CONFIG.outlines;
-        if (cfg.mode === 'off' || this.bodiesData.length === 0) return;
-
-        const ctx = this.linkCtx;
+    collectNoteOutlineGroups() {
         const scrollX = window.pageXOffset;
         const scrollY = window.pageYOffset;
 
-        // Group live dot positions (viewport coords) by note
         const groups = new Map();
         this.bodiesData.forEach(item => {
             if (item.isFiltered) return;
@@ -11789,26 +12061,68 @@ const PhysicsEngine = {
             });
         });
 
-        ctx.strokeStyle = this.linkColor;
-        ctx.lineWidth = cfg.width;
+        return groups;
+    },
 
+    shouldCullOutlineGroup(pts) {
         const presCull = CONFIG.presentation?.outlineViewportCull &&
             typeof isPresentationMode === 'function' && isPresentationMode();
+        if (!presCull) return false;
+
         const viewPad = CONFIG.outlines.padding + CONFIG.physics.body.radius + 48;
         const vw = window.innerWidth;
         const vh = window.innerHeight;
+        let cx = 0;
+        let cy = 0;
+        pts.forEach(p => { cx += p.x; cy += p.y; });
+        cx /= pts.length;
+        cy /= pts.length;
+        return cx < -viewPad || cx > vw + viewPad || cy < -viewPad || cy > vh + viewPad;
+    },
+
+    getMoleculeBackingFill() {
+        return CONFIG.outlines.backingFill ||
+            getComputedStyle(document.documentElement).getPropertyValue('--bg-main').trim() ||
+            '#F2F0EE';
+    },
+
+    drawNoteBackings() {
+        const cfg = CONFIG.outlines;
+        if (cfg.mode === 'off' || cfg.backing === false || this.bodiesData.length === 0) return;
+        if (!this.linkCtx) return;
+
+        const ctx = this.linkCtx;
+        const groups = this.collectNoteOutlineGroups();
+        ctx.save();
+        ctx.fillStyle = this.getMoleculeBackingFill();
 
         groups.forEach((pts, noteIndex) => {
             if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
+            if (this.shouldCullOutlineGroup(pts)) return;
 
-            if (presCull) {
-                let cx = 0;
-                let cy = 0;
-                pts.forEach(p => { cx += p.x; cy += p.y; });
-                cx /= pts.length;
-                cy /= pts.length;
-                if (cx < -viewPad || cx > vw + viewPad || cy < -viewPad || cy > vh + viewPad) return;
+            const R = pts[0].r + cfg.padding;
+            const useHull = cfg.mode === 'hull' ||
+                           (cfg.mode === 'compare' && noteIndex % 2 === 0);
+            if (useHull) {
+                this.fillHullOutline(pts, R, ctx);
             }
+        });
+
+        ctx.restore();
+    },
+
+    drawNoteOutlines() {
+        const cfg = CONFIG.outlines;
+        if (cfg.mode === 'off' || this.bodiesData.length === 0) return;
+
+        const ctx = this.linkCtx;
+        const groups = this.collectNoteOutlineGroups();
+        ctx.strokeStyle = this.linkColor;
+        ctx.lineWidth = cfg.width;
+
+        groups.forEach((pts, noteIndex) => {
+            if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
+            if (this.shouldCullOutlineGroup(pts)) return;
 
             const isHover = noteIndex === this.hoveredNoteIndex;
             ctx.lineWidth = isHover ? (cfg.hoverWidth ?? cfg.width * 2.5) : cfg.width;
@@ -11826,14 +12140,13 @@ const PhysicsEngine = {
 
     // Option A: rounded convex hull membrane (offset polygon: arcs at vertices,
     // straight tangents along edges)
-    strokeHullOutline(pts, R, ctx) {
+    traceHullOutlinePath(pts, R, ctx) {
         const hull = pts.length <= 2 ? pts : this.convexHull(pts);
 
         ctx.beginPath();
         if (hull.length === 1) {
             ctx.arc(hull[0].x, hull[0].y, R, 0, Math.PI * 2);
-            ctx.stroke();
-            return;
+            return true;
         }
 
         const n = hull.length;
@@ -11847,7 +12160,17 @@ const PhysicsEngine = {
             ctx.arc(p.x, p.y, R, a1, a2);
         }
         ctx.closePath();
+        return true;
+    },
+
+    strokeHullOutline(pts, R, ctx) {
+        if (!this.traceHullOutlinePath(pts, R, ctx)) return;
         ctx.stroke();
+    },
+
+    fillHullOutline(pts, R, ctx) {
+        if (!this.traceHullOutlinePath(pts, R, ctx)) return;
+        ctx.fill();
     },
 
     // Monotone chain; returns hull ordered clockwise in screen coords
@@ -12120,12 +12443,13 @@ const PhysicsEngine = {
         this.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
         if (macroVisualActive) {
+            this.drawNoteBackings();
             this.drawSiblingLinks();
             if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
                 DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
             }
             this.drawNoteOutlines();
-            this.updateMoleculeHoverId();
+            this.updateMoleculeHoverState();
         }
 
         if (depthFocusLinks) {
@@ -12136,6 +12460,7 @@ const PhysicsEngine = {
     flushMacroCanvas() {
         if (!this.linkCtx) return;
         this.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
+        this.drawNoteBackings();
         this.drawSiblingLinks();
         if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
             DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
@@ -12270,12 +12595,8 @@ const PhysicsEngine = {
         document.addEventListener('pointercancel', this.onMoleculePointerUp);
     },
 
-    updateMoleculeHoverId() {
-        const badge = this.moleculeIdBadge;
-        if (!badge) return;
-
+    updateMoleculeHoverState() {
         if (DepthController.currentLevel !== 1 || this.bodiesData.length === 0) {
-            badge.classList.remove('is-visible');
             this.hoveredNoteIndex = -1;
             document.body.classList.remove('is-molecule-hover');
             return;
@@ -12283,7 +12604,6 @@ const PhysicsEngine = {
 
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(this.mouseClientX, this.mouseClientY)) {
-            badge.classList.remove('is-visible');
             this.hoveredNoteIndex = -1;
             document.body.classList.remove('is-molecule-hover');
             return;
@@ -12292,25 +12612,6 @@ const PhysicsEngine = {
         const noteIndex = this.hitTestMolecule(this.mouseClientX, this.mouseClientY);
         this.hoveredNoteIndex = noteIndex;
         document.body.classList.toggle('is-molecule-hover', noteIndex >= 0);
-
-        if (noteIndex < 0) {
-            badge.classList.remove('is-visible');
-            return;
-        }
-
-        const bounds = this.moleculeViewportBounds(noteIndex);
-        const wrappers = document.querySelectorAll('.note-wrapper');
-        const wrapper = wrappers[noteIndex];
-        const noteId = wrapper?.dataset.noteId;
-        if (!bounds || !noteId) {
-            badge.classList.remove('is-visible');
-            return;
-        }
-
-        badge.textContent = noteId;
-        badge.style.left = `${bounds.maxX}px`;
-        badge.style.top = `${bounds.minY}px`;
-        badge.classList.add('is-visible');
     }
 };
 
@@ -12372,6 +12673,10 @@ const ActionWarehouse = {
             <div class="depth-block-bar" aria-hidden="true"></div>
             <div class="warehouse-layout">
                 <div class="warehouse-dock">
+                    <div class="warehouse-panel-corners warehouse-panel-corners--dock" aria-hidden="true">
+                        <span class="warehouse-panel-corner warehouse-panel-corner--tr"></span>
+                        <span class="warehouse-panel-corner warehouse-panel-corner--br"></span>
+                    </div>
                     <div class="warehouse-statistics general-t" aria-live="polite"></div>
                     <div class="warehouse-message-port general-t">${messageText}</div>
                     <div class="action-warehouse">
@@ -12384,7 +12689,12 @@ const ActionWarehouse = {
                         </div>
                     </div>
                 </div>
-                <div class="warehouse-map" id="warehouse-map-mount" aria-hidden="true"></div>
+                <div class="warehouse-map" id="warehouse-map-mount" aria-hidden="true">
+                    <div class="warehouse-panel-corners warehouse-panel-corners--map" aria-hidden="true">
+                        <span class="warehouse-panel-corner warehouse-panel-corner--tl"></span>
+                        <span class="warehouse-panel-corner warehouse-panel-corner--bl"></span>
+                    </div>
+                </div>
             </div>
         `;
         this.dockElement = this.shellElement.querySelector('.action-warehouse');
@@ -12607,7 +12917,7 @@ const ActionWarehouse = {
 
         const el = document.createElement('div');
         const isAuthor = def.type === 'author';
-        el.classList.add('action-block', 'site-type');
+        el.classList.add('action-block', 'general-t');
         if (isAuthor) el.classList.add('action-block--author');
         el.dataset.type = def.type || 'tag';
 
@@ -12650,7 +12960,7 @@ const ActionWarehouse = {
 
         const el = document.createElement('div');
         const frameKind = def.frameKind || 'filter';
-        el.classList.add('action-block', 'action-block--frame', 'site-type');
+        el.classList.add('action-block', 'action-block--frame', 'general-t');
         if (frameKind === 'filter') el.classList.add('action-block--frame-filter');
         el.dataset.type = 'frame';
         el.dataset.frameKind = frameKind;
