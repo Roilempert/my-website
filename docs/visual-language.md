@@ -106,7 +106,7 @@ Four classes replace legacy `--type-*` / ratzif22 / NarkissTam body.
 - **Panel dividers:** color 3 hairlines with 5px → `var(--space-5)` endpoint breathing room.
   - between statistics and dock content: vertical divider ends 5px from dock top/bottom
   - above the block tray / under the message port: horizontal divider starts at the statistics divider and ends 5px from the dock right edge, creating a joined rotated T shape
-- **Viewport marker:** compact, **fixed** at center of map frame — does **not** move; map **content** pans behind it, clipped to panel bounds. Marker proportions follow the raw browser viewport; L1 uses live macro dots, and L2 uses stable meso frame rectangles plus viewport echo for a complete overview.
+- **Viewport marker:** compact, **fixed** at center of map frame — does **not** move; map **content** pans behind it, clipped to panel bounds. Marker proportions follow the raw browser viewport; L1 uses live macro dots, and L2 uses stable meso frame rectangles with original line silhouettes drawn inside them.
 - **Remove:** English `ACTION REPOSITORY` label.
 
 ### Action blocks (dock panel)
@@ -134,10 +134,10 @@ All block/tag pills use the same dimensions everywhere on the site; only color r
 
 | State | Box | Type | Marker |
 |-------|-----|------|--------|
-| Active | color 6, 5px pad, 5px radius | `.general-t` | selection vector SVG |
-| Inactive | same box styling | `.general-h` | none |
+| Active | color 6, 5px pad, 5px radius | `.general-h` | selection vector SVG |
+| Inactive | same box styling | `.general-t` | none |
 
-- **10px** gap between three boxes
+- **5px** gap between three boxes
 - **40px** from viewport right edge → `2.5rem`
 - Active label vertically centered; slot animation moves inactive labels
 - **Selection marker:** one SVG, reparented to active button in `syncActiveState()` — rides existing slot transition
@@ -181,6 +181,9 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-04 | Reduced layer navigation label padding and inter-label gap to 5px using `var(--space-5)` |
+| 2026-07-04 | Switched layer navigation type hierarchy so the active layer is large and inactive layers are small; restored color-6 rectangular boxes with 10px padding |
+| 2026-07-04 | Added original L2 line silhouettes inside stable minimap frame markers after saving the successful frame-echo reference |
 | 2026-07-04 | Expanded shared block/tag pill dot-text gap to 10px using `var(--space-10)` |
 | 2026-07-04 | Reduced L1/L2/L3 site-grid marks to every second row/column crossing |
 | 2026-07-04 | Added inner decorative corner marks at the action dock/map gap |

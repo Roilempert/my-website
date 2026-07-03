@@ -50,11 +50,11 @@ macroMapMaxDots: 900,
 mesoMapUseFrameRects: true,
 mesoMapMaxFrameRects: 320,
 mesoMapViewportEcho: true,
-mesoMapSilhouetteDetail: false,
+mesoMapSilhouetteDetail: true,
 mesoMapCenterSilhouetteFragments: false,
 mesoMapScaleSilhouetteFragments: false,
 mesoMapSilhouetteFragmentScale: 1,
-mesoMapMaxDetailRects: 220,
+mesoMapMaxDetailRects: 2500,
 mesoMapEchoSettleMs: 120,
 mesoFrameFill: 'rgba(45, 45, 45, 0.28)',
 mesoFrameEchoFill: 'rgba(45, 45, 45, 0.32)',
@@ -99,7 +99,7 @@ Main canvas clamp rules in `CHECKPOINT.md` still apply to page scroll. The minim
 | Level | Bounds source |
 |---|---|
 | L3 | `getDepthMapMarkerBounds()` — union of `.note-card` page rects + `depthMapBoundsPad` |
-| L2 | `getDepthMapMarkerBounds()` from visible `.meso-mock__frame` rectangles; rendered map content uses stable frame rectangles plus viewport echo, not internal line fragments |
+| L2 | `getDepthMapMarkerBounds()` from visible `.meso-mock__frame` rectangles; rendered map content keeps stable frame rectangles and draws original `.meso-mock__line` fragments inside each frame |
 | L1 | `SpatialNavigation.getMapReferenceBounds()` + live `.layer-dot` DOM positions |
 
 L3 must use marker bounds, not raw `#app` scroll extents alone — prevents ~15px edge slack and “marker outside map” at corners.
