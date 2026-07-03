@@ -26,30 +26,35 @@ const MicroMock = {
         return null;
     },
 
-    buildTagsHTML(tags) {
+    buildTagsHTML(tags, options = {}) {
+        const pillClass = options.noteStyle
+            ? 'micro-mock__tag-pill general-t'
+            : 'action-block micro-mock__tag-block site-type';
         if (!tags?.length) {
-            return `<span class="action-block micro-mock__tag-block site-type">` +
-                `<span class="block-glyph" style="background-color:var(--main-text)"></span>` +
+            return `<span class="${pillClass}">` +
+                `<span class="block-glyph" style="background-color:var(--color-4)"></span>` +
                 `<span class="block-label">—</span></span>`;
         }
         return tags.map(tag => (
-            `<span class="action-block micro-mock__tag-block site-type">` +
+            `<span class="${pillClass}">` +
             `<span class="block-glyph" style="background-color:${tag.color}"></span>` +
             `<span class="block-label">${this.escapeHTML(tag.name)}</span></span>`
         )).join('');
     },
 
-    buildCardHTML(item) {
+    buildCardHTML(item, options = {}) {
         const title = String(item.title || '').trim();
         const titleHTML = title
-            ? `<h2 class="note-title">${this.escapeHTML(title)}</h2>`
+            ? `<h2 class="note-title note-h">${this.escapeHTML(title)}</h2>`
             : '';
-        return `<div class="micro-mock__card note-card" data-note-id="${this.escapeHTML(item.id)}">` +
-            `<div class="note-idcode">${this.escapeHTML(item.id)}</div>` +
+        const focusClass = options.focusScale ? ' micro-mock__card--focus' : '';
+        const card = `<div class="micro-mock__card note-card${focusClass}" data-note-id="${this.escapeHTML(item.id)}">` +
+            `<div class="note-idcode general-t">${this.escapeHTML(item.id)}</div>` +
             titleHTML +
-            `<div class="note-body">${this.escapeHTML(item.body)}</div>` +
-            `<div class="micro-mock__tags">${this.buildTagsHTML(item.tags)}</div>` +
+            `<div class="note-body note-t">${this.escapeHTML(item.body)}</div>` +
             `</div>`;
+        const tags = `<div class="micro-mock__tags">${this.buildTagsHTML(item.tags, { noteStyle: true })}</div>`;
+        return `<div class="micro-mock__note">${card}${tags}</div>`;
     },
 
     applyToWrapper(wrapper, item = null) {

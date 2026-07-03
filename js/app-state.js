@@ -170,7 +170,10 @@ const AppState = {
         const rows = this.parseCSVToArray(csvText);
         const cols = CONFIG.data.columns;
         return rows.slice(1).map((columns, index) => {
+            const authorFullName = this.normalizeString(columns[cols.authorFullName] || '');
             const authorCode = this.normalizeString(columns[cols.authorCode] || '');
+            const dateWritten = this.normalizeString(columns[cols.date] || '');
+            const typology = this.normalizeString(columns[cols.typology] || '');
             const id = (columns[cols.id] || `SYS-${index}`).replace(/_/g, ' ');
             const tagsRaw = columns[cols.tags] || '';
             
@@ -184,7 +187,16 @@ const AppState = {
                 return { name: norm, color: this.tagColorsMap.get(norm) || CONFIG.data.fallbackTagColor };
             }).filter(t => t.name);
 
-            return { id, title, body, tags: tagsArray, authorCode };
+            return {
+                id,
+                title,
+                body,
+                tags: tagsArray,
+                authorCode,
+                authorFullName,
+                dateWritten,
+                typology
+            };
         });
     },
 

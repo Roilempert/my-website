@@ -261,18 +261,18 @@ Supporting docs (untracked, exhibition-specific):
 | `AGENTS.md` line 23 | Says "Matter.js via CDN" — site uses `vendor/matter.min.js` (local bundle). `docs/REFERENCE-2026-06-25-layout-boot.md` is correct. |
 | `js/physics-engine.js` error message | Still mentions "CDN blocked" though Matter is local |
 
-### 9b. Docs not indexed in `docs/README.md`
+### 9b. Docs not indexed in `docs/DOC-INDEX.md`
 
 | File | Content | Recommendation |
 |------|---------|----------------|
-| `docs/architecture/site-grid.md` | Site shell grid (`CONFIG.siteGrid`) | **KEEP** — add link to `docs/README.md` or leave as-is |
+| `docs/architecture/site-grid.md` | Site shell grid (`CONFIG.siteGrid`) | **KEEP** — linked from `docs/DOC-INDEX.md` |
 | `docs/REFERENCE-2026-06-25-layout-boot.md` | Boot/layout restore point | **KEEP** — valuable regression reference |
 | `docs/REFERENCE-2026-06-28-navigation-map-scaling.md` | Minimap scaling restore point | **KEEP** |
 | `docs/work/2026-06-22-l2-grid-stable.md` | Completed work session | **KEEP** as history or archive to `docs/work/archive/` |
 
 ### 9c. Work session template
 
-`docs/work/TEMPLATE.md` — **KEEP** (project convention per `AGENTS.md`).
+`docs/work/session-template.md` — **KEEP** (project convention per `AGENTS.md`).
 
 **None of these are deletion candidates** unless you want a leaner docs folder post-exhibition.
 

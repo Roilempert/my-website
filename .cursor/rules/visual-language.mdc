@@ -1,0 +1,27 @@
+---
+description: Exhibition visual language — read and update docs/visual-language.md when changing UI tokens, chrome, or SVG assets
+globs: styles.css,js/warehouse-core.js,js/navigation-map.js,js/artifact-inspector.js,assets/ui/**,docs/visual-language.md
+alwaysApply: false
+---
+
+# Visual language (exhibition UI)
+
+## Before changing chrome
+
+Read [`docs/visual-language.md`](../../docs/visual-language.md) for locked colors, type classes, spacing, grid marks, and component rules (warehouse, layer nav, L3 notes, inspector).
+
+Target: **21.5″ iMac @ 1920×1080**. Use `rem` / site-grid units — not raw px in CSS. Shell sizes use **`VISUAL_SCALE = 1.0`** (see doc).
+
+## After any visual change
+
+Update **`docs/visual-language.md` in the same session**:
+
+- Token or rule changed → edit the relevant section + add a **Changelog** entry (date, what changed).
+- New SVG under `assets/ui/` → add row to **SVG assets** table.
+- New component chrome → add or extend **Components** section.
+
+Do not leave code and legend out of sync. Same discipline as `docs/CHECKPOINT.md` for physics.
+
+## Site content
+
+Hebrew UI strings and note data stay Hebrew — do not translate. This doc describes **chrome and typography roles**, not note body copy from the sheet.

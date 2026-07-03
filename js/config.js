@@ -2,16 +2,21 @@
    00. GLOBAL CONFIGURATION
    Central control panel. All tunable parameters live here.
    ========================================================================== */
-const VISUAL_SCALE = 0.72;
+const VISUAL_SCALE = 1.0;
 const scale = (px) => Math.round(px * VISUAL_SCALE);
 
-/* Canonical type scale — keep in sync with :root --type-* in styles.css */
+/* Exhibition type scale — keep in sync with .general-h/t, .note-h/t in styles.css */
 const TYPE_SCALE = {
-    display: { sizeRem: 4.125, sizePx: 66, line: 0.9, weight: 600, style: 'italic' },
-    body:    { sizeRem: 1, sizePx: 16, line: 1.2, weight: 400, maxCh: 55 },
-    meta:    { sizeRem: 0.875, sizePx: 14, line: 1.2, weight: 400 },
-    ui:      { sizePt: 10, line: 1.2, weight: 400 },
-    nav:     { sizeRem: 3, line: 1.15, weight: 600, weightActive: 700 },
+    generalH: { sizePt: 66, linePt: 56, weight: 700 },
+    generalT: { sizePt: 20, linePt: 20, weight: 700 },
+    noteH:    { sizePt: 86, line: 0.9, weight: 700, style: 'italic', letterSpacing: '-0.01em' },
+    noteT:    { sizePt: 18, line: 1.2, weight: 400 },
+    /* Legacy aliases for gradual migration */
+    display: { sizeRem: 5.375, sizePx: 86, line: 0.9, weight: 700, style: 'italic' },
+    body:    { sizeRem: 1.125, sizePx: 18, line: 1.2, weight: 400, maxCh: 55 },
+    meta:    { sizeRem: 1.25, sizePx: 20, line: 1, weight: 700 },
+    ui:      { sizePt: 20, line: 1, weight: 700 },
+    nav:     { sizeRem: 4.125, line: 0.848, weight: 700, weightActive: 700 },
     debug:   { sizePx: 9 }
 };
 
@@ -29,21 +34,23 @@ const CONFIG = {
     siteGrid: {
         columns: 18,
         rows: 10,
-        padding: { value: 2.5, unit: 'rem' },  // design ref: 40px @ 16px root
-        gap: { value: 1.25, unit: 'rem' },      // design ref: 20px @ 16px root
-        crossStep: 2,                           // intersection marks every N rows/cols
+        padding: { value: 1.25, unit: 'rem' },  // exhibition: 20px @ 16px root
+        gap: { value: 1.25, unit: 'rem' },
+        crossStep: 1,                           // mark at every intersection
         debug: false,
         // Reference regions in grid coordinates (colEnd/rowEnd exclusive).
         // Scale/anchor tokens only — layers stay free (scroll, drag, overflow).
         regions: {
             nav:          { colStart: 1, colEnd: 19, rowStart: 1, rowEnd: 11 },
             canvas:       { colStart: 1, colEnd: 19, rowStart: 1, rowEnd: 9  },
-            warehouse:    { colStart: 4, colEnd: 16, rowStart: 9, rowEnd: 11 },
-            blockBar:       { colStart: 4, colEnd: 16, rowStart: 8, rowEnd: 9  },
+            warehouse:    { colStart: 1, colEnd: 19, rowStart: 9, rowEnd: 11 },
+            warehouseDock: { colStart: 1, colEnd: 16, rowStart: 9, rowEnd: 11 },
+            warehouseMap:  { colStart: 16, colEnd: 19, rowStart: 9, rowEnd: 11 },
+            blockBar:       { colStart: 1, colEnd: 16, rowStart: 8, rowEnd: 9  },
             inspector:    { colStart: 6, colEnd: 14, rowStart: 5, rowEnd: 9  },
             filterFringe: { colStart: 17, colEnd: 19, rowStart: 1, rowEnd: 9  },
             navigationLayers: { colStart: 17, colEnd: 19, rowStart: 1, rowEnd: 6  },
-            navigationMaps:   { colStart: 16, colEnd: 19, rowStart: 9, rowEnd: 11 }
+            navigationMaps:   { colStart: 16, colEnd: 19, rowStart: 9, rowEnd: 11 } // alias: warehouseMap
             // reset button: centered above warehouse shell — not a grid region
         },
         regionsByLevel: {
@@ -71,13 +78,16 @@ const CONFIG = {
         preferLocal: false,
         // Column indices in the main CSV (zero-based)
         columns: {
+            authorFullName: 1,
             authorCode: 2,
+            date: 3,
             id: 4,
             title: 6,
             body: 7,
-            tags: 8
+            tags: 8,
+            typology: 9
         },
-        fallbackTagColor: 'var(--main-text)'
+        fallbackTagColor: 'var(--color-4)'
     },
 
     /* --- Boot Sequence --- */
@@ -280,7 +290,7 @@ const CONFIG = {
                 viewportCols: 3,
                 colCount: 12,
                 rowGap: 10,
-                colGap: 12,
+                colGap: 40,
                 pagePaddingX: 36
             },
             fringe: {
@@ -380,19 +390,17 @@ const CONFIG = {
     /* --- Layer navigation — depth labels (מאקרו / מזו / מיקרו), top-right --- */
     layerNavigation: {
         labels: { 1: 'מאקרו', 2: 'מזו', 3: 'מיקרו' },
-        typeSize: { value: TYPE_SCALE.nav.sizeRem, unit: 'rem' },
-        typeLine: TYPE_SCALE.nav.line,
-        typeWeight: TYPE_SCALE.nav.weight,
-        typeWeightActive: TYPE_SCALE.nav.weightActive,
-        gap: { value: 1, unit: 'rem' },
-        rowGap: { value: 0.08, unit: 'rem' },
+        rightInset: { value: 2.5, unit: 'rem' },
+        boxGap: { value: 0.625, unit: 'rem' },
+        boxPadding: { value: 0.3125, unit: 'rem' },
+        boxRadius: { value: 0.3125, unit: 'rem' },
+        markerGap: { value: 0.625, unit: 'rem' },
+        markerSrc: 'assets/ui/layer-nav-marker.svg',
+        rowGap: { value: 0.625, unit: 'rem' },
         slotMoveDuration: 0.34,
-        // Extreme slow-in → snap mid → very short ease-out (no overshoot)
         slotMoveEasing: 'cubic-bezier(0.9, 0, 0.02, 1)',
-        indentColumns: 0.5,
-        anchorRow: 1,
-        inactiveOpacity: 0.35,
-        hitAreaPadding: { value: 0.625, unit: 'rem' },
+        centerOnViewport: true,
+        hitAreaPadding: { value: 0, unit: 'rem' },
         slotCount: 3
     },
 
@@ -403,8 +411,8 @@ const CONFIG = {
         showWorldFill: false,
         showViewportFill: true,
         showViewportOutline: true,
-        viewportFillColor: 'rgba(16, 16, 16, 0.05)',
-        viewportOutlineColor: 'rgba(16, 16, 16, 0.55)',
+        viewportFillColor: 'rgba(45, 45, 45, 0.08)',
+        viewportOutlineColor: 'rgba(45, 45, 45, 0.72)',
         viewportOutlineWidth: 0.75,
         offsetY: { value: -0.35, unit: 'cellH' },
         /* Clip frame larger than grid slot; soft fade at clip edges */
@@ -434,21 +442,21 @@ const CONFIG = {
         macroFocusConnectors: false,
         macroBlockMarkers: true,
         macroDotRadius: 1.5,
-        macroDotFill: 'rgba(16, 16, 16, 0.4)',
-        macroDotMutedFill: 'rgba(16, 16, 16, 0.12)',
+        macroDotFill: 'rgba(45, 45, 45, 0.45)',
+        macroDotMutedFill: 'rgba(45, 45, 45, 0.14)',
         mesoMapDetailed: true,
-        mesoLineFill: 'rgba(16, 16, 16, 0.16)',
-        mesoLineMutedFill: 'rgba(16, 16, 16, 0.06)',
-        mesoPathFill: 'rgba(16, 16, 16, 0.12)',
-        noteCardFill: 'rgba(16, 16, 16, 0.16)',
-        noteCardMutedFill: 'rgba(16, 16, 16, 0.06)',
-        noteCardStroke: 'rgba(16, 16, 16, 0.08)',
-        noteBlockFill: 'rgba(16, 16, 16, 0.20)',
-        noteBlockMutedFill: 'rgba(16, 16, 16, 0.07)',
+        mesoLineFill: 'rgba(45, 45, 45, 0.18)',
+        mesoLineMutedFill: 'rgba(45, 45, 45, 0.08)',
+        mesoPathFill: 'rgba(45, 45, 45, 0.14)',
+        noteCardFill: 'rgba(45, 45, 45, 0.18)',
+        noteCardMutedFill: 'rgba(45, 45, 45, 0.08)',
+        noteCardStroke: 'rgba(45, 45, 45, 0.12)',
+        noteBlockFill: 'rgba(45, 45, 45, 0.22)',
+        noteBlockMutedFill: 'rgba(45, 45, 45, 0.09)',
         noteBlockMinHeight: 0.75,
         blockMarkerSize: 3.5,
         blockConnectorAlpha: 0.28,
-        authorBlockColor: '#101010',
+        authorBlockColor: '#2D2D2D',
         /* L1 minimap — DOM wrapper centers match on-screen notes (not physics-only) */
         macroMapUseDomPositions: true,
         /* Shared macro coordinate frame on L1 only; L2/L3 fit active grid layout */
@@ -591,12 +599,15 @@ const CONFIG = {
         maxCaptureBlocks: 5,
 
         dock: {
-            widthRatio: 0.5,
-            bottomOffset: 12,
-            borderRadius: 22,
-            outlineWidth: 1,
+            widthRatio: 1,
+            bottomOffset: 0,
+            borderRadius: 5,
+            outlineWidth: 0,
             visibleRows: 2,
-            rowGap: 6
+            rowGap: 6,
+            cornerDecorationSrc: 'assets/ui/decoration-corner-tr.svg',
+            messageText: 'גררו להפעלה',
+            blockTrayGap: { value: 3.75, unit: 'rem' }
         },
 
         drag: {

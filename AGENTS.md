@@ -45,7 +45,7 @@ Canvas grids inside `#app` (macro physics, L2 meso, L3 micro) are separate and w
 - **Site language:** Hebrew, RTL at the UI layer (content stays Hebrew).
 - **Work language:** English for docs, agents, and code comments.
 - Libraries: Matter.js (`vendor/matter.min.js` — bundled locally for offline/exhibition).
-- **Docs:** [`docs/README.md`](docs/README.md) · **Work sessions:** [`docs/work/README.md`](docs/work/README.md) · **Stability:** [`docs/CHECKPOINT.md`](docs/CHECKPOINT.md)
+- **Docs:** [`docs/DOC-INDEX.md`](docs/DOC-INDEX.md) · **Visual language:** [`docs/visual-language.md`](docs/visual-language.md) · **Stability:** [`docs/CHECKPOINT.md`](docs/CHECKPOINT.md)
 - **Depth architecture (V2 active):** [`docs/architecture/depth-v2.md`](docs/architecture/depth-v2.md) · legacy: [`docs/architecture/depth-legacy.md`](docs/architecture/depth-legacy.md)
 
 ## Glossary
@@ -94,11 +94,11 @@ Canvas grids inside `#app` (macro physics, L2 meso, L3 micro) are separate and w
 
 No fixed task board. Per topic:
 
-1. Copy `docs/work/TEMPLATE.md` to a dated file (e.g. `docs/work/2026-06-18-meso-transition.md`), or ask the agent to create one.
+1. Copy `docs/work/session-template.md` to a dated file (e.g. `docs/work/2026-06-18-meso-transition.md`), or ask the agent to create one.
 2. Fill in "What I want" and "Verification".
 3. New agent chat — attach the session file + `@AGENTS.md`; for physics also `@docs/CHECKPOINT.md`.
 
-Details: [`docs/work/README.md`](docs/work/README.md)
+Details: [`docs/DOC-INDEX.md`](docs/DOC-INDEX.md#work-sessions)
 
 ## Meso layer
 

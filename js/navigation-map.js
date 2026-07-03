@@ -40,38 +40,30 @@ const NavigationMap = {
     _resizeScheduled: false,
     _layoutSettleTimer: null,
 
+    layerMarker: null,
+    _layerMarkerLoaded: false,
+
     init() {
         const layerCfg = CONFIG.layerNavigation;
         const mapCfg = CONFIG.navigationMap;
         if (!layerCfg && !mapCfg) return;
 
         const root = document.documentElement;
-        if (layerCfg?.gap) {
-            root.style.setProperty('--layer-nav-gap', siteGridCssLength(layerCfg.gap));
+        if (layerCfg?.rightInset) {
+            root.style.setProperty('--layer-nav-right-inset', siteGridCssLength(layerCfg.rightInset));
         }
-        if (layerCfg?.typeSize) {
-            root.style.setProperty('--layer-nav-type-size', siteGridCssLength(layerCfg.typeSize));
+        if (layerCfg?.boxGap) {
+            root.style.setProperty('--layer-nav-gap', siteGridCssLength(layerCfg.boxGap));
         }
-        if (layerCfg?.typeLine != null) {
-            root.style.setProperty('--layer-nav-type-line', String(layerCfg.typeLine));
+        if (layerCfg?.boxPadding) {
+            root.style.setProperty('--layer-nav-box-pad', siteGridCssLength(layerCfg.boxPadding));
         }
-        if (layerCfg?.typeWeight != null) {
-            root.style.setProperty('--layer-nav-type-weight', String(layerCfg.typeWeight));
+        if (layerCfg?.boxRadius) {
+            root.style.setProperty('--layer-nav-box-radius', siteGridCssLength(layerCfg.boxRadius));
         }
-        if (layerCfg?.typeWeightActive != null) {
-            root.style.setProperty('--layer-nav-type-weight-active', String(layerCfg.typeWeightActive));
+        if (layerCfg?.markerGap) {
+            root.style.setProperty('--layer-nav-marker-gap', siteGridCssLength(layerCfg.markerGap));
         }
-        const indentCols = layerCfg?.indentColumns ?? 0.5;
-        const activeIndentCols = layerCfg?.activeIndentColumns ?? indentCols;
-        const hoverIndentCols = layerCfg?.hoverIndentColumns ?? indentCols;
-        root.style.setProperty(
-            '--layer-nav-active-indent',
-            `calc(${activeIndentCols} * var(--site-grid-cell-w))`
-        );
-        root.style.setProperty(
-            '--layer-nav-hover-indent',
-            `calc(${hoverIndentCols} * var(--site-grid-cell-w))`
-        );
         if (layerCfg?.rowGap) {
             root.style.setProperty('--layer-nav-row-gap', siteGridCssLength(layerCfg.rowGap));
         }
@@ -81,17 +73,11 @@ const NavigationMap = {
         if (layerCfg?.slotMoveEasing) {
             root.style.setProperty('--layer-nav-slot-easing', layerCfg.slotMoveEasing);
         }
-        const anchorRow = Math.max(1, layerCfg?.anchorRow ?? 1);
-        root.style.setProperty(
-            '--layer-nav-anchor-top',
-            `calc(${anchorRow} * var(--site-grid-cell-h) + ${anchorRow - 1} * var(--site-grid-gap))`
-        );
-        root.style.setProperty(
-            '--layer-nav-slot-base-top',
-            `calc(var(--site-grid-padding) + ${anchorRow} * var(--site-grid-cell-h) + ${anchorRow - 1} * var(--site-grid-gap))`
-        );
-        if (layerCfg?.inactiveOpacity != null) {
-            root.style.setProperty('--layer-nav-inactive-opacity', String(layerCfg.inactiveOpacity));
+        if (layerCfg?.centerOnViewport) {
+            root.style.setProperty(
+                '--layer-nav-slot-base-top',
+                'calc(50vh - 0.5 * var(--layer-nav-row-step))'
+            );
         }
         if (layerCfg?.hitAreaPadding) {
             root.style.setProperty('--layer-nav-hit-pad', siteGridCssLength(layerCfg.hitAreaPadding));
@@ -174,8 +160,20 @@ const NavigationMap = {
         mapWrap.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
         mapWrap.addEventListener('pointermove', (e) => this.handlePointerMove(e));
 
+        this.layerMarker = document.createElement('span');
+        this.layerMarker.className = 'site-navigation-layers__marker';
+        this.layerMarker.setAttribute('aria-hidden', 'true');
+        this._loadLayerMarker(layerCfg?.markerSrc || 'assets/ui/layer-nav-marker.svg');
+
         document.body.appendChild(layersPanel);
-        document.body.appendChild(mapsPanel);
+
+        const mapMount = document.getElementById('warehouse-map-mount');
+        if (mapMount) {
+            mapMount.appendChild(mapsPanel);
+            mapMount.removeAttribute('aria-hidden');
+        } else {
+            document.body.appendChild(mapsPanel);
+        }
         document.body.classList.add('has-site-navigation');
 
         this.layersPanel = layersPanel;
@@ -1053,6 +1051,19 @@ const NavigationMap = {
         return level - activeLevel;
     },
 
+    async _loadLayerMarker(src) {
+        if (!this.layerMarker || this._layerMarkerLoaded) return;
+        try {
+            const res = await fetch(src);
+            if (!res.ok) return;
+            const svgText = await res.text();
+            this.layerMarker.innerHTML = svgText;
+            this._layerMarkerLoaded = true;
+        } catch (_) {
+            /* offline exhibition — marker optional until SVG loads */
+        }
+    },
+
     applyLayerSlot(title, slot) {
         title.dataset.slot = String(slot);
         title.style.setProperty('--layer-nav-slot', String(slot));
@@ -1075,6 +1086,9 @@ const NavigationMap = {
             title.classList.toggle('is-inactive', !isActive);
             title.setAttribute('aria-current', isActive ? 'true' : 'false');
             title.disabled = transitionActive;
+            if (isActive && this.layerMarker && this.layerMarker.parentElement !== title) {
+                title.prepend(this.layerMarker);
+            }
         });
 
         const mapCursorBlocked = inspectorActive || transitionActive;

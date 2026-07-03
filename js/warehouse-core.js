@@ -31,31 +31,51 @@ const ActionWarehouse = {
     filterExitByNote: new Map(),   // noteIndex → { phase: 'hollow'|'peel', phaseStart }
     _navigationMapBlockCount: 0,
 
+    statisticsElement: null,
+    messagePortElement: null,
+    mapMountElement: null,
+
     init() {
         this.ensurePhysicsMaps();
         const dockCfg = CONFIG.warehouse.dock;
 
         this.refreshDisplayTokens();
 
+        const messageText = dockCfg?.messageText || 'גררו להפעלה';
         this.shellElement = document.createElement('div');
-        this.shellElement.classList.add('warehouse-shell', 'site-type');
+        this.shellElement.classList.add('warehouse-shell');
         this.shellElement.dataset.siteLayer = 'warehouse';
         this.shellElement.innerHTML = `
-            <button type="button" class="warehouse-reset site-type" aria-label="Reset">×</button>
+            <div class="warehouse-shell__corners" aria-hidden="true">
+                <span class="warehouse-shell__corner warehouse-shell__corner--tl"></span>
+                <span class="warehouse-shell__corner warehouse-shell__corner--tr"></span>
+                <span class="warehouse-shell__corner warehouse-shell__corner--bl"></span>
+                <span class="warehouse-shell__corner warehouse-shell__corner--br"></span>
+            </div>
+            <button type="button" class="warehouse-reset general-t" aria-label="נקה לוח">נקה לוח</button>
             <div class="depth-block-bar" aria-hidden="true"></div>
-            <div class="action-warehouse">
-                <div class="warehouse-label">ACTION REPOSITORY</div>
-                <div class="warehouse-tray-layout">
-                    <div class="warehouse-tray-section warehouse-tray-section--frames"></div>
-                    <div class="warehouse-tray-divider" aria-hidden="true"></div>
-                    <div class="warehouse-scroll">
-                        <div class="warehouse-tray-section warehouse-tray-section--blocks"></div>
+            <div class="warehouse-layout">
+                <div class="warehouse-dock">
+                    <div class="warehouse-statistics general-t" aria-live="polite"></div>
+                    <div class="warehouse-message-port general-t">${messageText}</div>
+                    <div class="action-warehouse">
+                        <div class="warehouse-tray-layout">
+                            <div class="warehouse-tray-section warehouse-tray-section--frames"></div>
+                            <div class="warehouse-tray-divider" aria-hidden="true"></div>
+                            <div class="warehouse-scroll">
+                                <div class="warehouse-tray-section warehouse-tray-section--blocks"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
+                <div class="warehouse-map" id="warehouse-map-mount" aria-hidden="true"></div>
             </div>
         `;
         this.dockElement = this.shellElement.querySelector('.action-warehouse');
         this.depthBlockBarElement = this.shellElement.querySelector('.depth-block-bar');
+        this.statisticsElement = this.shellElement.querySelector('.warehouse-statistics');
+        this.messagePortElement = this.shellElement.querySelector('.warehouse-message-port');
+        this.mapMountElement = this.shellElement.querySelector('#warehouse-map-mount');
         if (this.depthBlockBarElement) {
             this.depthBlockBarElement.dataset.siteLayer = 'blockBar';
         }
@@ -178,8 +198,9 @@ const ActionWarehouse = {
     },
 
     isPointOverDock(x, y) {
-        if (!this.shellElement) return false;
-        const rect = this.shellElement.getBoundingClientRect();
+        const dock = this.shellElement?.querySelector('.warehouse-dock');
+        if (!dock) return false;
+        const rect = dock.getBoundingClientRect();
         return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     },
 
@@ -1304,6 +1325,10 @@ const ActionWarehouse = {
             this.shouldUseCooccurrenceDockMute();
         if (this.dockElement) {
             this.dockElement.classList.toggle('is-capture-full', full && !suppressFullGray);
+        }
+        if (this.statisticsElement) {
+            const n = typeof this.getCrowdedBlockCount === 'function' ? this.getCrowdedBlockCount() : 0;
+            this.statisticsElement.textContent = `${n} בלוקים בשימוש`;
         }
     },
 

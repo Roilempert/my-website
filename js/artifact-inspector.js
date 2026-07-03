@@ -6,7 +6,7 @@ const ArtifactInspector = {
     activeElement: null,
     backdrop: null,
     panel: null,
-    mode: null, // 'center' | 'popup'
+    mode: null, // 'popup'
 
     init() {
         this.backdrop = document.createElement('div');
@@ -34,13 +34,7 @@ const ArtifactInspector = {
     },
 
     usesPopupMode() {
-        if (typeof DepthController === 'undefined') return false;
-        const level = DepthController.currentLevel;
-        if (level === 3) return false;
-        if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
-            return level === 1 || level === 2;
-        }
-        return level === 2;
+        return true;
     },
 
     isOpenableWrapper(noteWrapperNode) {
@@ -55,33 +49,7 @@ const ArtifactInspector = {
     open(noteWrapperNode) {
         if (this.isActive) return;
         if (!this.isOpenableWrapper(noteWrapperNode)) return;
-
-        if (this.usesPopupMode()) {
-            this.openPopup(noteWrapperNode);
-            return;
-        }
-
-        this.openCentered(noteWrapperNode);
-    },
-
-    openCentered(noteWrapperNode) {
-        this.isActive = true;
-        this.mode = 'center';
-        this.activeElement = noteWrapperNode;
-
-        SpatialNavigation.pause();
-
-        const rect = noteWrapperNode.getBoundingClientRect();
-        const elemCenterX = rect.left + rect.width / 2;
-        const elemCenterY = rect.top + rect.height / 2;
-
-        const dX = (window.innerWidth / 2) - elemCenterX;
-        const dY = (window.innerHeight / 2) - elemCenterY;
-
-        noteWrapperNode.classList.add('is-centered');
-        noteWrapperNode.style.transform = `translate(${dX}px, ${dY}px)`;
-
-        this.backdrop.classList.add('active');
+        this.openPopup(noteWrapperNode);
     },
 
     openPopup(noteWrapperNode) {
@@ -96,9 +64,7 @@ const ArtifactInspector = {
 
         SpatialNavigation.pause();
 
-        this.panel.innerHTML = typeof MicroMock !== 'undefined'
-            ? MicroMock.buildCardHTML(item)
-            : '';
+        this.panel.innerHTML = this.buildFocusHTML(item);
         this.panel.setAttribute('aria-hidden', 'false');
         this.panel.dataset.noteId = String(item.id);
 
@@ -107,32 +73,120 @@ const ArtifactInspector = {
         document.body.classList.add('is-artifact-inspector-open');
     },
 
-    close() {
-        if (!this.isActive) return;
-
-        if (this.mode === 'popup') {
-            this.closePopup();
-            return;
-        }
-
-        this.closeCentered();
+    buildFocusHTML(item) {
+        const cardHtml = typeof MicroMock !== 'undefined'
+            ? MicroMock.buildCardHTML(item, { focusScale: true })
+            : '';
+        const metaHtml = this.buildMetadataHTML(item);
+        const relatedHtml = this.buildRelatedNotesHTML(item);
+        return `
+            <div class="artifact-inspector-focus">
+                ${cardHtml}
+            </div>
+            ${metaHtml}
+            ${relatedHtml}
+        `;
     },
 
-    closeCentered() {
-        if (!this.activeElement) return;
-        const el = this.activeElement;
+    buildMetadataHTML(item) {
+        const author = item.authorFullName || item.authorCode || '—';
+        const date = item.dateWritten || '—';
+        const serial = item.id || '—';
+        const typology = item.typology || '—';
+        const tags = (item.tags || []).map(t => t.name).join('، ');
+        return `
+            <section class="artifact-inspector-metadata">
+                <h2 class="artifact-inspector-metadata__id general-h">${this.escapeHtml(item.id || '')}</h2>
+                <div class="artifact-inspector-metadata__grid">
+                    <div class="artifact-inspector-metadata__tags">
+                        <h3 class="general-t">תגיות</h3>
+                        <div class="artifact-inspector-metadata__tag-list general-t">${this.escapeHtml(tags || '—')}</div>
+                    </div>
+                    <dl class="artifact-inspector-metadata__details general-t">
+                        <div><dt>מחבר</dt><dd>${this.escapeHtml(author)}</dd></div>
+                        <div><dt>תאריך כתיבה</dt><dd>${this.escapeHtml(date)}</dd></div>
+                        <div><dt>מספר סידורי</dt><dd>${this.escapeHtml(serial)}</dd></div>
+                        <div><dt>מבנה טיפולוגי</dt><dd>${this.escapeHtml(typology)}</dd></div>
+                    </dl>
+                </div>
+            </section>
+        `;
+    },
 
-        el.style.transform = 'translate(0, 0)';
-        this.backdrop.classList.remove('active');
+    buildRelatedNotesHTML(focusItem) {
+        const sections = this.getRelatedTagSections(focusItem);
+        if (!sections.length) return '';
 
-        setTimeout(() => {
-            el.classList.remove('is-centered');
-            el.style.transform = '';
-            this.isActive = false;
-            this.activeElement = null;
-            this.mode = null;
-            SpatialNavigation.resume();
-        }, CONFIG.inspector.closeDuration);
+        const blocks = sections.map((section) => {
+            const pills = section.tags.map((name) => {
+                const color = AppState.tagColorsMap.get(name) || 'var(--color-3)';
+                return `<span class="artifact-inspector-related__pill action-block general-t"><span class="block-glyph" style="background-color:${color}"></span><span class="block-label">${this.escapeHtml(name)}</span></span>`;
+            }).join('<span class="artifact-inspector-related__plus" aria-hidden="true">+</span>');
+
+            const notes = section.items.map((item) => {
+                const html = typeof MicroMock !== 'undefined'
+                    ? MicroMock.buildCardHTML(item)
+                    : '';
+                return `<div class="artifact-inspector-related__note">${html}</div>`;
+            }).join('');
+
+            return `
+                <section class="artifact-inspector-related__section">
+                    <div class="artifact-inspector-related__heading general-h">${pills}</div>
+                    <div class="artifact-inspector-related__grid">${notes}</div>
+                </section>
+            `;
+        }).join('');
+
+        return `
+            <section class="artifact-inspector-related">
+                <h2 class="artifact-inspector-related__title general-h">פתקים קשורים</h2>
+                ${blocks}
+            </section>
+        `;
+    },
+
+    getRelatedTagSections(focusItem) {
+        const focusTags = (focusItem.tags || []).map(t => t.name).filter(Boolean);
+        if (!focusTags.length || !AppState.items?.length) return [];
+
+        const focusId = String(focusItem.id);
+        const subsets = [];
+
+        const emit = (mask) => {
+            const tags = focusTags.filter((_, i) => (mask >> i) & 1);
+            if (!tags.length) return;
+            const key = tags.slice().sort().join('\0');
+            if (subsets.some(s => s.key === key)) return;
+
+            const matches = AppState.items.filter((item) => {
+                if (String(item.id) === focusId) return false;
+                const names = new Set((item.tags || []).map(t => t.name));
+                return tags.every(name => names.has(name));
+            });
+
+            if (!matches.length) return;
+            subsets.push({ key, tags, items: matches });
+        };
+
+        const total = 1 << focusTags.length;
+        for (let mask = 1; mask < total; mask++) emit(mask);
+
+        subsets.sort((a, b) => a.tags.length - b.tags.length || a.key.localeCompare(b.key, 'he'));
+        return subsets;
+    },
+
+    escapeHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    },
+
+    close() {
+        if (!this.isActive) return;
+        this.closePopup();
     },
 
     closePopup() {

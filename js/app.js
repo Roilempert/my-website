@@ -203,7 +203,10 @@ const AppState = {
         const rows = this.parseCSVToArray(csvText);
         const cols = CONFIG.data.columns;
         return rows.slice(1).map((columns, index) => {
+            const authorFullName = this.normalizeString(columns[cols.authorFullName] || '');
             const authorCode = this.normalizeString(columns[cols.authorCode] || '');
+            const dateWritten = this.normalizeString(columns[cols.date] || '');
+            const typology = this.normalizeString(columns[cols.typology] || '');
             const id = (columns[cols.id] || `SYS-${index}`).replace(/_/g, ' ');
             const tagsRaw = columns[cols.tags] || '';
             
@@ -217,7 +220,16 @@ const AppState = {
                 return { name: norm, color: this.tagColorsMap.get(norm) || CONFIG.data.fallbackTagColor };
             }).filter(t => t.name);
 
-            return { id, title, body, tags: tagsArray, authorCode };
+            return {
+                id,
+                title,
+                body,
+                tags: tagsArray,
+                authorCode,
+                authorFullName,
+                dateWritten,
+                typology
+            };
         });
     },
 
@@ -3882,30 +3894,35 @@ const MicroMock = {
         return null;
     },
 
-    buildTagsHTML(tags) {
+    buildTagsHTML(tags, options = {}) {
+        const pillClass = options.noteStyle
+            ? 'micro-mock__tag-pill general-t'
+            : 'action-block micro-mock__tag-block site-type';
         if (!tags?.length) {
-            return `<span class="action-block micro-mock__tag-block site-type">` +
-                `<span class="block-glyph" style="background-color:var(--main-text)"></span>` +
+            return `<span class="${pillClass}">` +
+                `<span class="block-glyph" style="background-color:var(--color-4)"></span>` +
                 `<span class="block-label">—</span></span>`;
         }
         return tags.map(tag => (
-            `<span class="action-block micro-mock__tag-block site-type">` +
+            `<span class="${pillClass}">` +
             `<span class="block-glyph" style="background-color:${tag.color}"></span>` +
             `<span class="block-label">${this.escapeHTML(tag.name)}</span></span>`
         )).join('');
     },
 
-    buildCardHTML(item) {
+    buildCardHTML(item, options = {}) {
         const title = String(item.title || '').trim();
         const titleHTML = title
-            ? `<h2 class="note-title">${this.escapeHTML(title)}</h2>`
+            ? `<h2 class="note-title note-h">${this.escapeHTML(title)}</h2>`
             : '';
-        return `<div class="micro-mock__card note-card" data-note-id="${this.escapeHTML(item.id)}">` +
-            `<div class="note-idcode">${this.escapeHTML(item.id)}</div>` +
+        const focusClass = options.focusScale ? ' micro-mock__card--focus' : '';
+        const card = `<div class="micro-mock__card note-card${focusClass}" data-note-id="${this.escapeHTML(item.id)}">` +
+            `<div class="note-idcode general-t">${this.escapeHTML(item.id)}</div>` +
             titleHTML +
-            `<div class="note-body">${this.escapeHTML(item.body)}</div>` +
-            `<div class="micro-mock__tags">${this.buildTagsHTML(item.tags)}</div>` +
+            `<div class="note-body note-t">${this.escapeHTML(item.body)}</div>` +
             `</div>`;
+        const tags = `<div class="micro-mock__tags">${this.buildTagsHTML(item.tags, { noteStyle: true })}</div>`;
+        return `<div class="micro-mock__note">${card}${tags}</div>`;
     },
 
     applyToWrapper(wrapper, item = null) {
@@ -8191,38 +8208,30 @@ const NavigationMap = {
     _resizeScheduled: false,
     _layoutSettleTimer: null,
 
+    layerMarker: null,
+    _layerMarkerLoaded: false,
+
     init() {
         const layerCfg = CONFIG.layerNavigation;
         const mapCfg = CONFIG.navigationMap;
         if (!layerCfg && !mapCfg) return;
 
         const root = document.documentElement;
-        if (layerCfg?.gap) {
-            root.style.setProperty('--layer-nav-gap', siteGridCssLength(layerCfg.gap));
+        if (layerCfg?.rightInset) {
+            root.style.setProperty('--layer-nav-right-inset', siteGridCssLength(layerCfg.rightInset));
         }
-        if (layerCfg?.typeSize) {
-            root.style.setProperty('--layer-nav-type-size', siteGridCssLength(layerCfg.typeSize));
+        if (layerCfg?.boxGap) {
+            root.style.setProperty('--layer-nav-gap', siteGridCssLength(layerCfg.boxGap));
         }
-        if (layerCfg?.typeLine != null) {
-            root.style.setProperty('--layer-nav-type-line', String(layerCfg.typeLine));
+        if (layerCfg?.boxPadding) {
+            root.style.setProperty('--layer-nav-box-pad', siteGridCssLength(layerCfg.boxPadding));
         }
-        if (layerCfg?.typeWeight != null) {
-            root.style.setProperty('--layer-nav-type-weight', String(layerCfg.typeWeight));
+        if (layerCfg?.boxRadius) {
+            root.style.setProperty('--layer-nav-box-radius', siteGridCssLength(layerCfg.boxRadius));
         }
-        if (layerCfg?.typeWeightActive != null) {
-            root.style.setProperty('--layer-nav-type-weight-active', String(layerCfg.typeWeightActive));
+        if (layerCfg?.markerGap) {
+            root.style.setProperty('--layer-nav-marker-gap', siteGridCssLength(layerCfg.markerGap));
         }
-        const indentCols = layerCfg?.indentColumns ?? 0.5;
-        const activeIndentCols = layerCfg?.activeIndentColumns ?? indentCols;
-        const hoverIndentCols = layerCfg?.hoverIndentColumns ?? indentCols;
-        root.style.setProperty(
-            '--layer-nav-active-indent',
-            `calc(${activeIndentCols} * var(--site-grid-cell-w))`
-        );
-        root.style.setProperty(
-            '--layer-nav-hover-indent',
-            `calc(${hoverIndentCols} * var(--site-grid-cell-w))`
-        );
         if (layerCfg?.rowGap) {
             root.style.setProperty('--layer-nav-row-gap', siteGridCssLength(layerCfg.rowGap));
         }
@@ -8232,17 +8241,11 @@ const NavigationMap = {
         if (layerCfg?.slotMoveEasing) {
             root.style.setProperty('--layer-nav-slot-easing', layerCfg.slotMoveEasing);
         }
-        const anchorRow = Math.max(1, layerCfg?.anchorRow ?? 1);
-        root.style.setProperty(
-            '--layer-nav-anchor-top',
-            `calc(${anchorRow} * var(--site-grid-cell-h) + ${anchorRow - 1} * var(--site-grid-gap))`
-        );
-        root.style.setProperty(
-            '--layer-nav-slot-base-top',
-            `calc(var(--site-grid-padding) + ${anchorRow} * var(--site-grid-cell-h) + ${anchorRow - 1} * var(--site-grid-gap))`
-        );
-        if (layerCfg?.inactiveOpacity != null) {
-            root.style.setProperty('--layer-nav-inactive-opacity', String(layerCfg.inactiveOpacity));
+        if (layerCfg?.centerOnViewport) {
+            root.style.setProperty(
+                '--layer-nav-slot-base-top',
+                'calc(50vh - 0.5 * var(--layer-nav-row-step))'
+            );
         }
         if (layerCfg?.hitAreaPadding) {
             root.style.setProperty('--layer-nav-hit-pad', siteGridCssLength(layerCfg.hitAreaPadding));
@@ -8325,8 +8328,20 @@ const NavigationMap = {
         mapWrap.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
         mapWrap.addEventListener('pointermove', (e) => this.handlePointerMove(e));
 
+        this.layerMarker = document.createElement('span');
+        this.layerMarker.className = 'site-navigation-layers__marker';
+        this.layerMarker.setAttribute('aria-hidden', 'true');
+        this._loadLayerMarker(layerCfg?.markerSrc || 'assets/ui/layer-nav-marker.svg');
+
         document.body.appendChild(layersPanel);
-        document.body.appendChild(mapsPanel);
+
+        const mapMount = document.getElementById('warehouse-map-mount');
+        if (mapMount) {
+            mapMount.appendChild(mapsPanel);
+            mapMount.removeAttribute('aria-hidden');
+        } else {
+            document.body.appendChild(mapsPanel);
+        }
         document.body.classList.add('has-site-navigation');
 
         this.layersPanel = layersPanel;
@@ -9204,6 +9219,19 @@ const NavigationMap = {
         return level - activeLevel;
     },
 
+    async _loadLayerMarker(src) {
+        if (!this.layerMarker || this._layerMarkerLoaded) return;
+        try {
+            const res = await fetch(src);
+            if (!res.ok) return;
+            const svgText = await res.text();
+            this.layerMarker.innerHTML = svgText;
+            this._layerMarkerLoaded = true;
+        } catch (_) {
+            /* offline exhibition — marker optional until SVG loads */
+        }
+    },
+
     applyLayerSlot(title, slot) {
         title.dataset.slot = String(slot);
         title.style.setProperty('--layer-nav-slot', String(slot));
@@ -9226,6 +9254,9 @@ const NavigationMap = {
             title.classList.toggle('is-inactive', !isActive);
             title.setAttribute('aria-current', isActive ? 'true' : 'false');
             title.disabled = transitionActive;
+            if (isActive && this.layerMarker && this.layerMarker.parentElement !== title) {
+                title.prepend(this.layerMarker);
+            }
         });
 
         const mapCursorBlocked = inspectorActive || transitionActive;
@@ -10441,7 +10472,7 @@ const ArtifactInspector = {
     activeElement: null,
     backdrop: null,
     panel: null,
-    mode: null, // 'center' | 'popup'
+    mode: null, // 'popup'
 
     init() {
         this.backdrop = document.createElement('div');
@@ -10469,13 +10500,7 @@ const ArtifactInspector = {
     },
 
     usesPopupMode() {
-        if (typeof DepthController === 'undefined') return false;
-        const level = DepthController.currentLevel;
-        if (level === 3) return false;
-        if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
-            return level === 1 || level === 2;
-        }
-        return level === 2;
+        return true;
     },
 
     isOpenableWrapper(noteWrapperNode) {
@@ -10490,33 +10515,7 @@ const ArtifactInspector = {
     open(noteWrapperNode) {
         if (this.isActive) return;
         if (!this.isOpenableWrapper(noteWrapperNode)) return;
-
-        if (this.usesPopupMode()) {
-            this.openPopup(noteWrapperNode);
-            return;
-        }
-
-        this.openCentered(noteWrapperNode);
-    },
-
-    openCentered(noteWrapperNode) {
-        this.isActive = true;
-        this.mode = 'center';
-        this.activeElement = noteWrapperNode;
-
-        SpatialNavigation.pause();
-
-        const rect = noteWrapperNode.getBoundingClientRect();
-        const elemCenterX = rect.left + rect.width / 2;
-        const elemCenterY = rect.top + rect.height / 2;
-
-        const dX = (window.innerWidth / 2) - elemCenterX;
-        const dY = (window.innerHeight / 2) - elemCenterY;
-
-        noteWrapperNode.classList.add('is-centered');
-        noteWrapperNode.style.transform = `translate(${dX}px, ${dY}px)`;
-
-        this.backdrop.classList.add('active');
+        this.openPopup(noteWrapperNode);
     },
 
     openPopup(noteWrapperNode) {
@@ -10531,9 +10530,7 @@ const ArtifactInspector = {
 
         SpatialNavigation.pause();
 
-        this.panel.innerHTML = typeof MicroMock !== 'undefined'
-            ? MicroMock.buildCardHTML(item)
-            : '';
+        this.panel.innerHTML = this.buildFocusHTML(item);
         this.panel.setAttribute('aria-hidden', 'false');
         this.panel.dataset.noteId = String(item.id);
 
@@ -10542,32 +10539,120 @@ const ArtifactInspector = {
         document.body.classList.add('is-artifact-inspector-open');
     },
 
-    close() {
-        if (!this.isActive) return;
-
-        if (this.mode === 'popup') {
-            this.closePopup();
-            return;
-        }
-
-        this.closeCentered();
+    buildFocusHTML(item) {
+        const cardHtml = typeof MicroMock !== 'undefined'
+            ? MicroMock.buildCardHTML(item, { focusScale: true })
+            : '';
+        const metaHtml = this.buildMetadataHTML(item);
+        const relatedHtml = this.buildRelatedNotesHTML(item);
+        return `
+            <div class="artifact-inspector-focus">
+                ${cardHtml}
+            </div>
+            ${metaHtml}
+            ${relatedHtml}
+        `;
     },
 
-    closeCentered() {
-        if (!this.activeElement) return;
-        const el = this.activeElement;
+    buildMetadataHTML(item) {
+        const author = item.authorFullName || item.authorCode || '—';
+        const date = item.dateWritten || '—';
+        const serial = item.id || '—';
+        const typology = item.typology || '—';
+        const tags = (item.tags || []).map(t => t.name).join('، ');
+        return `
+            <section class="artifact-inspector-metadata">
+                <h2 class="artifact-inspector-metadata__id general-h">${this.escapeHtml(item.id || '')}</h2>
+                <div class="artifact-inspector-metadata__grid">
+                    <div class="artifact-inspector-metadata__tags">
+                        <h3 class="general-t">תגיות</h3>
+                        <div class="artifact-inspector-metadata__tag-list general-t">${this.escapeHtml(tags || '—')}</div>
+                    </div>
+                    <dl class="artifact-inspector-metadata__details general-t">
+                        <div><dt>מחבר</dt><dd>${this.escapeHtml(author)}</dd></div>
+                        <div><dt>תאריך כתיבה</dt><dd>${this.escapeHtml(date)}</dd></div>
+                        <div><dt>מספר סידורי</dt><dd>${this.escapeHtml(serial)}</dd></div>
+                        <div><dt>מבנה טיפולוגי</dt><dd>${this.escapeHtml(typology)}</dd></div>
+                    </dl>
+                </div>
+            </section>
+        `;
+    },
 
-        el.style.transform = 'translate(0, 0)';
-        this.backdrop.classList.remove('active');
+    buildRelatedNotesHTML(focusItem) {
+        const sections = this.getRelatedTagSections(focusItem);
+        if (!sections.length) return '';
 
-        setTimeout(() => {
-            el.classList.remove('is-centered');
-            el.style.transform = '';
-            this.isActive = false;
-            this.activeElement = null;
-            this.mode = null;
-            SpatialNavigation.resume();
-        }, CONFIG.inspector.closeDuration);
+        const blocks = sections.map((section) => {
+            const pills = section.tags.map((name) => {
+                const color = AppState.tagColorsMap.get(name) || 'var(--color-3)';
+                return `<span class="artifact-inspector-related__pill action-block general-t"><span class="block-glyph" style="background-color:${color}"></span><span class="block-label">${this.escapeHtml(name)}</span></span>`;
+            }).join('<span class="artifact-inspector-related__plus" aria-hidden="true">+</span>');
+
+            const notes = section.items.map((item) => {
+                const html = typeof MicroMock !== 'undefined'
+                    ? MicroMock.buildCardHTML(item)
+                    : '';
+                return `<div class="artifact-inspector-related__note">${html}</div>`;
+            }).join('');
+
+            return `
+                <section class="artifact-inspector-related__section">
+                    <div class="artifact-inspector-related__heading general-h">${pills}</div>
+                    <div class="artifact-inspector-related__grid">${notes}</div>
+                </section>
+            `;
+        }).join('');
+
+        return `
+            <section class="artifact-inspector-related">
+                <h2 class="artifact-inspector-related__title general-h">פתקים קשורים</h2>
+                ${blocks}
+            </section>
+        `;
+    },
+
+    getRelatedTagSections(focusItem) {
+        const focusTags = (focusItem.tags || []).map(t => t.name).filter(Boolean);
+        if (!focusTags.length || !AppState.items?.length) return [];
+
+        const focusId = String(focusItem.id);
+        const subsets = [];
+
+        const emit = (mask) => {
+            const tags = focusTags.filter((_, i) => (mask >> i) & 1);
+            if (!tags.length) return;
+            const key = tags.slice().sort().join('\0');
+            if (subsets.some(s => s.key === key)) return;
+
+            const matches = AppState.items.filter((item) => {
+                if (String(item.id) === focusId) return false;
+                const names = new Set((item.tags || []).map(t => t.name));
+                return tags.every(name => names.has(name));
+            });
+
+            if (!matches.length) return;
+            subsets.push({ key, tags, items: matches });
+        };
+
+        const total = 1 << focusTags.length;
+        for (let mask = 1; mask < total; mask++) emit(mask);
+
+        subsets.sort((a, b) => a.tags.length - b.tags.length || a.key.localeCompare(b.key, 'he'));
+        return subsets;
+    },
+
+    escapeHtml(str) {
+        return String(str)
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    },
+
+    close() {
+        if (!this.isActive) return;
+        this.closePopup();
     },
 
     closePopup() {
@@ -12262,31 +12347,51 @@ const ActionWarehouse = {
     filterExitByNote: new Map(),   // noteIndex → { phase: 'hollow'|'peel', phaseStart }
     _navigationMapBlockCount: 0,
 
+    statisticsElement: null,
+    messagePortElement: null,
+    mapMountElement: null,
+
     init() {
         this.ensurePhysicsMaps();
         const dockCfg = CONFIG.warehouse.dock;
 
         this.refreshDisplayTokens();
 
+        const messageText = dockCfg?.messageText || 'גררו להפעלה';
         this.shellElement = document.createElement('div');
-        this.shellElement.classList.add('warehouse-shell', 'site-type');
+        this.shellElement.classList.add('warehouse-shell');
         this.shellElement.dataset.siteLayer = 'warehouse';
         this.shellElement.innerHTML = `
-            <button type="button" class="warehouse-reset site-type" aria-label="Reset">×</button>
+            <div class="warehouse-shell__corners" aria-hidden="true">
+                <span class="warehouse-shell__corner warehouse-shell__corner--tl"></span>
+                <span class="warehouse-shell__corner warehouse-shell__corner--tr"></span>
+                <span class="warehouse-shell__corner warehouse-shell__corner--bl"></span>
+                <span class="warehouse-shell__corner warehouse-shell__corner--br"></span>
+            </div>
+            <button type="button" class="warehouse-reset general-t" aria-label="נקה לוח">נקה לוח</button>
             <div class="depth-block-bar" aria-hidden="true"></div>
-            <div class="action-warehouse">
-                <div class="warehouse-label">ACTION REPOSITORY</div>
-                <div class="warehouse-tray-layout">
-                    <div class="warehouse-tray-section warehouse-tray-section--frames"></div>
-                    <div class="warehouse-tray-divider" aria-hidden="true"></div>
-                    <div class="warehouse-scroll">
-                        <div class="warehouse-tray-section warehouse-tray-section--blocks"></div>
+            <div class="warehouse-layout">
+                <div class="warehouse-dock">
+                    <div class="warehouse-statistics general-t" aria-live="polite"></div>
+                    <div class="warehouse-message-port general-t">${messageText}</div>
+                    <div class="action-warehouse">
+                        <div class="warehouse-tray-layout">
+                            <div class="warehouse-tray-section warehouse-tray-section--frames"></div>
+                            <div class="warehouse-tray-divider" aria-hidden="true"></div>
+                            <div class="warehouse-scroll">
+                                <div class="warehouse-tray-section warehouse-tray-section--blocks"></div>
+                            </div>
+                        </div>
                     </div>
                 </div>
+                <div class="warehouse-map" id="warehouse-map-mount" aria-hidden="true"></div>
             </div>
         `;
         this.dockElement = this.shellElement.querySelector('.action-warehouse');
         this.depthBlockBarElement = this.shellElement.querySelector('.depth-block-bar');
+        this.statisticsElement = this.shellElement.querySelector('.warehouse-statistics');
+        this.messagePortElement = this.shellElement.querySelector('.warehouse-message-port');
+        this.mapMountElement = this.shellElement.querySelector('#warehouse-map-mount');
         if (this.depthBlockBarElement) {
             this.depthBlockBarElement.dataset.siteLayer = 'blockBar';
         }
@@ -12409,8 +12514,9 @@ const ActionWarehouse = {
     },
 
     isPointOverDock(x, y) {
-        if (!this.shellElement) return false;
-        const rect = this.shellElement.getBoundingClientRect();
+        const dock = this.shellElement?.querySelector('.warehouse-dock');
+        if (!dock) return false;
+        const rect = dock.getBoundingClientRect();
         return x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
     },
 
@@ -13535,6 +13641,10 @@ const ActionWarehouse = {
             this.shouldUseCooccurrenceDockMute();
         if (this.dockElement) {
             this.dockElement.classList.toggle('is-capture-full', full && !suppressFullGray);
+        }
+        if (this.statisticsElement) {
+            const n = typeof this.getCrowdedBlockCount === 'function' ? this.getCrowdedBlockCount() : 0;
+            this.statisticsElement.textContent = `${n} בלוקים בשימוש`;
         }
     },
 
