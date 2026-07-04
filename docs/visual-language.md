@@ -61,8 +61,8 @@ Four classes replace legacy `--type-*` / ratzif22 / NarkissTam body.
 
 | Class | Font file | Size | Line | Other | Use |
 |-------|-----------|------|------|-------|-----|
-| `.general-h` | `NarkissYair-Bold-TRIAL.woff2` | `4.125rem` | `3.5rem` | — | Inactive layer labels; inspector ID title; related-notes section title |
-| `.general-t` | `NarkissYair-BoldMono-TRIAL.woff2` | `1rem` | `1` | no synthesis | Warehouse, blocks, **active** layer label, metadata labels/details, note ID |
+| `.general-h` | `NarkissYair-Bold-TRIAL.woff2` | `3.625rem` | `3.5rem` | — | Layer labels; inspector ID title; related-notes section title |
+| `.general-t` | `NarkissYair-BoldMono-TRIAL.woff2` | `1rem` | `1` | letter-spacing 5%, no synthesis | Warehouse, blocks, **active** layer label, metadata labels/details, note ID |
 | `.note-h` | `Neoklass-BoldItalic-TRIAL.woff2` | `5.375rem` | `0.9` | letter-spacing −1% | Note titles |
 | `.note-t` | `FrankRuhl_Universal-Mono.woff2` | `1.125rem` | `1.2` | — | Note body |
 
@@ -97,8 +97,8 @@ Four classes replace legacy `--type-*` / ratzif22 / NarkissTam body.
 - **Shell:** 2 rows high, cols 1–18 inside padding; transparent outer wrapper with **4 corner decorations** (5×5, color 3, static).
 - **Action dock** (15 cols): separate bg color 6 panel, radius 5px, **left side** of the shell.
   - Inner corner decorations: two marks on the dock right edge, paired with two marks on the map left edge around the dock/map gap
-  - Message/statistics inset: top/right 10px → `var(--space-10)`; left/bottom 20px → `var(--space-20)`; paragraph indent 20px → `var(--space-20)`
-  - Statistics (2×3): block counter only, top-aligned on left side of dock
+  - Message/statistics inset: top/right 10px → `var(--space-10)`; left/bottom 20px → `var(--space-20)`; message paragraph indent 20px → `var(--space-20)`
+  - Statistics (3 cols): live rows for `בלוקים בשימוש`, `קשרים פעילים`, and `פתקים מחוברים`; category labels stick to the right of the panel, numeric output sticks left on the same line; rows use normal text line-height spacing
   - Message port (0.5×12): `גררו להפעלה` (`.general-t`), middle area next to map; text top-aligned; no extra outer side inset beyond internal padding
   - Block panel (1.5×12): live blocks from sheet (`.general-t`), middle area next to map; content padding is 10px → `var(--space-10)`, including 10px below the separator hairline
 - **Map** (3 cols): separate bg color 6 panel, radius 5px, **right side** of the shell; live minimap with compact details (objects color 3).
@@ -128,19 +128,20 @@ All block/tag pills use the same dimensions everywhere on the site; only color r
 
 - **20px** above dock top, **10px** inset from dock right edge
 - Clear: **`נקה לוח`**, fill color 6 (= RESET)
-- Counter in statistics panel only
+- Block counter appears inside the live statistics panel
 
 ### Layer navigation (right)
 
 | State | Box | Type | Marker |
 |-------|-----|------|--------|
-| Active | color 6, 5px pad, 5px radius | `.general-h` | selection vector SVG |
-| Inactive | same box styling | `.general-t` | none |
+| Active | color 3 fill, color 6 text, 10px pad, 5px radius | `.general-h` at `3.625rem` | selection vector SVG |
+| Inactive | color 6 fill, color 3 text, 10px pad, 5px radius | `.general-h` at `3.625rem` | none |
 
-- **5px** gap between three boxes
+- Three-label stack totals 2.5 shell rows, including the two 5px gaps; label type scales inside that unit with 10px padding
 - **40px** from viewport right edge → `2.5rem`
-- Active label vertically centered; slot animation moves inactive labels
-- **Selection marker:** one SVG, reparented to active button in `syncActiveState()` — rides existing slot transition
+- Active label aligns to the 75% point of shell row 4; inactive labels follow inside the 2.5-row stack
+- Inactive hover only: move label left by 20px (`var(--space-20)`); active label does not hover-shift
+- **Selection marker:** one fixed SVG on the right side of the layer stack — curved top/bottom skeleton and two interior dividers stay static; only the `X` and its vertical-line gap move smoothly between top/middle/bottom cells for macro/meso/micro
 
 ### L3 note cards
 
@@ -171,7 +172,7 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | File | Figma source | In code | Motion |
 |------|--------------|---------|--------|
-| `layer-nav-marker.svg` | `layer navigation final` (638:12) | `navigation-map.js` | Moves with active layer button |
+| `layer-nav-marker.svg` | `layer navigation final` (638:12) | `navigation-map.js` | Fixed curved skeleton; `X` and vertical-line gap move between marker cells |
 | `decoration-corner-tr.svg` | One shell corner group (exported **top-right** orientation) | `.warehouse-shell` × 4 (mirror/rotate per corner) | Static |
 | — | — | Map viewport marker | **Not SVG** — fixed DOM/canvas frame; map pans behind |
 
@@ -181,6 +182,43 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-04 | Narrowed `.general-t` letter spacing trial to 5% |
+| 2026-07-04 | Centered the layer navigation marker divider ticks between the layer labels |
+| 2026-07-04 | Matched the layer navigation marker to 1px non-scaling hairlines and centered the `X` more accurately on labels |
+| 2026-07-04 | Restored the layer navigation marker curved corners and mounted the skeleton as a fixed panel-level object |
+| 2026-07-04 | Tightened warehouse statistics rows so categories and outputs share one line with normal line-height spacing |
+| 2026-07-04 | Rebuilt the layer navigation marker as a mostly static three-cell table; only the `X` and vertical-line gap move |
+| 2026-07-04 | Added live warehouse statistics rows for active connections and connected notes, with right-label/left-value layout |
+| 2026-07-04 | Mapped the layer navigation marker `X` to top/middle/bottom SVG cells for macro/meso/micro |
+| 2026-07-04 | Added a lightweight one-shot internal vector reveal to the layer navigation marker SVG |
+| 2026-07-04 | Updated `.general-h` and runtime nav type token to responsive 3.625rem (58px) |
+| 2026-07-04 | Set layer navigation label text to responsive 3.625rem (58px) |
+| 2026-07-04 | Set layer navigation label text to responsive 3.75rem (60px) |
+| 2026-07-04 | Set layer navigation label text to responsive 4rem (64px) |
+| 2026-07-04 | Set layer navigation label text to responsive 4.25rem for the requested 68pt design size |
+| 2026-07-04 | Reduced layer navigation label text to scale with the 2.5-row stack while leaving `.general-h` at 4.375rem |
+| 2026-07-04 | Reduced the full three-label navigation stack to 2.5 shell rows total, with gaps included |
+| 2026-07-04 | Returned active layer navigation label and marker to the original label column |
+| 2026-07-04 | Offset the active layer navigation label and marker 20px left from the inactive column |
+| 2026-07-04 | Increased inactive layer navigation hover shift to 20px using `var(--space-20)` |
+| 2026-07-04 | Fixed layer navigation hover so only inactive labels shift left by 5px |
+| 2026-07-04 | Set `.general-h` and layer navigation label text to responsive 4.375rem (70px) |
+| 2026-07-04 | Enlarged the full three-label navigation stack to 3 shell rows total, with gaps included |
+| 2026-07-04 | Made the full three-label navigation stack 225% of a shell row, with the 5px gaps included in the unit |
+| 2026-07-04 | Shifted layer navigation label placement from row centers to the 75% vertical guide of each shell row |
+| 2026-07-04 | Restored layer navigation slot spacing to shell row centers after increasing label padding |
+| 2026-07-04 | Increased layer navigation label padding to 10px while keeping 64px text and row-centered placement |
+| 2026-07-04 | Set `.general-h` and layer navigation labels to responsive 4rem font size |
+| 2026-07-04 | Tested 75%-row-height layer navigation labels while keeping the 5px inter-label gap |
+| 2026-07-04 | Resized layer navigation labels to two-thirds of a shell row and restored the 5px inter-label gap |
+| 2026-07-04 | Tightened layer navigation spacing so half-row-height labels occupy consecutive half-row slots |
+| 2026-07-04 | Tested half-row-height layer navigation labels with nav-specific `.general-h` scaling |
+| 2026-07-04 | Moved the row-centered layer navigation stack up to anchor the active label on shell row 4 |
+| 2026-07-04 | Moved the row-centered layer navigation stack up one shell row so the active label anchors on row 5 |
+| 2026-07-04 | Centered layer navigation labels on adjacent site-shell row centers while keeping the active label fixed on row 6 |
+| 2026-07-04 | Moved the layer navigation selection SVG to the right side of the active label |
+| 2026-07-04 | Corrected layer navigation palette to use color 3 and color 6 for active/inactive states |
+| 2026-07-04 | Matched inactive layer navigation labels to active label size and inverted active label fill/text colors |
 | 2026-07-04 | Reduced layer navigation label padding and inter-label gap to 5px using `var(--space-5)` |
 | 2026-07-04 | Switched layer navigation type hierarchy so the active layer is large and inactive layers are small; restored color-6 rectangular boxes with 10px padding |
 | 2026-07-04 | Added original L2 line silhouettes inside stable minimap frame markers after saving the successful frame-echo reference |

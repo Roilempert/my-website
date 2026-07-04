@@ -164,7 +164,9 @@ const NavigationMap = {
         this.layerMarker = document.createElement('span');
         this.layerMarker.className = 'site-navigation-layers__marker';
         this.layerMarker.setAttribute('aria-hidden', 'true');
+        this.layerMarker.dataset.level = String(DepthController.currentLevel || 1);
         this._loadLayerMarker(layerCfg?.markerSrc || 'assets/ui/layer-nav-marker.svg');
+        layersPanel.appendChild(this.layerMarker);
 
         document.body.appendChild(layersPanel);
 
@@ -1182,10 +1184,10 @@ const NavigationMap = {
             title.classList.toggle('is-inactive', !isActive);
             title.setAttribute('aria-current', isActive ? 'true' : 'false');
             title.disabled = transitionActive;
-            if (isActive && this.layerMarker && this.layerMarker.parentElement !== title) {
-                title.prepend(this.layerMarker);
-            }
         });
+        if (this.layerMarker) {
+            this.layerMarker.dataset.level = String(level);
+        }
 
         const mapCursorBlocked = inspectorActive || transitionActive;
         if (this.canvas && !this._drag?.active) {

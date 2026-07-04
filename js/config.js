@@ -7,7 +7,7 @@ const scale = (px) => Math.round(px * VISUAL_SCALE);
 
 /* Exhibition type scale — keep in sync with .general-h/t, .note-h/t in styles.css */
 const TYPE_SCALE = {
-    generalH: { sizePt: 66, linePt: 56, weight: 700 },
+    generalH: { sizePt: 58, linePt: 56, weight: 700 },
     generalT: { sizeRem: 1, line: 1, weight: 700 },
     noteH:    { sizePt: 86, line: 0.9, weight: 700, style: 'italic', letterSpacing: '-0.01em' },
     noteT:    { sizePt: 18, line: 1.2, weight: 400 },
@@ -16,7 +16,7 @@ const TYPE_SCALE = {
     body:    { sizeRem: 1.125, sizePx: 18, line: 1.2, weight: 400, maxCh: 55 },
     meta:    { sizeRem: 1, sizePx: 16, line: 1, weight: 700 },
     ui:      { sizeRem: 1, line: 1, weight: 700 },
-    nav:     { sizeRem: 4.125, line: 0.848, weight: 700, weightActive: 700 },
+    nav:     { sizeRem: 3.625, line: 0.848, weight: 700, weightActive: 700 },
     debug:   { sizePx: 9 }
 };
 
@@ -398,14 +398,13 @@ const CONFIG = {
         labels: { 1: 'מאקרו', 2: 'מזו', 3: 'מיקרו' },
         rightInset: { value: 2.5, unit: 'rem' },
         boxGap: { value: 0.625, unit: 'rem' },
-        boxPadding: { value: 0.3125, unit: 'rem' },
+        boxPadding: { value: 0.625, unit: 'rem' },
         boxRadius: { value: 0.3125, unit: 'rem' },
         markerGap: { value: 0.625, unit: 'rem' },
         markerSrc: 'assets/ui/layer-nav-marker.svg',
-        rowGap: { value: 0.3125, unit: 'rem' },
         slotMoveDuration: 0.34,
         slotMoveEasing: 'cubic-bezier(0.9, 0, 0.02, 1)',
-        centerOnViewport: true,
+        centerOnViewport: false,
         hitAreaPadding: { value: 0, unit: 'rem' },
         slotCount: 3
     },

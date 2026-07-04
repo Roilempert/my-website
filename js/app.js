@@ -8503,7 +8503,9 @@ const NavigationMap = {
         this.layerMarker = document.createElement('span');
         this.layerMarker.className = 'site-navigation-layers__marker';
         this.layerMarker.setAttribute('aria-hidden', 'true');
+        this.layerMarker.dataset.level = String(DepthController.currentLevel || 1);
         this._loadLayerMarker(layerCfg?.markerSrc || 'assets/ui/layer-nav-marker.svg');
+        layersPanel.appendChild(this.layerMarker);
 
         document.body.appendChild(layersPanel);
 
@@ -9521,10 +9523,10 @@ const NavigationMap = {
             title.classList.toggle('is-inactive', !isActive);
             title.setAttribute('aria-current', isActive ? 'true' : 'false');
             title.disabled = transitionActive;
-            if (isActive && this.layerMarker && this.layerMarker.parentElement !== title) {
-                title.prepend(this.layerMarker);
-            }
         });
+        if (this.layerMarker) {
+            this.layerMarker.dataset.level = String(level);
+        }
 
         const mapCursorBlocked = inspectorActive || transitionActive;
         if (this.canvas && !this._drag?.active) {
@@ -14251,6 +14253,73 @@ const ActionWarehouse = {
         }
     },
 
+    getLiveStatistics() {
+        const blocksInUse = typeof this.getCrowdedBlockCount === 'function'
+            ? this.getCrowdedBlockCount()
+            : 0;
+        const activeBlocks = typeof this.getActiveCaptureBlocks === 'function'
+            ? this.getActiveCaptureBlocks()
+            : [];
+        const connectedNotes = new Set();
+        let activeConnections = 0;
+
+        if (typeof AppState !== 'undefined' && Array.isArray(AppState.items) && activeBlocks.length) {
+            AppState.items.forEach((item, noteIndex) => {
+                const noteTags = new Set((item.tags || []).map(tag => tag?.name).filter(Boolean));
+                activeBlocks.forEach(block => {
+                    const matchesTag = block.type === 'tag' && block.tag && noteTags.has(block.tag);
+                    const matchesAuthor = block.type === 'author' && block.author &&
+                        (item.authorCode === block.author || item.authorFullName === block.author);
+                    if (!matchesTag && !matchesAuthor) return;
+
+                    activeConnections++;
+                    connectedNotes.add(noteIndex);
+                });
+            });
+        }
+
+        return {
+            blocksInUse,
+            activeConnections,
+            connectedNotes: connectedNotes.size
+        };
+    },
+
+    formatStatisticValue(value) {
+        return Number(value || 0).toLocaleString('he-IL');
+    },
+
+    renderWarehouseStatistics() {
+        if (!this.statisticsElement) return;
+
+        const stats = this.getLiveStatistics();
+        const rows = [
+            { label: 'בלוקים בשימוש', value: stats.blocksInUse },
+            { label: 'קשרים פעילים', value: stats.activeConnections },
+            { label: 'פתקים מחוברים', value: stats.connectedNotes }
+        ];
+        const list = document.createElement('dl');
+        list.className = 'warehouse-statistics__list';
+
+        rows.forEach(row => {
+            const item = document.createElement('div');
+            item.className = 'warehouse-statistics__row';
+
+            const label = document.createElement('dt');
+            label.className = 'warehouse-statistics__label';
+            label.textContent = row.label;
+
+            const value = document.createElement('dd');
+            value.className = 'warehouse-statistics__value';
+            value.textContent = this.formatStatisticValue(row.value);
+
+            item.append(label, value);
+            list.appendChild(item);
+        });
+
+        this.statisticsElement.replaceChildren(list);
+    },
+
     // Gray out docked tag/author pills when the workspace capture limit is reached
     updateWarehouseCapacityUI() {
         const full = this.isWarehouseCaptureFull();
@@ -14259,10 +14328,7 @@ const ActionWarehouse = {
         if (this.dockElement) {
             this.dockElement.classList.toggle('is-capture-full', full && !suppressFullGray);
         }
-        if (this.statisticsElement) {
-            const n = typeof this.getCrowdedBlockCount === 'function' ? this.getCrowdedBlockCount() : 0;
-            this.statisticsElement.textContent = `${n} בלוקים בשימוש`;
-        }
+        this.renderWarehouseStatistics();
     },
 
     // Macro view: matching-tag dots or whole author molecules stay filled;
