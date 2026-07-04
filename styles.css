@@ -1981,7 +1981,7 @@ body.site-grid .warehouse-shell {
 }
 
 .warehouse-dock {
-    --warehouse-message-row-h: calc(var(--site-grid-cell-h) / 2);
+    --warehouse-message-row-h: calc(var(--site-grid-cell-h) / 2 + 5px);
     --warehouse-dock-text-inset: var(--space-20);
     --warehouse-message-bottom-inset: var(--space-5);
     --warehouse-dock-top-inset: var(--space-10);
