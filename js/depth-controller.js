@@ -387,7 +387,7 @@ const DepthController = {
             ActionWarehouse.updateDotFocusFilter();
             ActionWarehouse.syncDeployedBlocksForDepth?.();
             requestAnimationFrame(() => {
-                AppState.centerMesoViewport();
+                AppState.centerMesoViewport({ centerMode: 'canvas' });
                 requestAnimationFrame(() => {
                     PhysicsEngine.setTransitionFrozen(false);
                     this.endLevelChange();
@@ -396,7 +396,7 @@ const DepthController = {
                     }
                     const pending = typeof MesoMock !== 'undefined' && MesoMock.hasPendingTextureBakes();
                     if (!pending) {
-                        AppState.centerMesoViewport();
+                        AppState.centerMesoViewport({ centerMode: 'canvas' });
                     }
                 });
             });
@@ -429,7 +429,7 @@ const DepthController = {
             ActionWarehouse.syncDeployedBlocksForDepth?.();
             ActionWarehouse.updateDotFocusFilter();
             requestAnimationFrame(() => {
-                AppState.centerMesoViewport();
+                AppState.centerMesoViewport({ centerMode: 'canvas' });
                 if (typeof SpatialNavigation !== 'undefined') {
                     SpatialNavigation.resume();
                 }

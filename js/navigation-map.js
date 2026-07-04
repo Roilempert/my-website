@@ -597,7 +597,9 @@ const NavigationMap = {
             ? Math.max(1, style.macroMapMaxDots ?? 900)
             : this._activeLevel === 2 && style.mesoMapUseFrameRects === true
                 ? Math.max(1, style.mesoMapMaxFrameRects ?? style.depthMapMaxCollect ?? 320)
-                : Math.max(1, style.depthMapMaxCollect ?? 320);
+                : this._activeLevel === 3
+                    ? Math.max(1, style.microMapMaxCards ?? Math.max(style.depthMapMaxCollect ?? 320, 512))
+                    : Math.max(1, style.depthMapMaxCollect ?? 320);
         const markers = [];
         const scrollX = window.pageXOffset;
         const scrollY = window.pageYOffset;
@@ -750,7 +752,17 @@ const NavigationMap = {
                     style.mesoFrameDetailBaseFill ?? frameMutedFill
                 );
             if (!drewMesoDetail) {
-                this.drawMapPageRect(ctx, t, pageRect, fill);
+                if (level === 3) {
+                    this.drawMapPageRectWithInset(
+                        ctx,
+                        t,
+                        pageRect,
+                        fill,
+                        Math.max(0, style.microMapCardInsetPx ?? 0)
+                    );
+                } else {
+                    this.drawMapPageRect(ctx, t, pageRect, fill);
+                }
             }
 
             if (focus.active) {
@@ -1491,8 +1503,10 @@ const NavigationMap = {
         if (shouldEcho) {
             this.drawMapContent(this.ctx, base, this._activeLevel);
             const echoMotionActive = this.isViewportEchoMotionActive();
-            this.drawViewportMarkerEcho({ detail: !echoMotionActive });
-            if (echoMotionActive) {
+            const keepSilhouetteDetail = style.mesoMapSilhouetteDetailDuringMotion === true &&
+                style.mesoMapSilhouetteDetail === true;
+            this.drawViewportMarkerEcho({ detail: keepSilhouetteDetail || !echoMotionActive });
+            if (echoMotionActive && !keepSilhouetteDetail) {
                 this.scheduleViewportEchoSettle();
             }
         }
@@ -1875,6 +1889,34 @@ const NavigationMap = {
             ctx.strokeStyle = stroke.color;
             ctx.lineWidth = stroke.width ?? 0.5;
             ctx.strokeRect(tl.x, tl.y, w, h);
+        }
+    },
+
+    drawMapPageRectWithInset(ctx, t, pageRect, fill, insetPx = 0, stroke = null) {
+        if (!insetPx) {
+            this.drawMapPageRect(ctx, t, pageRect, fill, stroke);
+            return;
+        }
+
+        const tl = t.toMap(pageRect.left, pageRect.top);
+        const br = t.toMap(
+            pageRect.left + pageRect.width,
+            pageRect.top + pageRect.height
+        );
+        const inset = Math.max(0, insetPx);
+        const x = Math.min(tl.x, br.x) + inset;
+        const y = Math.min(tl.y, br.y) + inset;
+        const w = Math.abs(br.x - tl.x) - inset * 2;
+        const h = Math.abs(br.y - tl.y) - inset * 2;
+        if (w < 0.2 || h < 0.2) return;
+
+        ctx.fillStyle = fill;
+        ctx.fillRect(x, y, w, h);
+
+        if (stroke) {
+            ctx.strokeStyle = stroke.color;
+            ctx.lineWidth = stroke.width ?? 0.5;
+            ctx.strokeRect(x, y, w, h);
         }
     },
 
@@ -2439,7 +2481,7 @@ const NavigationMap = {
         const minBlockH = style.noteBlockMinHeight ?? 0.75;
         const simplified = style.microMapDetailed !== true;
         const focus = this.getBlockFocusState();
-        const glyphScale = this.getLevelGlyphScale(3);
+        const cardInsetPx = Math.max(0, style.microMapCardInsetPx ?? 0);
 
         this.getMapNoteWrappers().forEach((wrapper) => {
             const noteIndex = this.getWrapperNoteIndex(wrapper);
@@ -2464,9 +2506,8 @@ const NavigationMap = {
                     || wrapper.querySelector('.depth-v2-glyph--micro .note-card'));
             const pageRect = this.pageRectFromElement(card);
             if (!pageRect) return;
-            const scaledCard = this.scaleMapPageRect(pageRect, glyphScale);
 
-            this.drawMapPageRect(ctx, t, scaledCard, resolvedCardFill, simplified ? null : {
+            this.drawMapPageRectWithInset(ctx, t, pageRect, resolvedCardFill, cardInsetPx, simplified ? null : {
                 color: resolvedStroke,
                 width: isFocused ? 0.85 : 0.6
             });
@@ -2477,15 +2518,15 @@ const NavigationMap = {
                     || wrapper.querySelector('.depth-v2-glyph--micro .note-card');
                 const titleRect = this.pageRectFromElement(cardEl?.querySelector('.note-title'));
                 if (titleRect) {
-                    this.drawMapPageRect(ctx, t, this.scaleMapPageRect(titleRect, glyphScale), resolvedBlockFill);
+                    this.drawMapPageRectWithInset(ctx, t, titleRect, resolvedBlockFill, cardInsetPx);
                 }
 
                 const bodyRect = this.pageRectFromElement(cardEl?.querySelector('.note-body'));
                 if (bodyRect) {
-                    this.drawMapPageRect(ctx, t, this.scaleMapPageRect({
+                    this.drawMapPageRectWithInset(ctx, t, {
                         ...bodyRect,
                         height: Math.max(bodyRect.height, minBlockH)
-                    }, glyphScale), resolvedBlockFill);
+                    }, resolvedBlockFill, cardInsetPx);
                 }
             }
 

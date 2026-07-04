@@ -760,7 +760,7 @@ const DepthV2 = {
                 MesoMock.syncAllGlyphsOnL2Enter();
                 MesoMock.scheduleAllTextureBakes();
                 if (typeof AppState !== 'undefined') {
-                    AppState.centerMesoViewport();
+                    AppState.centerMesoViewport({ centerMode: 'canvas' });
                 }
             });
         }

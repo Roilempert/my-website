@@ -441,6 +441,7 @@ const CONFIG = {
         mesoRefreshMsBlock: 80,
         microRefreshMs: 1500,
         microRefreshMsBlock: 80,
+        microMapMaxCards: 512,
         macroDotStride: 1,
         macroMapNoteCenters: true,
         macroFocusDetails: true,
@@ -455,6 +456,7 @@ const CONFIG = {
         mesoMapMaxFrameRects: 320,
         mesoMapViewportEcho: true,
         mesoMapSilhouetteDetail: true,
+        mesoMapSilhouetteDetailDuringMotion: true,
         mesoMapCenterSilhouetteFragments: false,
         mesoMapScaleSilhouetteFragments: false,
         mesoMapSilhouetteFragmentScale: 1,
@@ -488,7 +490,8 @@ const CONFIG = {
         viewportMarkerWidthRatio: 0.72,
         viewportMarkerHeightRatio: 0.4,
         /* Per-layer glyph size on the shared frame (not map scale) */
-        levelGlyphScale: { 1: 0.78, 2: 0.72, 3: 0.7 },
+        levelGlyphScale: { 1: 0.78, 2: 0.72, 3: 1 },
+        microMapCardInsetPx: 1.6,
         /* L2/L3 minimap — cell rects from one batched DOM read; no full silhouette bake */
         depthMapLayoutSettleMs: 480,
         depthMapMaxCollect: 320,

@@ -355,7 +355,9 @@ const AppState = {
         const app = document.getElementById('app');
         if (!app) return;
 
-        if (app.classList.contains('is-meso-hive-layout') && !options._skipHive) {
+        const forceCanvasCenter = options.centerMode === 'canvas';
+
+        if (!forceCanvasCenter && app.classList.contains('is-meso-hive-layout') && !options._skipHive) {
             this.centerMesoHiveCluster(options);
             return;
         }
@@ -418,6 +420,14 @@ const AppState = {
                 behavior: options.smooth ? 'smooth' : 'auto'
             });
         };
+
+        if (forceCanvasCenter) {
+            requestAnimationFrame(() => {
+                centerOnCanvas();
+                requestAnimationFrame(centerOnCanvas);
+            });
+            return;
+        }
 
         if (app.classList.contains('is-micro-grid-layout') ||
             app.classList.contains('is-meso-column-layout') ||
