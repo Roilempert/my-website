@@ -298,22 +298,27 @@ Object.assign(ActionWarehouse, {
         }
     },
 
-    buildCooccurrenceSets(activeTags, activeAuthors) {
+    buildCooccurrenceSets(activeTags, activeAuthors, activeTypologies = new Set()) {
         const coTags = new Set();
         const coAuthors = new Set();
+        const coTypologies = new Set();
         const items = typeof AppState !== 'undefined' ? AppState.items : [];
 
         items.forEach(item => {
             const noteTags = (item.tags || []).map(t => t.name).filter(Boolean);
             const author = item.authorCode || '';
+            const typology = item.typology || '';
 
-            if (!this.noteMatchesActiveFocus(noteTags, author, activeTags, activeAuthors)) return;
+            if (!this.noteMatchesActiveFocus(
+                noteTags, author, activeTags, activeAuthors, typology, activeTypologies
+            )) return;
 
             noteTags.forEach(tag => coTags.add(tag));
             if (author) coAuthors.add(author);
+            if (typology) coTypologies.add(typology);
         });
 
-        return { coTags, coAuthors };
+        return { coTags, coAuthors, coTypologies };
     },
 
     isBlockDockedInTray(block) {
@@ -322,12 +327,13 @@ Object.assign(ActionWarehouse, {
         if (block.element.classList.contains('is-deployed')) return false;
         if (block.element.classList.contains('is-depth-ui-mounted')) return false;
         if (block.element.classList.contains('is-dragging')) return false;
-        return block.type === 'tag' || block.type === 'author';
+        return block.type === 'tag' || block.type === 'author' || block.type === 'typology';
     },
 
-    isDockBlockCoRelevant(block, coTags, coAuthors) {
+    isDockBlockCoRelevant(block, coTags, coAuthors, coTypologies = new Set()) {
         if (block.type === 'tag' && block.tag) return coTags.has(block.tag);
         if (block.type === 'author' && block.author) return coAuthors.has(block.author);
+        if (block.type === 'typology' && block.typology) return coTypologies.has(block.typology);
         return true;
     },
 
@@ -335,8 +341,8 @@ Object.assign(ActionWarehouse, {
         const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
         const isV2Depth = typeof DepthV2 !== 'undefined' && DepthV2.isActive();
         if (!isV2Depth || level < 2 || level > 3) return false;
-        const { tags, authors } = this.getActiveFocusCriteria();
-        return tags.size > 0 || authors.size > 0;
+        const { tags, authors, typologies } = this.getActiveFocusCriteria();
+        return tags.size > 0 || authors.size > 0 || typologies.size > 0;
     },
 
     updateWarehouseBlockRelevance() {
@@ -355,8 +361,10 @@ Object.assign(ActionWarehouse, {
             return;
         }
 
-        const { tags: activeTags, authors: activeAuthors } = this.getActiveFocusCriteria();
-        const { coTags, coAuthors } = this.buildCooccurrenceSets(activeTags, activeAuthors);
+        const { tags: activeTags, authors: activeAuthors, typologies: activeTypologies } =
+            this.getActiveFocusCriteria();
+        const { coTags, coAuthors, coTypologies } =
+            this.buildCooccurrenceSets(activeTags, activeAuthors, activeTypologies);
 
         this.blocks.forEach(block => {
             if (!this.isBlockDockedInTray(block)) {
@@ -365,13 +373,13 @@ Object.assign(ActionWarehouse, {
                 return;
             }
 
-            const irrelevant = !this.isDockBlockCoRelevant(block, coTags, coAuthors);
+            const irrelevant = !this.isDockBlockCoRelevant(block, coTags, coAuthors, coTypologies);
             block.element.classList.toggle('is-dock-irrelevant', irrelevant);
             block.slotElement?.classList.toggle('is-dock-irrelevant', irrelevant);
         });
 
-        this.reorderDockTrayByRelevance(coTags, coAuthors);
-        this.reorderDepthBlockBar(coTags, coAuthors);
+        this.reorderDockTrayByRelevance(coTags, coAuthors, coTypologies);
+        this.reorderDepthBlockBar(coTags, coAuthors, coTypologies);
     },
 
     getDepthBarDeployedBlocks() {
@@ -393,21 +401,23 @@ Object.assign(ActionWarehouse, {
         return blocksIdx >= 0 ? blocksIdx : 9999;
     },
 
-    reorderDepthBlockBar(coTags, coAuthors) {
+    reorderDepthBlockBar(coTags, coAuthors, coTypologies = new Set()) {
         if (!this.depthBlockBarElement) return;
 
         const deployed = this.getDepthBarDeployedBlocks();
         if (!deployed.length) return;
 
-        const { tags: activeTags, authors: activeAuthors } = this.getActiveFocusCriteria();
+        const { tags: activeTags, authors: activeAuthors, typologies: activeTypologies } =
+            this.getActiveFocusCriteria();
 
         const rank = (block) => {
             const isPrimaryFocus =
                 (block.type === 'tag' && activeTags.has(block.tag)) ||
-                (block.type === 'author' && activeAuthors.has(block.author));
+                (block.type === 'author' && activeAuthors.has(block.author)) ||
+                (block.type === 'typology' && activeTypologies.has(block.typology));
             if (isPrimaryFocus) return 0;
             if (block.type === 'frame') return 1;
-            if (this.isDockBlockCoRelevant(block, coTags, coAuthors)) return 2;
+            if (this.isDockBlockCoRelevant(block, coTags, coAuthors, coTypologies)) return 2;
             return 3;
         };
 

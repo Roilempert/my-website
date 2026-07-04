@@ -3,8 +3,8 @@
    ========================================================================== */
 const CatalogState = {
     revision: 0,
-    activeCriteria: { tags: new Set(), authors: new Set() },
-    filterCriteria: { tags: new Set(), authors: new Set() },
+    activeCriteria: { tags: new Set(), authors: new Set(), typologies: new Set() },
+    filterCriteria: { tags: new Set(), authors: new Set(), typologies: new Set() },
     noteRoles: new Map(),
     blockAnchors: [],
     catalogLayout: null,
@@ -39,8 +39,10 @@ const CatalogState = {
             layoutMode: CONFIG.depth.layoutMode,
             activeTags: [...this.activeCriteria.tags],
             activeAuthors: [...this.activeCriteria.authors],
+            activeTypologies: [...this.activeCriteria.typologies],
             filterTags: [...this.filterCriteria.tags],
             filterAuthors: [...this.filterCriteria.authors],
+            filterTypologies: [...this.filterCriteria.typologies],
             blockCount: this.blockAnchors.length,
             noteCount: this.noteRoles.size,
             hasCatalogLayout: !!this.catalogLayout,
@@ -57,6 +59,7 @@ const CatalogState = {
 
         const activeTags = new Set();
         const activeAuthors = new Set();
+        const activeTypologies = new Set();
 
         ActionWarehouse.blocks.forEach(block => {
             if (block.state !== 'active') return;
@@ -65,6 +68,7 @@ const CatalogState = {
 
             if (block.type === 'tag' && block.tag) activeTags.add(block.tag);
             if (block.type === 'author' && block.author) activeAuthors.add(block.author);
+            if (block.type === 'typology' && block.typology) activeTypologies.add(block.typology);
         });
 
         ActionWarehouse.blocks.forEach(block => {
@@ -73,26 +77,29 @@ const CatalogState = {
             if (!ActionWarehouse.isBlockFocusEligible(block.nestedIn)) return;
             if (block.type === 'tag' && block.tag) activeTags.add(block.tag);
             if (block.type === 'author' && block.author) activeAuthors.add(block.author);
+            if (block.type === 'typology' && block.typology) activeTypologies.add(block.typology);
         });
 
-        const { tags: filterTags, authors: filterAuthors } = ActionWarehouse.getFilterCriteria();
+        const { tags: filterTags, authors: filterAuthors, typologies: filterTypologies } =
+            ActionWarehouse.getFilterCriteria();
 
-        this.activeCriteria = { tags: activeTags, authors: activeAuthors };
-        this.filterCriteria = { tags: filterTags, authors: filterAuthors };
-        this.hasFilterCriteria = filterTags.size > 0 || filterAuthors.size > 0;
-        this.hasFocus = activeTags.size > 0 || activeAuthors.size > 0;
+        this.activeCriteria = { tags: activeTags, authors: activeAuthors, typologies: activeTypologies };
+        this.filterCriteria = { tags: filterTags, authors: filterAuthors, typologies: filterTypologies };
+        this.hasFilterCriteria = filterTags.size > 0 || filterAuthors.size > 0 || filterTypologies.size > 0;
+        this.hasFocus = activeTags.size > 0 || activeAuthors.size > 0 || activeTypologies.size > 0;
 
         this.filteredNoteIndices = [...ActionWarehouse.filteredNoteIndices];
         this.visibleNoteIndices = [];
 
         this.blockAnchors = ActionWarehouse.blocks
             .filter(b => ActionWarehouse.isWorkspaceOccupant(b))
-            .filter(b => b.type === 'tag' || b.type === 'author' || b.type === 'frame')
+            .filter(b => b.type === 'tag' || b.type === 'author' || b.type === 'typology' || b.type === 'frame')
             .map(b => ({
-                id: b.tag || b.author || b.type,
+                id: b.tag || b.author || b.typology || b.type,
                 type: b.type,
                 tag: b.tag || null,
                 author: b.author || null,
+                typology: b.typology || null,
                 pageX: b.bodyX,
                 pageY: b.bodyY
             }));
@@ -108,11 +115,14 @@ const CatalogState = {
             const authorCode = wrapper.dataset.authorCode || '';
             const { tags } = ActionWarehouse.getNoteFocusTagsAndAuthor(noteIndex, wrapper);
 
+            const noteTypology = ActionWarehouse.getNoteTypology(noteIndex, wrapper);
             const emphasized = ActionWarehouse.noteMatchesActiveFocus(
                 tags,
                 authorCode,
                 activeTags,
-                activeAuthors
+                activeAuthors,
+                noteTypology,
+                activeTypologies
             );
 
             let role = emphasized ? 'emphasized' : 'neutral';
@@ -134,6 +144,7 @@ const CatalogState = {
         this.workspaceLens = {
             activeTags: new Set(activeTags),
             activeAuthors: new Set(activeAuthors),
+            activeTypologies: new Set(activeTypologies),
             blockAnchors: this.blockAnchors.slice(),
             emphasizedNotes: [...this.noteRoles.entries()]
                 .filter(([, role]) => role === 'emphasized' || role === 'captured' || role === 'stretched')

@@ -37,10 +37,10 @@ const MesoSpatialLayout = {
 
     hasActiveLens() {
         if (typeof ActionWarehouse === 'undefined') return false;
-        const { tags, authors } = ActionWarehouse.getActiveFocusCriteria();
+        const { tags, authors, typologies } = ActionWarehouse.getActiveFocusCriteria();
         const filter = ActionWarehouse.getFilterCriteria();
-        return tags.size > 0 || authors.size > 0 ||
-            filter.tags.size > 0 || filter.authors.size > 0;
+        return tags.size > 0 || authors.size > 0 || typologies.size > 0 ||
+            filter.tags.size > 0 || filter.authors.size > 0 || filter.typologies.size > 0;
     },
 
     getLayoutRanks() {

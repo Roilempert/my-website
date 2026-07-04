@@ -181,6 +181,10 @@ const AppState = {
             const title = titleRaw.replace(/^#+\s*/, '').replace(/_/g, ' ').trim();
             
             const body = (columns[cols.body] || '').replace(/_/g, ' ').trim();
+            const directionOverride = cols.direction != null ? columns[cols.direction] : '';
+            const textDirection = typeof TextDirection !== 'undefined'
+                ? TextDirection.resolve(title, body, directionOverride)
+                : 'rtl';
             
             const tagsArray = tagsRaw.split(',').map(t => {
                 const norm = this.normalizeString(t);
@@ -195,7 +199,8 @@ const AppState = {
                 authorCode,
                 authorFullName,
                 dateWritten,
-                typology
+                typology,
+                textDirection
             };
         });
     },
@@ -225,6 +230,16 @@ const AppState = {
             if (titleEl) titleEl.textContent = item.title || '';
             if (bodyEl) bodyEl.textContent = item.body || '';
             if (idEl) idEl.textContent = item.id || '';
+
+            if (item.typology) {
+                wrapper.dataset.typology = item.typology;
+            } else {
+                delete wrapper.dataset.typology;
+            }
+
+            if (typeof TextDirection !== 'undefined') {
+                TextDirection.applyToWrapper(wrapper, item.textDirection);
+            }
 
             if (typeof SilhouetteEngine !== 'undefined') {
                 const entry = SilhouetteEngine.entries.get(String(item.id));
@@ -354,6 +369,11 @@ const AppState = {
     centerMesoViewport(options = {}) {
         const app = document.getElementById('app');
         if (!app) return;
+
+        if (typeof ToroidalPan !== 'undefined' && ToroidalPan.isEnabled()) {
+            ToroidalPan.centerOnContent(options);
+            return;
+        }
 
         const forceCanvasCenter = options.centerMode === 'canvas';
 

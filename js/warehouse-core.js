@@ -229,6 +229,17 @@ const ActionWarehouse = {
             this.createBlock({ type: 'tag', tag: tagName, color: color });
         });
 
+        const retired = new Set(CONFIG.data.retiredTypologies || []);
+        const typologies = new Set();
+        AppState.items.forEach(item => {
+            if (item.typology && !retired.has(item.typology)) typologies.add(item.typology);
+        });
+        [...typologies]
+            .sort((a, b) => getTypologySortIndex(a) - getTypologySortIndex(b) || a.localeCompare(b))
+            .forEach(name => {
+            this.createBlock({ type: 'typology', typology: name });
+        });
+
         const authorCodes = new Set();
         AppState.items.forEach(item => {
             if (item.authorCode) authorCodes.add(item.authorCode);
@@ -244,7 +255,7 @@ const ActionWarehouse = {
 
     captureDockTrayBaseOrder() {
         this._dockTrayBaseOrder = this.blocks.filter(
-            b => (b.type === 'tag' || b.type === 'author') && b.slotElement
+            b => (b.type === 'tag' || b.type === 'author' || b.type === 'typology') && b.slotElement
         );
     },
 
@@ -265,7 +276,7 @@ const ActionWarehouse = {
         });
     },
 
-    reorderDockTrayByRelevance(coTags, coAuthors) {
+    reorderDockTrayByRelevance(coTags, coAuthors, coTypologies = new Set()) {
         if (!this.trayBlocksElement) return;
         this.ensureDockTrayBaseOrder();
 
@@ -282,7 +293,7 @@ const ActionWarehouse = {
                 return;
             }
 
-            if (this.isDockBlockCoRelevant(block, coTags, coAuthors)) {
+            if (this.isDockBlockCoRelevant(block, coTags, coAuthors, coTypologies)) {
                 relevant.push(block);
             } else {
                 irrelevant.push(block);
@@ -306,22 +317,34 @@ const ActionWarehouse = {
 
         const el = document.createElement('div');
         const isAuthor = def.type === 'author';
+        const isTypology = def.type === 'typology';
         el.classList.add('action-block', 'general-t');
         if (isAuthor) el.classList.add('action-block--author');
+        if (isTypology) {
+            el.classList.add('action-block--typology');
+            el.dataset.typology = def.typology;
+            el.dataset.typologyPattern = typeof getTypologyPattern === 'function'
+                ? getTypologyPattern(def.typology)
+                : 'regular';
+        }
         el.dataset.type = def.type || 'tag';
 
-        const label = isAuthor ? def.author : def.tag;
-        const glyphHTML = isAuthor
+        const label = isAuthor ? def.author : (isTypology ? null : def.tag);
+        const glyphHTML = (isAuthor || isTypology)
             ? ''
             : `<span class="block-glyph" style="background-color: ${def.color}"></span>`;
-        el.innerHTML = `${glyphHTML}<span class="block-label">${label}</span>`;
+        const typologyHTML = isTypology && typeof buildTypologyBlockInnerHTML === 'function'
+            ? buildTypologyBlockInnerHTML(def.typology)
+            : `<span class="block-label">${label}</span>`;
+        el.innerHTML = isTypology ? typologyHTML : `${glyphHTML}${typologyHTML}`;
         slot.appendChild(el);
         this.trayBlocksElement.appendChild(slot);
 
         const block = {
             type: def.type || 'tag',
-            tag: isAuthor ? null : def.tag,
+            tag: (isAuthor || isTypology) ? null : def.tag,
             author: isAuthor ? def.author : null,
+            typology: isTypology ? def.typology : null,
             color: def.color || null,
             frameKind: null,
             element: el,
@@ -473,7 +496,8 @@ const ActionWarehouse = {
         return (frame.nestedBlocks || []).some(n =>
             n.type === block.type &&
             ((block.type === 'tag' && n.tag === block.tag) ||
-             (block.type === 'author' && n.author === block.author))
+             (block.type === 'author' && n.author === block.author) ||
+             (block.type === 'typology' && n.typology === block.typology))
         );
     },
 
@@ -1350,7 +1374,9 @@ const ActionWarehouse = {
                     const matchesTag = block.type === 'tag' && block.tag && noteTags.has(block.tag);
                     const matchesAuthor = block.type === 'author' && block.author &&
                         (item.authorCode === block.author || item.authorFullName === block.author);
-                    if (!matchesTag && !matchesAuthor) return;
+                    const matchesTypology = block.type === 'typology' && block.typology &&
+                        item.typology === block.typology;
+                    if (!matchesTag && !matchesAuthor && !matchesTypology) return;
 
                     blockNoteConnections++;
                     connectedNotes.add(noteIndex);
@@ -1506,11 +1532,14 @@ const ActionWarehouse = {
             !CatalogLayoutEngine.isLegacyMode() &&
             !isV2Depth;
 
-        const { tags: activeTags, authors: activeAuthors } = this.getActiveFocusCriteria();
+        const { tags: activeTags, authors: activeAuthors, typologies: activeTypologies } =
+            this.getActiveFocusCriteria();
 
-        const { tags: filterTags, authors: filterAuthors } = this.getFilterCriteria();
-        const focus = activeTags.size > 0 || activeAuthors.size > 0;
-        const hasFilterCriteria = filterTags.size > 0 || filterAuthors.size > 0;
+        const { tags: filterTags, authors: filterAuthors, typologies: filterTypologies } =
+            this.getFilterCriteria();
+        const focus = activeTags.size > 0 || activeAuthors.size > 0 || activeTypologies.size > 0;
+        const hasFilterCriteria = filterTags.size > 0 || filterAuthors.size > 0 ||
+            filterTypologies.size > 0;
         const shouldPeel = hasFilterCriteria && isMacro;
 
         document.body.classList.toggle(
@@ -1532,7 +1561,8 @@ const ActionWarehouse = {
         const wrappers = document.querySelectorAll('.note-wrapper');
 
         wrappers.forEach((wrapper, noteIndex) => {
-            if (hasFilterCriteria && this.moleculeMatchesFilter(noteIndex, filterTags, filterAuthors)) {
+            if (hasFilterCriteria &&
+                this.moleculeMatchesFilter(noteIndex, filterTags, filterAuthors, filterTypologies)) {
                 shouldFilter.add(noteIndex);
             }
         });
@@ -1589,11 +1619,14 @@ const ActionWarehouse = {
             const moleculeTags = [...dots]
                 .map(dot => dot.dataset.tag)
                 .filter(Boolean);
+            const noteTypology = this.getNoteTypology(noteIndex, wrapper);
             const isRelevant = this.noteMatchesActiveFocus(
                 moleculeTags,
                 authorCode,
                 activeTags,
-                activeAuthors
+                activeAuthors,
+                noteTypology,
+                activeTypologies
             );
 
             wrapper.classList.toggle('is-molecule-focused', isRelevant);
@@ -1605,7 +1638,8 @@ const ActionWarehouse = {
                 const tag = dot.dataset.tag || '';
                 const dotMatchesTag = tag && activeTags.has(tag);
                 const dotMatchesAuthor = authorCode && activeAuthors.has(authorCode);
-                const dotMatches = dotMatchesTag || dotMatchesAuthor;
+                const dotMatchesTypology = noteTypology && activeTypologies.has(noteTypology);
+                const dotMatches = dotMatchesTag || dotMatchesAuthor || dotMatchesTypology;
                 dot.classList.toggle('is-dot-focused', dotMatches);
                 dot.classList.toggle('is-dot-muted', !dotMatches);
             });

@@ -3,7 +3,7 @@
     <mask id="layer-nav-marker-spine-gap" maskUnits="userSpaceOnUse">
       <rect x="-4" y="-4" width="18" height="111" fill="white"/>
       <g class="layer-nav-marker__selection">
-        <line class="layer-nav-marker__gap-mask" x1="5" y1="74.65" x2="5" y2="89.15"/>
+        <line class="layer-nav-marker__gap-mask" x1="5" y1="80.33" x2="5" y2="91.33"/>
       </g>
     </mask>
   </defs>
@@ -15,7 +15,6 @@
     <path class="layer-nav-marker__part layer-nav-marker__corner layer-nav-marker__corner-bottom" d="M2.12,103.5c1.72,0,2.88-1.44,2.88-2.88"/>
   </g>
   <g class="layer-nav-marker__selection">
-    <line class="layer-nav-marker__part layer-nav-marker__cross" x1="8.81" y1="85.83" x2=".81" y2="77.83"/>
-    <line class="layer-nav-marker__part layer-nav-marker__cross" x1=".77" y1="85.86" x2="8.84" y2="77.79"/>
+    <circle class="layer-nav-marker__dot" cx="5" cy="85.83" r="2.05"/>
   </g>
 </svg>

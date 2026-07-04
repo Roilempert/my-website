@@ -346,7 +346,9 @@ Object.assign(ActionWarehouse, {
 
     isActiveCaptureBlock(block) {
         if (block.nestedIn) return false;
-        return block.type === 'author' ? !!block.author : !!block.tag;
+        if (block.type === 'author') return !!block.author;
+        if (block.type === 'typology') return !!block.typology;
+        return !!block.tag;
     },
 
     isBlockClickTransitionEligible(block) {
@@ -381,7 +383,7 @@ Object.assign(ActionWarehouse, {
             if (!this.isWorkspaceOccupant(b)) return false;
             if (b.nestedIn?.frameKind === 'filter') return false;
             if (!Number.isFinite(b.bodyX) || !Number.isFinite(b.bodyY)) return false;
-            return b.type === 'frame' || b.type === 'tag' || b.type === 'author';
+            return b.type === 'frame' || b.type === 'tag' || b.type === 'author' || b.type === 'typology';
         });
     },
 
@@ -396,6 +398,7 @@ Object.assign(ActionWarehouse, {
             if (b.nestedIn?.frameKind === 'filter') return false;
             if (b.type === 'author') return !!b.author;
             if (b.type === 'tag') return !!b.tag;
+            if (b.type === 'typology') return !!b.typology;
             return false;
         });
     },
@@ -423,6 +426,17 @@ Object.assign(ActionWarehouse, {
                 )
                 .map(b => b.author)
         );
+        const activeTypologies = new Set(
+            this.blocks
+                .filter(b =>
+                    b.state === 'active' &&
+                    b.type === 'typology' &&
+                    b.typology &&
+                    !b.nestedIn &&
+                    this.isBlockFocusEligible(b)
+                )
+                .map(b => b.typology)
+        );
         this.blocks
             .filter(b =>
                 b.state === 'active' &&
@@ -433,8 +447,20 @@ Object.assign(ActionWarehouse, {
             .forEach(b => {
                 if (b.type === 'tag' && b.tag) activeTags.add(b.tag);
                 if (b.type === 'author' && b.author) activeAuthors.add(b.author);
+                if (b.type === 'typology' && b.typology) activeTypologies.add(b.typology);
             });
-        return { tags: activeTags, authors: activeAuthors };
+        return { tags: activeTags, authors: activeAuthors, typologies: activeTypologies };
+    },
+
+    getNoteTypology(noteIndex, wrapper = null) {
+        if (typeof AppState !== 'undefined' && AppState.items?.[noteIndex]) {
+            return AppState.items[noteIndex].typology || '';
+        }
+
+        const w = wrapper ||
+            (typeof this.getNoteWrapper === 'function' ? this.getNoteWrapper(noteIndex) : null) ||
+            document.querySelector(`.note-wrapper[data-note-index="${noteIndex}"]`);
+        return w?.dataset.typology || '';
     },
 
     getNoteFocusTagsAndAuthor(noteIndex, wrapper = null) {
@@ -457,10 +483,11 @@ Object.assign(ActionWarehouse, {
         };
     },
 
-    /* All active focus tags/authors must match the same note (AND, not OR). */
-    noteMatchesActiveFocus(noteTags, authorCode, activeTags, activeAuthors) {
+    /* All active focus tags/authors/typologies must match the same note (AND, not OR). */
+    noteMatchesActiveFocus(noteTags, authorCode, activeTags, activeAuthors, noteTypology = '', activeTypologies = null) {
         const tagList = Array.isArray(noteTags) ? noteTags : [...noteTags];
-        if (!activeTags.size && !activeAuthors.size) return false;
+        const typologies = activeTypologies || new Set();
+        if (!activeTags.size && !activeAuthors.size && !typologies.size) return false;
 
         for (const tag of activeTags) {
             if (!tagList.includes(tag)) return false;
@@ -468,36 +495,52 @@ Object.assign(ActionWarehouse, {
         for (const author of activeAuthors) {
             if (authorCode !== author) return false;
         }
+        for (const typology of typologies) {
+            if (noteTypology !== typology) return false;
+        }
         return true;
     },
 
-    noteMatchesActiveFocusForIndex(noteIndex, activeTags, activeAuthors, wrapper = null) {
+    noteMatchesActiveFocusForIndex(noteIndex, activeTags, activeAuthors, wrapper = null, activeTypologies = null) {
         const { tags, authorCode } = this.getNoteFocusTagsAndAuthor(noteIndex, wrapper);
-        return this.noteMatchesActiveFocus(tags, authorCode, activeTags, activeAuthors);
+        const noteTypology = this.getNoteTypology(noteIndex, wrapper);
+        return this.noteMatchesActiveFocus(
+            tags,
+            authorCode,
+            activeTags,
+            activeAuthors,
+            noteTypology,
+            activeTypologies
+        );
     },
 
     getFilterCriteria() {
         const tags = new Set();
         const authors = new Set();
+        const typologies = new Set();
         this.blocks.forEach(b => {
             if (b.state !== 'active' || !b.nestedIn || b.nestedIn.frameKind !== 'filter') return;
             if (b.type === 'tag' && b.tag) tags.add(b.tag);
             if (b.type === 'author' && b.author) authors.add(b.author);
+            if (b.type === 'typology' && b.typology) typologies.add(b.typology);
         });
-        return { tags, authors };
+        return { tags, authors, typologies };
     },
 
     isNoteFiltered(noteIndex) {
         return this.filteredNoteIndices.has(noteIndex);
     },
 
-    moleculeMatchesFilter(noteIndex, filterTags, filterAuthors) {
+    moleculeMatchesFilter(noteIndex, filterTags, filterAuthors, filterTypologies = new Set()) {
         const wrappers = document.querySelectorAll('.note-wrapper');
         const wrapper = wrappers[noteIndex];
         if (!wrapper) return false;
 
         const authorCode = wrapper.dataset.authorCode || '';
         if (authorCode && filterAuthors.has(authorCode)) return true;
+
+        const noteTypology = this.getNoteTypology(noteIndex, wrapper);
+        if (noteTypology && filterTypologies.has(noteTypology)) return true;
 
         const dots = wrapper.querySelectorAll('.layer-dot');
         return [...dots].some(dot => {
@@ -507,12 +550,19 @@ Object.assign(ActionWarehouse, {
     },
 
     getBlockRingKey(block) {
-        return block.type === 'author' ? `@${block.author}` : block.tag;
+        if (block.type === 'author') return `@${block.author}`;
+        if (block.type === 'typology') return `~${block.typology}`;
+        return block.tag;
     },
 
     dotMatchesBlock(block, dot) {
         if (block.type === 'author') {
             return !!dot.authorCode && dot.authorCode === block.author;
+        }
+        if (block.type === 'typology') {
+            if (!block.typology) return false;
+            const item = typeof AppState !== 'undefined' ? AppState.items?.[dot.noteIndex] : null;
+            return item?.typology === block.typology;
         }
         return dot.tag === block.tag;
     },
@@ -675,6 +725,21 @@ Object.assign(ActionWarehouse, {
         const ringDots = [];
         bodiesData.forEach(d => {
             if (d.authorCode !== block.author) return;
+            if (this.isNotePhysicsSuspended(d.noteIndex)) return;
+            if (this.stretchedNotes.has(d.noteIndex)) return;
+            if (seen.has(d.noteIndex)) return;
+            seen.add(d.noteIndex);
+            ringDots.push(d);
+        });
+        return ringDots;
+    },
+
+    getTypologyRingDots(block, bodiesData) {
+        const seen = new Set();
+        const ringDots = [];
+        bodiesData.forEach(d => {
+            const item = typeof AppState !== 'undefined' ? AppState.items?.[d.noteIndex] : null;
+            if (!item || item.typology !== block.typology) return;
             if (this.isNotePhysicsSuspended(d.noteIndex)) return;
             if (this.stretchedNotes.has(d.noteIndex)) return;
             if (seen.has(d.noteIndex)) return;

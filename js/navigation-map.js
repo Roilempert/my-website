@@ -57,7 +57,10 @@ const NavigationMap = {
             root.style.setProperty('--layer-nav-gap', siteGridCssLength(layerCfg.boxGap));
         }
         if (layerCfg?.boxPadding) {
-            root.style.setProperty('--layer-nav-box-pad', siteGridCssLength(layerCfg.boxPadding));
+            const pad = siteGridCssLength(layerCfg.boxPadding);
+            root.style.setProperty('--layer-nav-box-pad', pad);
+            root.style.setProperty('--layer-nav-box-pad-x', pad);
+            root.style.setProperty('--layer-nav-box-pad-y', pad);
         }
         if (layerCfg?.boxRadius) {
             root.style.setProperty('--layer-nav-box-radius', siteGridCssLength(layerCfg.boxRadius));
@@ -188,6 +191,7 @@ const NavigationMap = {
 
         window.addEventListener('scroll', () => this.schedulePanUpdate(), { passive: true });
         window.addEventListener('resize', () => {
+            this.syncLayerNavMetrics();
             if (!this.isMapReady()) return;
             this._contentDirty = true;
             this.scheduleRender();
@@ -211,6 +215,8 @@ const NavigationMap = {
 
         this.syncActiveState(this._activeLevel);
         this.resizeCanvas();
+        document.fonts?.ready?.then(() => this.syncLayerNavMetrics());
+        requestAnimationFrame(() => this.syncLayerNavMetrics());
     },
 
     isMapReady() {
@@ -1157,8 +1163,60 @@ const NavigationMap = {
             const svgText = await res.text();
             this.layerMarker.innerHTML = svgText;
             this._layerMarkerLoaded = true;
+            this.syncLayerNavMetrics();
         } catch (_) {
             /* offline exhibition — marker optional until SVG loads */
+        }
+    },
+
+    syncLayerNavMetrics() {
+        const root = document.documentElement;
+        if (!this.titles?.size) return;
+
+        let maxLabelH = 0;
+        this.titles.forEach((title) => {
+            const label = title.querySelector('.site-navigation-layers__label');
+            if (!label) return;
+            maxLabelH = Math.max(maxLabelH, label.getBoundingClientRect().height);
+        });
+        if (maxLabelH <= 0) return;
+
+        const rowGapPx = this._layerNavRowGapPx();
+
+        root.style.setProperty('--layer-nav-label-box-h', `${maxLabelH}px`);
+        root.style.setProperty('--layer-nav-row-step', `${maxLabelH + rowGapPx}px`);
+        root.style.setProperty('--layer-nav-stack-h', `${maxLabelH * 3 + rowGapPx * 2}px`);
+        this.syncLayerMarkerDot();
+    },
+
+    _layerNavRowGapPx() {
+        const probe = document.createElement('div');
+        probe.style.cssText = 'position:absolute;visibility:hidden;height:var(--layer-nav-row-gap);pointer-events:none;';
+        document.documentElement.appendChild(probe);
+        const px = probe.getBoundingClientRect().height;
+        probe.remove();
+        return px > 0 ? px : 10;
+    },
+
+    syncLayerMarkerDot() {
+        const svg = this.layerMarker?.querySelector('svg');
+        const dot = svg?.querySelector('.layer-nav-marker__dot');
+        const gapLine = svg?.querySelector('.layer-nav-marker__gap-mask');
+        if (!svg || !dot || !this.layerMarker) return;
+
+        const stackH = this.layerMarker.getBoundingClientRect().height;
+        if (stackH <= 0) return;
+
+        const dotSizeRaw = getComputedStyle(document.documentElement).getPropertyValue('--dot-size').trim();
+        const dotPx = parseFloat(dotSizeRaw) || 10;
+        const vbH = svg.viewBox.baseVal.height || 103;
+        const r = (dotPx / 2) * (vbH / stackH);
+        dot.setAttribute('r', String(r));
+
+        const cy = parseFloat(dot.getAttribute('cy') || '85.83');
+        if (gapLine) {
+            gapLine.setAttribute('y1', String(cy - r - 0.3));
+            gapLine.setAttribute('y2', String(cy + r + 0.3));
         }
     },
 
@@ -1188,6 +1246,7 @@ const NavigationMap = {
         if (this.layerMarker) {
             this.layerMarker.dataset.level = String(level);
         }
+        requestAnimationFrame(() => this.syncLayerNavMetrics());
 
         const mapCursorBlocked = inspectorActive || transitionActive;
         if (this.canvas && !this._drag?.active) {

@@ -33,6 +33,7 @@ const RenderEngine = {
         wrapper.dataset.noteId = item.id;
         if (noteIndex >= 0) wrapper.dataset.noteIndex = String(noteIndex);
         if (item.authorCode) wrapper.dataset.authorCode = item.authorCode;
+        if (item.typology) wrapper.dataset.typology = item.typology;
 
         const hoverDeg = this.getStableMicroHoverRotationDeg(item, noteIndex >= 0 ? noteIndex : 0);
         wrapper.style.setProperty('--note-micro-hover-rotation', `${hoverDeg}deg`);
@@ -126,6 +127,9 @@ const RenderEngine = {
         });
         
         SilhouetteEngine.registerWrapper(wrapper, item);
+        if (typeof TextDirection !== 'undefined') {
+            TextDirection.applyToWrapper(wrapper, item.textDirection);
+        }
         return wrapper;
     }
 };

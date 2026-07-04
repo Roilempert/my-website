@@ -7,16 +7,16 @@ const scale = (px) => Math.round(px * VISUAL_SCALE);
 
 /* Exhibition type scale — keep in sync with .general-h/t, .note-h/t in styles.css */
 const TYPE_SCALE = {
-    generalH: { sizePt: 58, linePt: 56, weight: 700 },
+    generalH: { sizePt: 71.33, linePt: 69.33, weight: 700 },
     generalT: { sizeRem: 1, line: 1, weight: 700 },
-    noteH:    { sizePt: 86, line: 0.9, weight: 700, style: 'italic', letterSpacing: '-0.01em' },
+    noteH:    { sizePt: 45.5, line: 0.9, weight: 700, style: 'italic', letterSpacing: '-0.02em' },
     noteT:    { sizePt: 18, line: 1.2, weight: 400 },
     /* Legacy aliases for gradual migration */
-    display: { sizeRem: 5.375, sizePx: 86, line: 0.9, weight: 700, style: 'italic' },
+    display: { sizeRem: 2.84375, sizePx: 45.5, line: 0.9, weight: 700, style: 'italic' },
     body:    { sizeRem: 1.125, sizePx: 18, line: 1.2, weight: 400, maxCh: 55 },
     meta:    { sizeRem: 1, sizePx: 16, line: 1, weight: 700 },
     ui:      { sizeRem: 1, line: 1, weight: 700 },
-    nav:     { sizeRem: 3.625, line: 0.848, weight: 700, weightActive: 700 },
+    nav:     { sizeRem: 4.4583, line: 0.848, weight: 700, weightActive: 700 },
     debug:   { sizePx: 9 }
 };
 
@@ -85,9 +85,25 @@ const CONFIG = {
             title: 6,
             body: 7,
             tags: 8,
-            typology: 9
+            typology: 9,
+            // Optional manual override: ltr | rtl | en | he (empty → auto-detect from title+body)
+            direction: 10
         },
-        fallbackTagColor: 'var(--color-4)'
+        fallbackTagColor: 'var(--color-4)',
+        typologyPatterns: {
+            Block: 'regular',
+            List: 'dashed',
+            Fragment: 'dotted',
+            Stanza: 'wavy'
+        },
+        typologyLabels: {
+            Block: 'בלוק',
+            List: 'רשימה',
+            Fragment: 'מקטע',
+            Stanza: 'מחרוזת'
+        },
+        typologyOrder: ['Block', 'List', 'Fragment', 'Stanza'],
+        retiredTypologies: ['Quote', 'quote']
     },
 
     /* --- Boot Sequence --- */
@@ -390,7 +406,12 @@ const CONFIG = {
         wheel: {
             speed: 1                  // multiplier on trackpad / mouse wheel delta
         },
-        spacePanKey: 'Space'
+        spacePanKey: 'Space',
+        toroidalWrap: {
+            enabled: true,
+            axes: 'both',             // 'x' | 'y' | 'both'
+            lockNativeScroll: false
+        }
     },
 
     /* --- Layer navigation — depth labels (מאקרו / מזו / מיקרו), top-right --- */
@@ -401,6 +422,7 @@ const CONFIG = {
         boxPadding: { value: 0.625, unit: 'rem' },
         boxRadius: { value: 0.3125, unit: 'rem' },
         markerGap: { value: 0.625, unit: 'rem' },
+        rowGap: { value: 0.625, unit: 'rem' },
         markerSrc: 'assets/ui/layer-nav-marker.svg',
         slotMoveDuration: 0.34,
         slotMoveEasing: 'cubic-bezier(0.9, 0, 0.02, 1)',
@@ -749,6 +771,52 @@ const CONFIG = {
         hoverWidth: 0.55 * (96 / 72)
     }
 };
+
+function getTypologyPattern(name) {
+    const patterns = CONFIG.data.typologyPatterns || {};
+    const fallback = {
+        block: 'regular',
+        list: 'dashed',
+        fragment: 'dotted',
+        stanza: 'wavy'
+    };
+    if (!name) return 'regular';
+    if (patterns[name]) return patterns[name];
+    const key = Object.keys(patterns).find(k => k.toLowerCase() === String(name).toLowerCase());
+    if (key) return patterns[key];
+    return fallback[String(name).toLowerCase()] || 'regular';
+}
+
+function getTypologyLabel(name) {
+    const labels = CONFIG.data.typologyLabels || {};
+    if (!name) return '';
+    if (labels[name]) return labels[name];
+    const key = Object.keys(labels).find(k => k.toLowerCase() === String(name).toLowerCase());
+    return key ? labels[key] : String(name);
+}
+
+function escapeTypologyHtml(text) {
+    return String(text || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+}
+
+function buildTypologyBlockInnerHTML(typology) {
+    const heLabel = getTypologyLabel(typology);
+    const pattern = getTypologyPattern(typology);
+    return `<span class="block-typology-stack">` +
+        `<span class="block-label block-label--typology">${escapeTypologyHtml(heLabel)}</span>` +
+        `<span class="block-typology-mark" data-typology-pattern="${pattern}" aria-hidden="true"></span>` +
+        `</span>`;
+}
+
+function getTypologySortIndex(name) {
+    const order = CONFIG.data.typologyOrder || [];
+    const idx = order.findIndex(k => k.toLowerCase() === String(name).toLowerCase());
+    return idx >= 0 ? idx : 999;
+}
 
 function getDepthUnitScales() {
     const unit = CONFIG.depth.unitScale || {};

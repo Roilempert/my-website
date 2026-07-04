@@ -61,9 +61,9 @@ Four classes replace legacy `--type-*` / ratzif22 / NarkissTam body.
 
 | Class | Font file | Size | Line | Other | Use |
 |-------|-----------|------|------|-------|-----|
-| `.general-h` | `NarkissYair-Bold-TRIAL.woff2` | `3.625rem` | `3.5rem` | — | Layer labels; inspector ID title; related-notes section title |
+| `.general-h` | `NarkissYair-Bold-TRIAL.woff2` | `calc(3.625rem + 10pt)` | `calc(3.5rem + 10pt)` | — | Layer labels; inspector ID title; related-notes section title |
 | `.general-t` | `NarkissYair-BoldMono-TRIAL.woff2` | `1rem` | `1` | letter-spacing 5%, no synthesis | Warehouse, blocks, **active** layer label, metadata labels/details, note ID |
-| `.note-h` | `Neoklass-BoldItalic-TRIAL.woff2` | `5.375rem` | `0.9` | letter-spacing −1% | Note titles |
+| `.note-h` | `Neoklass-BoldItalic-TRIAL.woff2` | `2.84375rem` | `0.9` | letter-spacing −2% | Note titles |
 | `.note-t` | `FrankRuhl_Universal-Mono.woff2` | `1.125rem` | `1.2` | — | Note body |
 
 **Retired for exhibition UI:** `ratzif22`, NarkissTam on note body, NarkissYair Regular for chrome.
@@ -124,6 +124,17 @@ All block/tag pills use the same dimensions everywhere on the site; only color r
 | Tag dot | 10px, color from sheet |
 | Dot/text gap | 10px → `var(--space-10)` |
 
+**Typology block** — same pill dimensions as tag/author; no tag dot. Visible label: Hebrew from `CONFIG.data.typologyLabels` (בלוק, רשימה, מקטע, מחרוזת). Dock order: Block → List → Fragment → Stanza (`typologyOrder`). Pattern underline on `.block-typology-mark` (`data-typology-pattern`), text color, 1px thick (wavy 3px box), 1px below label:
+
+| Typology | Pattern | Hebrew label |
+|----------|---------|--------------|
+| Block | regular (solid) | בלוק |
+| List | dashed | רשימה |
+| Fragment | dotted | מקטע |
+| Stanza | wavy | מחרוזת |
+
+Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive). Retired typology values (e.g. `Quote`) are listed in `CONFIG.data.retiredTypologies` and never become dock blocks.
+
 ### Deployed block
 
 - **20px** above dock top, **10px** inset from dock right edge
@@ -134,14 +145,18 @@ All block/tag pills use the same dimensions everywhere on the site; only color r
 
 | State | Box | Type | Marker |
 |-------|-----|------|--------|
-| Active | color 3 fill, color 6 text, 10px pad, 5px radius | `.general-h` at `3.625rem` | selection vector SVG |
-| Inactive | color 6 fill, color 3 text, 10px pad, 5px radius | `.general-h` at `3.625rem` | none |
+| Active | color 3 fill, color 6 text, 10px pad (all sides), 5px radius | `.general-h` at `calc(3.625rem + 10pt)` | selection vector SVG |
+| Inactive | color 6 fill, color 3 text, 10px pad (all sides), 5px radius | `.general-h` at `calc(3.625rem + 10pt)` | none |
 
-- Three-label stack totals 2.5 shell rows, including the two 5px gaps; label type scales inside that unit with 10px padding
+- Label stack height follows content: `3 × label box + 2 × inter-label gap`, where each label box is `font-size + 2 × box padding` (line-height 1)
 - **40px** from viewport right edge → `2.5rem`
 - Active label aligns to the 75% point of shell row 4; inactive labels follow inside the 2.5-row stack
 - Inactive hover only: move label left by 20px (`var(--space-20)`); active label does not hover-shift
 - **Selection marker:** one fixed SVG on the right side of the layer stack — curved top/bottom skeleton and two interior dividers stay static; only the `X` and its vertical-line gap move smoothly between top/middle/bottom cells for macro/meso/micro
+
+### L2 meso silhouettes
+
+- Interim MesoMock silhouettes have no outline; keep the gradient line silhouettes un-stroked.
 
 ### L3 note cards
 
@@ -150,15 +165,32 @@ All block/tag pills use the same dimensions everywhere on the site; only color r
 | Column gap | 40px → `2.5rem` |
 | Min height | 6 site rows |
 | Card bg / text | color 1 / color 4 |
-| Border | **1pt solid color 4** (all note surfaces: grid, focus, related) |
+| Border | none |
+| Radius | 5px → `var(--space-5)` |
+| Left padding | **100px** → `6.25rem` (protects vertical note ID lane) |
+| Top padding | `0.75 × site-grid-gap + var(--space-5)` |
+| Title / body gap | 10px → `var(--space-10)` |
+| Note ID | 10px from left edge → `var(--space-10)`; vertically centered on card |
 | Title / body | `.note-h` / `.note-t` |
 
-**Tags (below card):** same sizing as action dock blocks: 26px pill height, 10px horizontal padding, 10px dot, 10px dot/text gap, 10px between tags; pill fill color 1, 1pt border color 4, text color 4.
+**Text direction:** Default RTL (Hebrew). English-only notes auto-detect to LTR from title+body (Latin letters, no Hebrew/Arabic script). Optional sheet column `direction` (`ltr` / `rtl` / `en` / `he`) overrides auto-detect. LTR cards mirror the ID lane to the right (`6.25rem` right padding, ID at `var(--space-10)` from right). Tag/author pills stay RTL Hebrew.
+
+### L2 meso silhouettes (direction)
+
+| Property | RTL (default) | LTR (English-only) |
+|----------|---------------|---------------------|
+| Frame alignment | `flex-end` / right | `flex-start` / left |
+| Line rects | anchored right | anchored left |
+| SVG clip rects | `x = viewW − width` | `x = 0` |
+
+**Tags / typology / authors (below card):** same sizing as action dock blocks: 26px pill height, 10px horizontal padding, 10px dot (tags only), 10px dot/text gap, 10px between blocks; note-related tag, typology, and author pills rest with fill color 1, text color 4, no border/outline, and hover to the block-panel dark treatment (fill color 3, text color 1). Typology pills reuse dock pattern underlines (regular/dotted/striped/wavy) via `data-typology`; underline follows pill text color. L3 grid block rows sit 10px (`var(--space-10)`) below their own card with no extra top padding; note groups are separated by 20px (`var(--space-20)`). Focus-card note rows use the same block styling.
 
 ### Focus popup (inspector, all levels)
 
 - Backdrop: color 3 @ 20% opacity
 - Note scales **6 cols → 8 cols** proportionally
+- Popup scrollport spans the full viewport height; focused/related content can scroll to the top and bottom viewport edges
+- Focused note starts at the beginning of shell row 2 when the popup opens
 - Metadata panel below (40px gap): bg color 3, text color 4, radius 5px
 - **Related notes:** one section per tag subset of focus note that **exists on at least one other note**; omit unused combinations; 2 notes per row, 40px gap
 
@@ -182,6 +214,41 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-04 | English-only notes auto-detect to LTR (optional sheet override); mirrored card padding, ID lane, and L2 silhouette alignment |
+| 2026-07-04 | Freed layer nav label box height from fixed shell slots; padding now grows the binding box |
+| 2026-07-04 | Sized layer nav label cells to font ink + padding and aligned boxes to marker cell height |
+| 2026-07-04 | Increased layer navigation inter-label gap to 10px (`var(--space-10)`) |
+| 2026-07-04 | Enlarged `.general-h` by 10pt; reverted mistaken `.general-t` enlargement |
+| 2026-07-04 | Restored note ID vertical centering; left inset 10px from card edge |
+| 2026-07-04 | Set L3 note-card left padding to 100px and note ID vertical inset/padding to 10px |
+| 2026-07-04 | Added 5px top padding to L3 note cards and tightened title-to-body gap to 10px |
+| 2026-07-04 | Set `.note-h` letter spacing to −2% (`-0.02em`) |
+| 2026-07-04 | Restored `.note-h` to Neoklass Bold Italic after the Medium Italic trial |
+| 2026-07-04 | Removed 5% letter spacing from `.note-h` note titles |
+| 2026-07-04 | Switched `.note-h` from Neoklass Bold Italic to Neoklass Medium Italic |
+| 2026-07-04 | Restored `.note-t` to `1.125rem` after the 16px trial |
+| 2026-07-04 | Reduced `.note-t` by 2px to `1rem` and set `.note-h` letter spacing to 5% |
+| 2026-07-04 | Halved `.note-h` to `2.84375rem` and restored `.general-h` to `3.625rem` |
+| 2026-07-04 | Increased `.note-h` by 5px to `5.6875rem` and reduced `.general-h` by 5px to `3.3125rem` |
+| 2026-07-04 | Reverted L2 MesoMock silhouettes to no outline |
+| 2026-07-04 | Restored L3 note titles to Neoklass `.note-h` after the FrankRuhl trial |
+| 2026-07-04 | Switched L3 note titles to `FrankRuhl_Universal-Mono` while keeping the `.note-h` size |
+| 2026-07-04 | Pixel-aligned L2 generated outline paths with a 1px SVG bleed for even hairline weight |
+| 2026-07-04 | Increased L3 note-card left padding to protect the vertical note ID lane |
+| 2026-07-04 | Kept L2 generated outline SVGs unclipped and crisp-edged to match site decoration hairlines |
+| 2026-07-04 | Matched note-related author pills to tag-pill colors and added dark block-panel hover for tag/author note pills |
+| 2026-07-04 | Replaced the L2 drop-shadow outline trial with generated SVG outer-contour paths |
+| 2026-07-04 | Let L2 meso glyph wrappers overflow visibly so outside silhouette outlines are not clipped |
+| 2026-07-04 | Removed L3 note-card borders and bottom tag/author pill outlines |
+| 2026-07-04 | Changed the L2 MesoMock outline from per-line inset strokes to an outside-only frame outline |
+| 2026-07-04 | Added a 1px color-4 outline trial to L2 MesoMock silhouettes |
+| 2026-07-04 | Moved the opened focus note start position up to the beginning of shell row 2 |
+| 2026-07-04 | Restored the 1px color-4 outline on L3 grid note cards |
+| 2026-07-04 | Positioned the opened focus note at the beginning of shell row 3 and reset inspector scroll on each open |
+| 2026-07-04 | Added `var(--space-5)` corner radius to L3 grid note cards |
+| 2026-07-04 | Let the focus popup use the full viewport height as its scrollport so content can reach the top and bottom edges |
+| 2026-07-04 | Set L3 tag-to-card spacing to `var(--space-10)` and note-group vertical spacing to `var(--space-20)` |
+| 2026-07-04 | Removed L3 grid note outlines and tightened tag rows to sit directly under their note cards |
 | 2026-07-04 | Renamed the live connection stat to `חיבורים פעילים` and added animated counting for warehouse statistics values |
 | 2026-07-04 | Pushed the layer navigation marker curved corners outward to slightly overhang the top and bottom label edges |
 | 2026-07-04 | Reduced the layer navigation marker curved corners to match the 6px action dock corner decoration scale |
@@ -221,7 +288,9 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 | 2026-07-04 | Centered layer navigation labels on adjacent site-shell row centers while keeping the active label fixed on row 6 |
 | 2026-07-04 | Moved the layer navigation selection SVG to the right side of the active label |
 | 2026-07-04 | Corrected layer navigation palette to use color 3 and color 6 for active/inactive states |
-| 2026-07-04 | Matched inactive layer navigation labels to active label size and inverted active label fill/text colors |
+| 2026-07-05 | Typology pills: Hebrew foreground + English ghost background; patterns remapped (block solid, list dashed, fragment dotted, stanza wavy); 1px underline; dock order Block→List→Fragment→Stanza |
+| 2026-07-05 | L3 note-related pill row includes typology blocks (pattern underline, same hover as tag/author) |
+| 2026-07-04 | Added typology action blocks — same pill chrome with pattern underlines (dots/lines/zigzag/stripes) per sheet Typology column |
 | 2026-07-04 | Reduced layer navigation label padding and inter-label gap to 5px using `var(--space-5)` |
 | 2026-07-04 | Switched layer navigation type hierarchy so the active layer is large and inactive layers are small; restored color-6 rectangular boxes with 10px padding |
 | 2026-07-04 | Added original L2 line silhouettes inside stable minimap frame markers after saving the successful frame-echo reference |
