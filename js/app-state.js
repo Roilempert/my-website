@@ -28,14 +28,22 @@ const AppState = {
 
         setTimeout(() => {
             try {
-                this.centerViewport();
                 if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.buildWorld) {
                     PhysicsEngine.buildWorld();
                 }
+                if (typeof applyMacroShellGridPlacement === 'function') {
+                    applyMacroShellGridPlacement();
+                } else if (typeof updateSiteGridCrosses === 'function') {
+                    updateSiteGridCrosses({ force: true });
+                }
                 requestAnimationFrame(() => {
-                    if (typeof NavigationMap !== 'undefined') {
-                        NavigationMap.onBootComplete();
-                    }
+                    this.scrollToCanvasCenter();
+                    requestAnimationFrame(() => {
+                        this.scrollToCanvasCenter();
+                        if (typeof NavigationMap !== 'undefined') {
+                            NavigationMap.onBootComplete();
+                        }
+                    });
                 });
             } catch (err) {
                 console.error('Boot physics failed', err);
@@ -207,11 +215,17 @@ const AppState = {
 
     render() {
         if (!this.appContainer) return;
-        this.appContainer.innerHTML = '';
+        this.appContainer.querySelectorAll(':scope > .note-wrapper').forEach(el => el.remove());
         this.items.forEach((item, noteIndex) => {
             const wrapper = RenderEngine.createNoteDOM(item, noteIndex);
             this.appContainer.appendChild(wrapper);
         });
+
+        if (typeof applyMacroShellGridPlacement === 'function') {
+            applyMacroShellGridPlacement();
+        } else if (typeof updateSiteGridCrosses === 'function') {
+            updateSiteGridCrosses({ force: true });
+        }
 
         if (typeof DepthV2 !== 'undefined') {
             DepthV2.afterNotesRender();
@@ -270,22 +284,41 @@ const AppState = {
             return;
         }
 
+        this.scrollToCanvasCenter(options);
+    },
+
+    /** Scroll so the geometric center of #app sits in the viewport center (warehouse-aware on Y). */
+    scrollToCanvasCenter(options = {}) {
+        const app = document.getElementById('app');
+        if (!app) return;
+
         SpatialNavigation.bypassScrollClamp(
             options.smooth
                 ? CONFIG.warehouse.workspaceGrid.rushDuration + 450
-                : 80
+                : 300
         );
 
-        const rect = appElement.getBoundingClientRect();
-        const dX = rect.left + rect.width / 2 - window.innerWidth / 2;
-        const dY = rect.top + rect.height / 2 - window.innerHeight / 2;
+        const reserve = typeof ActionWarehouse !== 'undefined'
+            ? ActionWarehouse.getScrollReserve()
+            : 0;
+        const viewMidY = (window.innerHeight - reserve) / 2;
 
-        if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return;
+        const run = () => {
+            const centerX = app.offsetLeft + app.offsetWidth / 2;
+            const centerY = app.offsetTop + app.offsetHeight / 2;
+            const targetX = centerX - window.innerWidth / 2;
+            const targetY = centerY - viewMidY;
 
-        window.scrollBy({
-            left: dX,
-            top: dY,
-            behavior: options.smooth ? 'smooth' : 'auto'
+            window.scrollTo({
+                left: targetX,
+                top: targetY,
+                behavior: options.smooth ? 'smooth' : 'auto'
+            });
+        };
+
+        requestAnimationFrame(() => {
+            run();
+            requestAnimationFrame(run);
         });
     },
 
@@ -428,24 +461,11 @@ const AppState = {
         };
 
         const centerOnCanvas = () => {
-            const rect = app.getBoundingClientRect();
-            const dX = rect.left + rect.width / 2 - window.innerWidth / 2;
-            const dY = rect.top + rect.height / 2 - window.innerHeight / 2;
-
-            if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return;
-
-            window.scrollBy({
-                left: dX,
-                top: dY,
-                behavior: options.smooth ? 'smooth' : 'auto'
-            });
+            this.scrollToCanvasCenter({ ...options, smooth: options.smooth });
         };
 
         if (forceCanvasCenter) {
-            requestAnimationFrame(() => {
-                centerOnCanvas();
-                requestAnimationFrame(centerOnCanvas);
-            });
+            centerOnCanvas();
             return;
         }
 
@@ -475,6 +495,19 @@ const AppState = {
             top: dY,
             behavior: options.smooth ? 'smooth' : 'auto'
         });
+    },
+
+    /** Center viewport on #app canvas middle after a depth level change. */
+    centerCanvasOnLayerEnter(options = {}) {
+        const merged = { centerMode: 'canvas', ...options };
+        const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+
+        if (level >= 2) {
+            this.centerMesoViewport(merged);
+            return;
+        }
+
+        this.scrollToCanvasCenter(merged);
     }
 };
 

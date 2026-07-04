@@ -18,10 +18,10 @@ js/depth-v2.js
 
 | Grid | Scope | Canonical size |
 |------|-------|----------------|
-| **Site shell** | Viewport reference — padding, UI anchors, proportional tokens | **18 columns × 10 rows** (`CONFIG.siteGrid`) — see [`site-grid.md`](site-grid.md) |
+| **Site shell** | Viewport reference — padding, UI anchors, proportional tokens | **24 columns × 12 rows** (`CONFIG.siteGrid`) — see [`site-grid.md`](site-grid.md) |
 | **Canvas (L2/L3)** | Scrollable `#app` workspace — note layout at meso/micro | `CONFIG.depth.v2.meso` / `.micro` (wider than viewport) |
 
-Do not change canvas column counts when adjusting the 18×10 shell.
+Do not change canvas column counts when adjusting the 24×12 shell.
 
 ## Work phases
 

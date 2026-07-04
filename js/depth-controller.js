@@ -200,7 +200,7 @@ const DepthController = {
                 });
             });
 
-            AppState.centerViewport();
+            AppState.centerCanvasOnLayerEnter();
         } else if (isMacroMesoTransition) {
             const zoomIn = newLevel === 2;
             const targetLevel = newLevel;
@@ -214,7 +214,7 @@ const DepthController = {
                     ActionWarehouse.updateDotFocusFilter();
                     this.endLevelChange();
 
-                    AppState.centerViewport();
+                    AppState.centerCanvasOnLayerEnter();
                     SpatialNavigation.resume();
                 });
             };
@@ -253,7 +253,7 @@ const DepthController = {
                 if (!startTimestamp) startTimestamp = timestamp;
                 const progress = timestamp - startTimestamp;
 
-                AppState.centerViewport();
+                AppState.centerCanvasOnLayerEnter();
 
                 if (progress < duration) {
                     requestAnimationFrame(lockCameraToCenter);
@@ -387,7 +387,7 @@ const DepthController = {
             ActionWarehouse.updateDotFocusFilter();
             ActionWarehouse.syncDeployedBlocksForDepth?.();
             requestAnimationFrame(() => {
-                AppState.centerMesoViewport({ centerMode: 'canvas' });
+                AppState.centerCanvasOnLayerEnter();
                 requestAnimationFrame(() => {
                     PhysicsEngine.setTransitionFrozen(false);
                     this.endLevelChange();
@@ -396,7 +396,7 @@ const DepthController = {
                     }
                     const pending = typeof MesoMock !== 'undefined' && MesoMock.hasPendingTextureBakes();
                     if (!pending) {
-                        AppState.centerMesoViewport({ centerMode: 'canvas' });
+                        AppState.centerCanvasOnLayerEnter();
                     }
                 });
             });
@@ -410,7 +410,7 @@ const DepthController = {
             ActionWarehouse.syncDeployedBlocksForDepth?.();
             ActionWarehouse.updateDotFocusFilter();
             requestAnimationFrame(() => {
-                AppState.centerViewport();
+                AppState.centerCanvasOnLayerEnter();
                 if (typeof SpatialNavigation !== 'undefined') {
                     SpatialNavigation.resume();
                 }
@@ -429,7 +429,7 @@ const DepthController = {
             ActionWarehouse.syncDeployedBlocksForDepth?.();
             ActionWarehouse.updateDotFocusFilter();
             requestAnimationFrame(() => {
-                AppState.centerMesoViewport({ centerMode: 'canvas' });
+                AppState.centerCanvasOnLayerEnter();
                 if (typeof SpatialNavigation !== 'undefined') {
                     SpatialNavigation.resume();
                 }
@@ -464,9 +464,17 @@ const DepthController = {
                 ActionWarehouse.updateScrollReserve();
                 ActionWarehouse.unmountDeployedBlocksFromDepthBar?.();
                 ActionWarehouse.updateDotFocusFilter();
-                AppState.centerViewport();
-                SpatialNavigation.resume();
-                this.endLevelChange();
+                if (typeof applyMacroShellGridPlacement === 'function') {
+                    applyMacroShellGridPlacement();
+                }
+                if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.buildWorld) {
+                    PhysicsEngine.buildWorld();
+                }
+                requestAnimationFrame(() => {
+                    AppState.centerCanvasOnLayerEnter();
+                    SpatialNavigation.resume();
+                    this.endLevelChange();
+                });
             });
             return true;
         }
@@ -475,7 +483,7 @@ const DepthController = {
         this.syncViewLevelClass(newLevel);
         ActionWarehouse.updateScrollReserve();
         ActionWarehouse.updateDotFocusFilter();
-        AppState.centerViewport();
+        AppState.centerCanvasOnLayerEnter();
         SpatialNavigation.resume();
         this.endLevelChange();
         return true;

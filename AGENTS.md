@@ -35,9 +35,9 @@ Do not default to a cold clinical or faux-archival aesthetic unless a specific t
 
 ## Layout reference
 
-**Site shell grid:** **18 columns × 10 rows** — viewport-level proportions, padding, and UI anchors (`CONFIG.siteGrid`). See [`docs/architecture/site-grid.md`](docs/architecture/site-grid.md).
+**Site shell grid:** **24 columns × 12 rows** — viewport-level proportions, padding, and UI anchors (`CONFIG.siteGrid`). See [`docs/architecture/site-grid.md`](docs/architecture/site-grid.md).
 
-Canvas grids inside `#app` (macro physics, L2 meso, L3 micro) are separate and wider than the viewport; do not confuse them with the 18×10 shell.
+Canvas grids inside `#app` (macro physics, L2 meso, L3 micro) are separate and wider than the viewport; do not confuse them with the 24×12 shell.
 
 ## Technical stack
 

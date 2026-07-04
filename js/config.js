@@ -32,36 +32,38 @@ const CONFIG = {
 
     /* --- Site shell grid (viewport reference — separate from #app canvas grids) --- */
     siteGrid: {
-        columns: 18,
-        rows: 10,
+        columns: 24,
+        rows: 12,
         padding: { value: 1.25, unit: 'rem' },  // exhibition: 20px @ 16px root
         gap: { value: 1.25, unit: 'rem' },
-        crossStep: 2,                           // mark every second row/column intersection
+        crossStep: 4,                           // decoration at every 4th row/column crossing
+        macroGridColStep: 2,                    // L1: every second shell column (12 slots — gaps on grid lines)
+        macroGridRowStep: 2,                    // L1: every second shell row (fewer rows than columns)
         debug: false,
         // Reference regions in grid coordinates (colEnd/rowEnd exclusive).
         // Scale/anchor tokens only — layers stay free (scroll, drag, overflow).
         regions: {
-            nav:          { colStart: 1, colEnd: 19, rowStart: 1, rowEnd: 11 },
-            canvas:       { colStart: 1, colEnd: 19, rowStart: 1, rowEnd: 9  },
-            warehouse:    { colStart: 1, colEnd: 19, rowStart: 9, rowEnd: 11 },
-            warehouseDock: { colStart: 1, colEnd: 16, rowStart: 9, rowEnd: 11 },
-            warehouseMap:  { colStart: 16, colEnd: 19, rowStart: 9, rowEnd: 11 },
-            blockBar:       { colStart: 1, colEnd: 16, rowStart: 8, rowEnd: 9  },
-            inspector:    { colStart: 6, colEnd: 14, rowStart: 5, rowEnd: 9  },
-            filterFringe: { colStart: 17, colEnd: 19, rowStart: 1, rowEnd: 9  },
-            navigationLayers: { colStart: 17, colEnd: 19, rowStart: 1, rowEnd: 6  },
-            navigationMaps:   { colStart: 16, colEnd: 19, rowStart: 9, rowEnd: 11 } // alias: warehouseMap
+            nav:          { colStart: 1, colEnd: 25, rowStart: 1, rowEnd: 13 },
+            canvas:       { colStart: 1, colEnd: 25, rowStart: 1, rowEnd: 11 },
+            warehouse:    { colStart: 1, colEnd: 25, rowStart: 11, rowEnd: 13 },
+            warehouseDock: { colStart: 1, colEnd: 21, rowStart: 11, rowEnd: 13 },
+            warehouseMap:  { colStart: 21, colEnd: 25, rowStart: 11, rowEnd: 13 },
+            blockBar:       { colStart: 1, colEnd: 21, rowStart: 10, rowEnd: 11 },
+            inspector:    { colStart: 8, colEnd: 19, rowStart: 6, rowEnd: 11 },
+            filterFringe: { colStart: 23, colEnd: 25, rowStart: 1, rowEnd: 11 },
+            navigationLayers: { colStart: 23, colEnd: 25, rowStart: 1, rowEnd: 7  },
+            navigationMaps:   { colStart: 21, colEnd: 25, rowStart: 11, rowEnd: 13 } // alias: warehouseMap
             // reset button: centered above warehouse shell — not a grid region
         },
         regionsByLevel: {
-            2: { inspector: { colStart: 5, colEnd: 15, rowStart: 4, rowEnd: 8 } },
-            3: { inspector: { colStart: 6, colEnd: 14, rowStart: 3, rowEnd: 8 } }
+            2: { inspector: { colStart: 7, colEnd: 21, rowStart: 5, rowEnd: 10 } },
+            3: { inspector: { colStart: 8, colEnd: 19, rowStart: 4, rowEnd: 10 } }
         },
         // Site columns each content column spans (width reference only — not total column count)
-        contentColumns: { 1: 1, 2: 3, 3: 6 },
+        contentColumns: { 1: 1, 2: 4, 3: 8 },
         contentColumnScale: { 3: 1.0 },
         contentGapScale: 0.88,
-        microNoteMinRows: 6,
+        microNoteMinRows: 7,
         macroCanvasScrollFactor: 1.5
     },
 
@@ -893,12 +895,12 @@ function siteGridCssLength({ value, unit }) {
 }
 
 function getSiteGridColumnSpan(level = 1) {
-    const spans = CONFIG.siteGrid?.contentColumns || { 1: 1, 2: 3, 3: 6 };
+    const spans = CONFIG.siteGrid?.contentColumns || { 1: 1, 2: 4, 3: 8 };
     return spans[level] ?? spans[1] ?? 1;
 }
 
 function getSiteGridContentColCount(level = 1) {
-    const cols = CONFIG.siteGrid?.columns || 18;
+    const cols = CONFIG.siteGrid?.columns || 24;
     const span = getSiteGridColumnSpan(level);
     return Math.max(1, Math.floor(cols / span));
 }
@@ -911,6 +913,123 @@ function siteGridSpanWidth(span) {
 function siteGridSpanHeight(span) {
     if (span <= 1) return 'var(--site-grid-cell-h)';
     return `calc(${span} * var(--site-grid-cell-h) + ${span - 1} * var(--site-grid-gap))`;
+}
+
+/** Shell grid line position — viewport-fixed reference (padding origin). */
+function siteGridLinePosition(axis, lineIndex, lineCount) {
+    const cellVar = axis === 'col' ? 'var(--site-grid-cell-w)' : 'var(--site-grid-cell-h)';
+    const pad = 'var(--site-grid-padding)';
+    const gap = 'var(--site-grid-gap)';
+    if (lineIndex <= 0) return `calc(${pad})`;
+    if (lineIndex >= lineCount) {
+        return `calc(${pad} + ${lineCount} * ${cellVar} + ${Math.max(0, lineCount - 1)} * ${gap})`;
+    }
+    return `calc(${pad} + ${lineIndex} * (${cellVar} + ${gap}))`;
+}
+
+/** Canvas-local shell line position — origin is #app content top-left (scrolls with canvas). */
+function siteGridCanvasLinePosition(axis, lineIndex) {
+    const cellVar = axis === 'col' ? 'var(--site-grid-cell-w)' : 'var(--site-grid-cell-h)';
+    const gap = 'var(--site-grid-gap)';
+    if (lineIndex <= 0) return '0px';
+    return `calc(${lineIndex} * (${cellVar} + ${gap}))`;
+}
+
+/** Center of a single shell cell (canvas-local, scrolls with #app). */
+function siteGridCanvasCellCenter(axis, cellIndex) {
+    const cellVar = axis === 'col' ? 'var(--site-grid-cell-w)' : 'var(--site-grid-cell-h)';
+    const gap = 'var(--site-grid-gap)';
+    return `calc(${cellIndex} * (${cellVar} + ${gap}) + ${cellVar} / 2)`;
+}
+
+/** Center of a multi-cell shell slot (canvas-local, scrolls with #app). */
+function siteGridCanvasSlotCenter(axis, slotIndex, slotSpan = 2) {
+    const cellVar = axis === 'col' ? 'var(--site-grid-cell-w)' : 'var(--site-grid-cell-h)';
+    const gap = 'var(--site-grid-gap)';
+    const startLines = slotIndex * slotSpan;
+    if (slotSpan <= 1) {
+        return siteGridCanvasCellCenter(axis, startLines);
+    }
+    return `calc(${startLines} * (${cellVar} + ${gap}) + (${slotSpan} * ${cellVar} + ${Math.max(0, slotSpan - 1)} * ${gap}) / 2)`;
+}
+
+function measureCrossTileLineCounts() {
+    const g = CONFIG.siteGrid;
+    const shellCols = g?.columns || 24;
+    const canvasRegion = g?.regions?.canvas;
+    const shellRows = canvasRegion
+        ? canvasRegion.rowEnd - canvasRegion.rowStart
+        : (g?.rows || 12) - 1;
+    const scrollFactor = g?.macroCanvasScrollFactor ?? 1.5;
+
+    let colLines = Math.ceil(shellCols * scrollFactor);
+    let rowLines = shellRows;
+
+    const app = document.getElementById('app');
+    if (!app?.isConnected) {
+        return { colCells: Math.ceil(shellCols * scrollFactor), rowCells: shellRows };
+    }
+
+    const probe = document.createElement('div');
+    probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;width:var(--site-grid-cell-w);height:var(--site-grid-cell-h);';
+    app.appendChild(probe);
+    const cellRect = probe.getBoundingClientRect();
+    probe.style.width = 'var(--site-grid-gap)';
+    probe.style.height = 'auto';
+    const gapRect = probe.getBoundingClientRect();
+    probe.remove();
+
+    const cellW = cellRect.width;
+    const cellH = cellRect.height;
+    const gap = gapRect.width;
+    if (Number.isFinite(cellW) && cellW > 0 && Number.isFinite(cellH) && cellH > 0) {
+        const appStyle = getComputedStyle(app);
+        const padH = parseFloat(appStyle.paddingLeft) + parseFloat(appStyle.paddingRight);
+        const padV = parseFloat(appStyle.paddingTop) + parseFloat(appStyle.paddingBottom);
+        const contentW = Math.max(0, app.scrollWidth - padH);
+        const contentH = Math.max(0, app.scrollHeight - padV);
+        const stepW = cellW + gap;
+        const stepH = cellH + gap;
+        colLines = Math.max(colLines, Math.ceil((contentW + gap) / stepW));
+        rowLines = Math.max(rowLines, Math.ceil((contentH + gap) / stepH));
+    }
+
+    return { colCells: colLines, rowCells: rowLines };
+}
+
+function syncCrossLayerSize(layer, app) {
+    if (!layer || !app) return;
+    const w = Math.max(app.scrollWidth, app.clientWidth);
+    const h = Math.max(app.scrollHeight, app.clientHeight);
+    layer.style.width = `${w}px`;
+    layer.style.height = `${h}px`;
+}
+
+let _crossResizeObserver = null;
+
+function bindCrossLayerResize(app) {
+    if (_crossResizeObserver || typeof ResizeObserver === 'undefined' || !app) return;
+    _crossResizeObserver = new ResizeObserver(() => {
+        updateSiteGridCrosses({ force: true });
+    });
+    _crossResizeObserver.observe(app);
+}
+
+function ensureSiteGridCrossesLayer() {
+    const app = document.getElementById('app');
+    if (!app) return null;
+
+    let layer = document.getElementById('site-grid-crosses');
+    if (!layer) {
+        layer = document.createElement('div');
+        layer.id = 'site-grid-crosses';
+        layer.setAttribute('aria-hidden', 'true');
+        layer.dataset.siteLayer = 'gridCrosses';
+    }
+    if (layer.parentElement !== app) {
+        app.insertBefore(layer, app.firstChild);
+    }
+    return layer;
 }
 
 function getSiteGridViewportColCount(level = 1) {
@@ -940,14 +1059,15 @@ function applySiteGridContentScale(root = document.documentElement) {
     const span1 = getSiteGridColumnSpan(1);
     const span2 = getSiteGridColumnSpan(2);
     const span3 = getSiteGridColumnSpan(3);
-    const macroCols = getSiteGridContentColCount(1);
+    const shellCols = g.columns || 24;
+    const scrollFactor = g.macroCanvasScrollFactor ?? 1.5;
+    const macroCols = Math.ceil(shellCols * scrollFactor);
     const viewportMesoCols = getSiteGridViewportColCount(2);
     const viewportMicroCols = getSiteGridViewportColCount(3);
     const canvasRegion = g.regions?.canvas;
     const macroRows = canvasRegion
         ? canvasRegion.rowEnd - canvasRegion.rowStart
-        : (g.rows || 10) - 1;
-    const scrollFactor = g.macroCanvasScrollFactor ?? 1.5;
+        : (g.rows || 12) - 1;
     const gapScale = g.contentGapScale ?? 1;
     if (gapScale !== 1) {
         root.style.setProperty('--site-content-gap', `calc(var(--site-grid-gap) * ${gapScale})`);
@@ -966,10 +1086,18 @@ function applySiteGridContentScale(root = document.documentElement) {
     root.style.setProperty('--site-micro-viewport-cols', String(viewportMicroCols));
     root.style.setProperty('--site-macro-cell-width', siteGridSpanWidth(span1));
     root.style.setProperty('--site-macro-row-height', 'var(--site-grid-cell-h)');
-    /* L1 row stride: content row + one empty reference row (odd shell rows 1, 3, 5…) */
+    const macroColStep = g.macroGridColStep ?? g.macroGridStep ?? 2;
+    const macroRowStep = g.macroGridRowStep ?? g.macroGridStep ?? 2;
+    root.style.setProperty('--site-macro-grid-col-step', String(macroColStep));
+    root.style.setProperty('--site-macro-grid-row-step', String(macroRowStep));
+    /* One shell row/column step per grid track; placement skips via macroGridCol/RowStep */
     root.style.setProperty(
         '--site-macro-row-stride',
-        'calc(2 * var(--site-grid-cell-h) + var(--site-grid-gap))'
+        'calc(var(--site-grid-cell-h) + var(--site-grid-gap))'
+    );
+    root.style.setProperty(
+        '--site-macro-slot-cols',
+        String(Math.floor(macroCols / macroColStep))
     );
     root.style.setProperty('--site-meso-col-width', siteGridContentColumnWidth(2));
     root.style.setProperty('--site-micro-col-width', siteGridContentColumnWidth(3));
@@ -977,8 +1105,46 @@ function applySiteGridContentScale(root = document.documentElement) {
     root.style.setProperty('--site-micro-note-min-height', siteGridSpanHeight(microMinRows));
     root.style.setProperty(
         '--site-macro-canvas-width',
-        `calc((${siteGridSpanWidth(span1)} * ${macroCols} + ${Math.max(0, macroCols - 1)} * var(--site-grid-gap) + 2 * var(--site-grid-padding)) * ${scrollFactor})`
+        `calc(2 * var(--site-grid-padding) + ${macroCols} * var(--site-grid-cell-w) + ${Math.max(0, macroCols - 1)} * var(--site-grid-gap))`
     );
+    root.style.setProperty(
+        '--site-macro-canvas-min-height',
+        `calc(2 * var(--site-grid-padding) + ${macroRows} * var(--site-grid-cell-h) + ${Math.max(0, macroRows - 1)} * var(--site-grid-gap))`
+    );
+}
+
+/** Map note index → centered slot in the macro shell grid (2D spread, not top-heavy). */
+function computeMacroGridSlot(index, total, placementCols, maxPlacementRows, colStep, rowStep) {
+    const minColsPerRow = Math.max(1, Math.ceil(placementCols / maxPlacementRows));
+    const rowsUsed = Math.min(
+        maxPlacementRows,
+        Math.max(1, Math.ceil(total / minColsPerRow))
+    );
+    const packInBand = Math.min(total, rowsUsed * placementCols);
+
+    const toGrid = (colSlot, rowSlot) => ({
+        gridColumn: `${colSlot * colStep + 1} / span ${colStep}`,
+        gridRow: `${rowSlot * rowStep + 1} / span ${rowStep}`
+    });
+
+    if (index < packInBand) {
+        const base = Math.floor(packInBand / rowsUsed);
+        const extra = packInBand % rowsUsed;
+        let rem = index;
+        for (let rowSlot = 0; rowSlot < rowsUsed; rowSlot++) {
+            const count = base + (rowSlot < extra ? 1 : 0);
+            if (rem < count) {
+                const colOffset = Math.floor((placementCols - count) / 2);
+                return toGrid(colOffset + rem, rowSlot);
+            }
+            rem -= count;
+        }
+    }
+
+    const overflowIndex = index - packInBand;
+    const overflowRowSlot = rowsUsed + Math.floor(overflowIndex / placementCols);
+    const colSlot = overflowIndex % placementCols;
+    return toGrid(colSlot, overflowRowSlot);
 }
 
 function siteGridRegionRect(placement) {
@@ -1072,41 +1238,72 @@ function getSiteGridActiveRegions(level = null) {
     return { ...base, ...overrides };
 }
 
-function updateSiteGridCrosses() {
+function updateSiteGridCrosses(options = {}) {
     const g = CONFIG.siteGrid;
     if (!g || !document.body) return;
 
-    let layer = document.getElementById('site-grid-crosses');
-    if (!layer) {
-        layer = document.createElement('div');
-        layer.id = 'site-grid-crosses';
-        layer.setAttribute('aria-hidden', 'true');
-        layer.dataset.siteLayer = 'gridCrosses';
-        const nav = document.getElementById('nav-surface');
-        document.body.insertBefore(layer, nav || document.body.firstChild);
-    }
+    const app = document.getElementById('app');
+    const layer = ensureSiteGridCrossesLayer();
+    if (!layer || !app) return;
 
-    const cols = g.columns || 18;
-    const rows = g.rows || 10;
-    const step = g.crossStep ?? 2;
-    const count =
-        (Math.floor(cols / step) + 1) *
-        (Math.floor(rows / step) + 1);
-    if (layer.children.length === count && layer.dataset.crossStep === String(step)) return;
+    bindCrossLayerResize(app);
 
-    layer.dataset.crossStep = String(step);
+    const { colCells, rowCells } = measureCrossTileLineCounts();
+    const step = g.crossStep ?? 4;
+    const cacheKey = `${g.columns || 24}x${g.rows || 12}s${step}t${colCells}x${rowCells}`;
+    if (!options.force && layer.dataset.crossKey === cacheKey && layer.children.length > 0) return;
+
+    layer.dataset.crossKey = cacheKey;
     layer.replaceChildren();
+    syncCrossLayerSize(layer, app);
     const fragment = document.createDocumentFragment();
-    for (let row = 0; row <= rows; row += step) {
-        for (let col = 0; col <= cols; col += step) {
+    for (let row = 0; row <= rowCells; row += step) {
+        for (let col = 0; col <= colCells; col += step) {
             const cross = document.createElement('span');
             cross.className = 'site-grid-cross';
-            cross.style.left = `calc(var(--site-grid-padding) + ${col} * (var(--site-grid-cell-w) + var(--site-grid-gap)))`;
-            cross.style.top = `calc(var(--site-grid-padding) + ${row} * (var(--site-grid-cell-h) + var(--site-grid-gap)))`;
+            cross.style.left = siteGridCanvasLinePosition('col', col);
+            cross.style.top = siteGridCanvasLinePosition('row', row);
             fragment.appendChild(cross);
         }
     }
     layer.appendChild(fragment);
+    requestAnimationFrame(() => syncCrossLayerSize(layer, app));
+}
+
+function applyMacroShellGridPlacement() {
+    const body = document.body;
+    const useShellGrid = body?.classList.contains('site-grid') &&
+        body.classList.contains('view-level-1');
+    const g = CONFIG.siteGrid;
+    const colStep = g?.macroGridColStep ?? g?.macroGridStep ?? 2;
+    const rowStep = g?.macroGridRowStep ?? g?.macroGridStep ?? 2;
+    const shellCols = g?.columns || 24;
+    const scrollFactor = g?.macroCanvasScrollFactor ?? 1.5;
+    const gridCols = Math.ceil(shellCols * scrollFactor);
+    const placementCols = Math.floor(gridCols / colStep);
+    const canvasRegion = g?.regions?.canvas;
+    const macroRows = canvasRegion
+        ? canvasRegion.rowEnd - canvasRegion.rowStart
+        : (g?.rows || 12) - 1;
+    const maxPlacementRows = Math.max(1, Math.floor(macroRows / rowStep));
+
+    const wrappers = [...document.querySelectorAll('#app .note-wrapper')];
+    const total = wrappers.length;
+
+    wrappers.forEach((wrapper, index) => {
+        if (!useShellGrid || placementCols < 1) {
+            wrapper.style.removeProperty('grid-column');
+            wrapper.style.removeProperty('grid-row');
+            return;
+        }
+        const slot = computeMacroGridSlot(
+            index, total, placementCols, maxPlacementRows, colStep, rowStep
+        );
+        wrapper.style.gridColumn = slot.gridColumn;
+        wrapper.style.gridRow = slot.gridRow;
+    });
+
+    updateSiteGridCrosses({ force: true });
 }
 
 function updateSiteGridDebugRegions(regionNames) {
@@ -1167,6 +1364,8 @@ function applySiteGridTokens(root = document.documentElement, level = null) {
     updateSiteGridCrosses();
 
     applySiteGridContentScale(root);
+
+    applyMacroShellGridPlacement();
 
     if (document.body) {
         document.body.classList.add('site-grid');

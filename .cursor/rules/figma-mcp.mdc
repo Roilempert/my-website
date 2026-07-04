@@ -20,7 +20,7 @@ Use when the user provides a Figma URL or asks to implement/sync UI from Figma.
 
 - **Stack:** static `index.html`, `styles.css`, bundled `js/app.js` — no React/Vue.
 - **Language:** Hebrew UI stays Hebrew; RTL at `.note-card` / UI layer; `#app { direction: ltr }` for canvas physics.
-- **Layout reference:** 18×10 site shell grid — see `docs/architecture/site-grid.md` and `CONFIG.siteGrid` in `js/config.js`.
+- **Layout reference:** 24×12 site shell grid — see `docs/architecture/site-grid.md` and `CONFIG.siteGrid` in `js/config.js`.
 - **Design direction:** slick, spatial, fun — not cold archival (see `AGENTS.md`).
 - **Physics/navigation:** if Figma-driven UI touches scroll/centering/blocks, read `docs/CHECKPOINT.md` first.
 

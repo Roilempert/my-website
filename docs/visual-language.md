@@ -31,7 +31,7 @@ CSS tokens in `:root` (`styles.css`):
 | `--color-3` | `#2D2D2D` | Action blocks, L3 grid dots, map objects, metadata panel, related-notes section title, SVG chrome |
 | `--color-4` | `#000000` | Note text, tag border/text, metadata text, **1pt note borders** |
 | `--color-5` | `#F2F0EE` | Canvas / note field background |
-| `--color-6` | `#EDE8E2` | Warehouse + map panel bg, layer nav label boxes, clear control (`נקה לוח`) |
+| `--color-6` | `#E6E0DA` | Warehouse + map panel bg, layer nav label boxes, clear control (`נקה לוח`) |
 
 **Divider inset:** `--divider-inset: var(--space-20)` (20px) — gap between divider line ends and panel outer border (site-wide).
 
@@ -51,7 +51,7 @@ Design spacing may be specified in Figma `px`, usually in 5px jumps. Agents must
 | 40px | `var(--space-40)` |
 | 60px | `var(--space-60)` |
 
-Use `--space-*` for component gaps, padding, insets, margins, and radii that come from Figma spacing. Use `--site-grid-*` or `calc(N * var(--site-grid-cell-w))` for shell layout tied to the 18×10 grid. Raw `px` remains acceptable for hairlines, borders, physics/canvas coordinates, SVG primitives, and tiny debug-only values.
+Use `--space-*` for component gaps, padding, insets, margins, and radii that come from Figma spacing. Use `--site-grid-*` or `calc(N * var(--site-grid-cell-w))` for shell layout tied to the 24×12 grid. Raw `px` remains acceptable for hairlines, borders, physics/canvas coordinates, SVG primitives, and tiny debug-only values.
 
 ---
 
@@ -74,9 +74,9 @@ Four classes replace legacy `--type-*` / ratzif22 / NarkissTam body.
 
 | Property | Value |
 |----------|--------|
-| Grid | **18 columns × 10 rows** (`CONFIG.siteGrid`) |
+| Grid | **24 columns × 12 rows** (`CONFIG.siteGrid`) |
 | Viewport padding | **20px** → `1.25rem` (all sides) |
-| Grid marks | Every second row/column crossing |
+| Grid marks | Every third row/column crossing (`crossStep: 3`) |
 
 ### Grid marks by depth level
 
@@ -92,16 +92,16 @@ Four classes replace legacy `--type-*` / ratzif22 / NarkissTam body.
 
 ## Components
 
-### Warehouse (rows 9–10)
+### Warehouse (rows 11–12)
 
-- **Shell:** 2 rows high, cols 1–18 inside padding; transparent outer wrapper with **4 corner decorations** (5×5, color 3, static).
-- **Action dock** (15 cols): separate bg color 6 panel, radius 5px, **left side** of the shell.
+- **Shell:** **2 rows** high, cols 1–24 inside padding; transparent outer wrapper with **4 corner decorations** (5×5, color 3, static).
+- **Action dock** (20 cols): separate bg color 6 panel, radius 5px, **left side** of the shell.
   - Inner corner decorations: two marks on the dock right edge, paired with two marks on the map left edge around the dock/map gap
   - Message/statistics inset: top/right 10px → `var(--space-10)`; left/bottom 20px → `var(--space-20)`; message paragraph indent 20px → `var(--space-20)`
-  - Statistics (3 cols): live rows for `בלוקים בשימוש`, `חיבורים פעילים`, and `פתקים מחוברים`; category labels stick to the right of the panel, numeric output sticks left on the same line; rows use normal text line-height spacing; values count up/down live until they reach the current output
-  - Message port (0.5×12): `גררו להפעלה` (`.general-t`), middle area next to map; text top-aligned; no extra outer side inset beyond internal padding
-  - Block panel (1.5×12): live blocks from sheet (`.general-t`), middle area next to map; content padding is 10px → `var(--space-10)`, including 10px below the separator hairline
-- **Map** (3 cols): separate bg color 6 panel, radius 5px, **right side** of the shell; live minimap with compact details (objects color 3).
+  - Statistics (4 cols): live rows for `בלוקים בשימוש`, `חיבורים פעילים`, and `פתקים מחוברים`; category labels stick to the right of the panel, numeric output sticks left on the same line; rows use normal text line-height spacing; values count up/down live until they reach the current output
+  - Message port (0.5× row): `גררו להפעלה` (`.general-t`), middle area next to map; text top-aligned; no extra outer side inset beyond internal padding
+  - Block panel: live blocks from sheet (`.general-t`), middle area next to map; content padding is 10px → `var(--space-10)`, including 10px below the separator hairline
+- **Map** (4 cols): separate bg color 6 panel, radius 5px, **right side** of the shell; live minimap with compact details (objects color 3).
 - **Dock/map gap:** one site-grid gap between the action dock panel and map panel.
 - **Panel dividers:** color 3 hairlines with 5px → `var(--space-5)` endpoint breathing room.
   - between statistics and dock content: vertical divider ends 5px from dock top/bottom
@@ -163,7 +163,7 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 | Property | Value |
 |----------|--------|
 | Column gap | 40px → `2.5rem` |
-| Min height | 6 site rows |
+| Min height | 7 site rows |
 | Card bg / text | color 1 / color 4 |
 | Border | none |
 | Radius | 5px → `var(--space-5)` |
@@ -214,6 +214,7 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-05 | Site shell grid 18×10 → **24×12**; warehouse **2 rows** (rows 11–12); dock/map **20+4 cols**; statistics **4 cols**; contentColumns L2/L3 **4/8**; grid marks every 3rd line; L3 min height **7 rows** |
 | 2026-07-04 | English-only notes auto-detect to LTR (optional sheet override); mirrored card padding, ID lane, and L2 silhouette alignment |
 | 2026-07-04 | Freed layer nav label box height from fixed shell slots; padding now grows the binding box |
 | 2026-07-04 | Sized layer nav label cells to font ink + padding and aligned boxes to marker cell height |

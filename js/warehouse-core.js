@@ -135,7 +135,7 @@ const ActionWarehouse = {
         document.documentElement.style.setProperty('--warehouse-bottom-offset', `${scale(dockCfg.bottomOffset)}px`);
         document.documentElement.style.setProperty(
             '--warehouse-tray-max-height',
-            `calc(var(--block-height) * ${dockCfg.visibleRows} + ${(dockCfg.visibleRows - 1) * scale(dockCfg.rowGap)}px)`
+            'var(--warehouse-block-panel-h, calc(100% - var(--warehouse-message-row-h)))'
         );
     },
 

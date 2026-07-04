@@ -83,7 +83,7 @@ const DepthTransitionOrchestrator = {
                     MesoMock.refreshFocusLensTextures?.();
                 }
                 if (typeof AppState !== 'undefined') {
-                    AppState.centerMesoViewport();
+                    AppState.centerCanvasOnLayerEnter();
                 }
             });
         };

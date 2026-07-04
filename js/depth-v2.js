@@ -433,6 +433,9 @@ const DepthV2 = {
         app.classList.add('is-meso-column-layout');
         app.classList.remove('has-filter-fringe');
         if (typeof MesoMock !== 'undefined') MesoMock.invalidateColumnGradientLayout();
+        if (typeof updateSiteGridCrosses === 'function') {
+            updateSiteGridCrosses({ force: true });
+        }
     },
 
     layoutMicroGrid(options = {}) {
@@ -494,6 +497,9 @@ const DepthV2 = {
         app.classList.add('is-micro-grid-layout');
         app.classList.remove('has-filter-fringe');
         this._notifyMapLayoutReady();
+        if (typeof updateSiteGridCrosses === 'function') {
+            updateSiteGridCrosses({ force: true });
+        }
     },
 
     relayoutForFilterChange(options = {}) {
@@ -760,7 +766,7 @@ const DepthV2 = {
                 MesoMock.syncAllGlyphsOnL2Enter();
                 MesoMock.scheduleAllTextureBakes();
                 if (typeof AppState !== 'undefined') {
-                    AppState.centerMesoViewport({ centerMode: 'canvas' });
+                    AppState.centerCanvasOnLayerEnter();
                 }
             });
         }
@@ -802,8 +808,7 @@ const DepthV2 = {
             }
             if (typeof AppState !== 'undefined') {
                 requestAnimationFrame(() => {
-                    AppState.centerViewport();
-                    requestAnimationFrame(() => AppState.centerViewport());
+                    AppState.centerCanvasOnLayerEnter();
                 });
             }
         };

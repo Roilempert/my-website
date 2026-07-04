@@ -44,7 +44,7 @@ gh workflow run deploy-pages.yml
 
 **[`AGENTS.md`](../AGENTS.md)** — project goal (study platform), discovery + study modes, design direction, glossary, working guidelines.
 
-**Site shell grid (18×10):** [`architecture/site-grid.md`](architecture/site-grid.md) — viewport reference; separate from scrollable canvas grids inside `#app`.
+**Site shell grid (24×12):** [`architecture/site-grid.md`](architecture/site-grid.md) — viewport reference; separate from scrollable canvas grids inside `#app`.
 
 **Exhibition visual language:** [`visual-language.md`](visual-language.md) — colors, type classes, spacing, SVG chrome (update with any UI token change).
 
@@ -77,7 +77,7 @@ Pair layout-boot with `CHECKPOINT.md` for physics.
 | [`architecture/depth-v2.md`](architecture/depth-v2.md) | Active V2 engine (L2/L3 grids, meso target) |
 | [`architecture/depth-legacy.md`](architecture/depth-legacy.md) | Legacy engine (frozen) |
 | [`architecture/meso-gradient-p5-baseline.md`](architecture/meso-gradient-p5-baseline.md) | Interim L2 p5 mandala baseline |
-| [`architecture/site-grid.md`](architecture/site-grid.md) | 18×10 shell grid |
+| [`architecture/site-grid.md`](architecture/site-grid.md) | 24×12 shell grid |
 
 ---
 

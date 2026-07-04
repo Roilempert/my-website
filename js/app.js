@@ -61,14 +61,22 @@ const AppState = {
 
         setTimeout(() => {
             try {
-                this.centerViewport();
                 if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.buildWorld) {
                     PhysicsEngine.buildWorld();
                 }
+                if (typeof applyMacroShellGridPlacement === 'function') {
+                    applyMacroShellGridPlacement();
+                } else if (typeof updateSiteGridCrosses === 'function') {
+                    updateSiteGridCrosses({ force: true });
+                }
                 requestAnimationFrame(() => {
-                    if (typeof NavigationMap !== 'undefined') {
-                        NavigationMap.onBootComplete();
-                    }
+                    this.scrollToCanvasCenter();
+                    requestAnimationFrame(() => {
+                        this.scrollToCanvasCenter();
+                        if (typeof NavigationMap !== 'undefined') {
+                            NavigationMap.onBootComplete();
+                        }
+                    });
                 });
             } catch (err) {
                 console.error('Boot physics failed', err);
@@ -240,11 +248,17 @@ const AppState = {
 
     render() {
         if (!this.appContainer) return;
-        this.appContainer.innerHTML = '';
+        this.appContainer.querySelectorAll(':scope > .note-wrapper').forEach(el => el.remove());
         this.items.forEach((item, noteIndex) => {
             const wrapper = RenderEngine.createNoteDOM(item, noteIndex);
             this.appContainer.appendChild(wrapper);
         });
+
+        if (typeof applyMacroShellGridPlacement === 'function') {
+            applyMacroShellGridPlacement();
+        } else if (typeof updateSiteGridCrosses === 'function') {
+            updateSiteGridCrosses({ force: true });
+        }
 
         if (typeof DepthV2 !== 'undefined') {
             DepthV2.afterNotesRender();
@@ -303,22 +317,41 @@ const AppState = {
             return;
         }
 
+        this.scrollToCanvasCenter(options);
+    },
+
+    /** Scroll so the geometric center of #app sits in the viewport center (warehouse-aware on Y). */
+    scrollToCanvasCenter(options = {}) {
+        const app = document.getElementById('app');
+        if (!app) return;
+
         SpatialNavigation.bypassScrollClamp(
             options.smooth
                 ? CONFIG.warehouse.workspaceGrid.rushDuration + 450
-                : 80
+                : 300
         );
 
-        const rect = appElement.getBoundingClientRect();
-        const dX = rect.left + rect.width / 2 - window.innerWidth / 2;
-        const dY = rect.top + rect.height / 2 - window.innerHeight / 2;
+        const reserve = typeof ActionWarehouse !== 'undefined'
+            ? ActionWarehouse.getScrollReserve()
+            : 0;
+        const viewMidY = (window.innerHeight - reserve) / 2;
 
-        if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return;
+        const run = () => {
+            const centerX = app.offsetLeft + app.offsetWidth / 2;
+            const centerY = app.offsetTop + app.offsetHeight / 2;
+            const targetX = centerX - window.innerWidth / 2;
+            const targetY = centerY - viewMidY;
 
-        window.scrollBy({
-            left: dX,
-            top: dY,
-            behavior: options.smooth ? 'smooth' : 'auto'
+            window.scrollTo({
+                left: targetX,
+                top: targetY,
+                behavior: options.smooth ? 'smooth' : 'auto'
+            });
+        };
+
+        requestAnimationFrame(() => {
+            run();
+            requestAnimationFrame(run);
         });
     },
 
@@ -461,24 +494,11 @@ const AppState = {
         };
 
         const centerOnCanvas = () => {
-            const rect = app.getBoundingClientRect();
-            const dX = rect.left + rect.width / 2 - window.innerWidth / 2;
-            const dY = rect.top + rect.height / 2 - window.innerHeight / 2;
-
-            if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return;
-
-            window.scrollBy({
-                left: dX,
-                top: dY,
-                behavior: options.smooth ? 'smooth' : 'auto'
-            });
+            this.scrollToCanvasCenter({ ...options, smooth: options.smooth });
         };
 
         if (forceCanvasCenter) {
-            requestAnimationFrame(() => {
-                centerOnCanvas();
-                requestAnimationFrame(centerOnCanvas);
-            });
+            centerOnCanvas();
             return;
         }
 
@@ -508,6 +528,19 @@ const AppState = {
             top: dY,
             behavior: options.smooth ? 'smooth' : 'auto'
         });
+    },
+
+    /** Center viewport on #app canvas middle after a depth level change. */
+    centerCanvasOnLayerEnter(options = {}) {
+        const merged = { centerMode: 'canvas', ...options };
+        const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+
+        if (level >= 2) {
+            this.centerMesoViewport(merged);
+            return;
+        }
+
+        this.scrollToCanvasCenter(merged);
     }
 };
 
@@ -5149,7 +5182,7 @@ const DepthTransitionOrchestrator = {
                     MesoMock.refreshFocusLensTextures?.();
                 }
                 if (typeof AppState !== 'undefined') {
-                    AppState.centerMesoViewport();
+                    AppState.centerCanvasOnLayerEnter();
                 }
             });
         };
@@ -6346,6 +6379,9 @@ const DepthV2 = {
         app.classList.add('is-meso-column-layout');
         app.classList.remove('has-filter-fringe');
         if (typeof MesoMock !== 'undefined') MesoMock.invalidateColumnGradientLayout();
+        if (typeof updateSiteGridCrosses === 'function') {
+            updateSiteGridCrosses({ force: true });
+        }
     },
 
     layoutMicroGrid(options = {}) {
@@ -6407,6 +6443,9 @@ const DepthV2 = {
         app.classList.add('is-micro-grid-layout');
         app.classList.remove('has-filter-fringe');
         this._notifyMapLayoutReady();
+        if (typeof updateSiteGridCrosses === 'function') {
+            updateSiteGridCrosses({ force: true });
+        }
     },
 
     relayoutForFilterChange(options = {}) {
@@ -6673,7 +6712,7 @@ const DepthV2 = {
                 MesoMock.syncAllGlyphsOnL2Enter();
                 MesoMock.scheduleAllTextureBakes();
                 if (typeof AppState !== 'undefined') {
-                    AppState.centerMesoViewport({ centerMode: 'canvas' });
+                    AppState.centerCanvasOnLayerEnter();
                 }
             });
         }
@@ -6715,8 +6754,7 @@ const DepthV2 = {
             }
             if (typeof AppState !== 'undefined') {
                 requestAnimationFrame(() => {
-                    AppState.centerViewport();
-                    requestAnimationFrame(() => AppState.centerViewport());
+                    AppState.centerCanvasOnLayerEnter();
                 });
             }
         };
@@ -7253,7 +7291,7 @@ const DepthController = {
                 });
             });
 
-            AppState.centerViewport();
+            AppState.centerCanvasOnLayerEnter();
         } else if (isMacroMesoTransition) {
             const zoomIn = newLevel === 2;
             const targetLevel = newLevel;
@@ -7267,7 +7305,7 @@ const DepthController = {
                     ActionWarehouse.updateDotFocusFilter();
                     this.endLevelChange();
 
-                    AppState.centerViewport();
+                    AppState.centerCanvasOnLayerEnter();
                     SpatialNavigation.resume();
                 });
             };
@@ -7306,7 +7344,7 @@ const DepthController = {
                 if (!startTimestamp) startTimestamp = timestamp;
                 const progress = timestamp - startTimestamp;
 
-                AppState.centerViewport();
+                AppState.centerCanvasOnLayerEnter();
 
                 if (progress < duration) {
                     requestAnimationFrame(lockCameraToCenter);
@@ -7440,7 +7478,7 @@ const DepthController = {
             ActionWarehouse.updateDotFocusFilter();
             ActionWarehouse.syncDeployedBlocksForDepth?.();
             requestAnimationFrame(() => {
-                AppState.centerMesoViewport({ centerMode: 'canvas' });
+                AppState.centerCanvasOnLayerEnter();
                 requestAnimationFrame(() => {
                     PhysicsEngine.setTransitionFrozen(false);
                     this.endLevelChange();
@@ -7449,7 +7487,7 @@ const DepthController = {
                     }
                     const pending = typeof MesoMock !== 'undefined' && MesoMock.hasPendingTextureBakes();
                     if (!pending) {
-                        AppState.centerMesoViewport({ centerMode: 'canvas' });
+                        AppState.centerCanvasOnLayerEnter();
                     }
                 });
             });
@@ -7463,7 +7501,7 @@ const DepthController = {
             ActionWarehouse.syncDeployedBlocksForDepth?.();
             ActionWarehouse.updateDotFocusFilter();
             requestAnimationFrame(() => {
-                AppState.centerViewport();
+                AppState.centerCanvasOnLayerEnter();
                 if (typeof SpatialNavigation !== 'undefined') {
                     SpatialNavigation.resume();
                 }
@@ -7482,7 +7520,7 @@ const DepthController = {
             ActionWarehouse.syncDeployedBlocksForDepth?.();
             ActionWarehouse.updateDotFocusFilter();
             requestAnimationFrame(() => {
-                AppState.centerMesoViewport({ centerMode: 'canvas' });
+                AppState.centerCanvasOnLayerEnter();
                 if (typeof SpatialNavigation !== 'undefined') {
                     SpatialNavigation.resume();
                 }
@@ -7517,9 +7555,17 @@ const DepthController = {
                 ActionWarehouse.updateScrollReserve();
                 ActionWarehouse.unmountDeployedBlocksFromDepthBar?.();
                 ActionWarehouse.updateDotFocusFilter();
-                AppState.centerViewport();
-                SpatialNavigation.resume();
-                this.endLevelChange();
+                if (typeof applyMacroShellGridPlacement === 'function') {
+                    applyMacroShellGridPlacement();
+                }
+                if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.buildWorld) {
+                    PhysicsEngine.buildWorld();
+                }
+                requestAnimationFrame(() => {
+                    AppState.centerCanvasOnLayerEnter();
+                    SpatialNavigation.resume();
+                    this.endLevelChange();
+                });
             });
             return true;
         }
@@ -7528,7 +7574,7 @@ const DepthController = {
         this.syncViewLevelClass(newLevel);
         ActionWarehouse.updateScrollReserve();
         ActionWarehouse.updateDotFocusFilter();
-        AppState.centerViewport();
+        AppState.centerCanvasOnLayerEnter();
         SpatialNavigation.resume();
         this.endLevelChange();
         return true;
@@ -13188,7 +13234,7 @@ const ActionWarehouse = {
         document.documentElement.style.setProperty('--warehouse-bottom-offset', `${scale(dockCfg.bottomOffset)}px`);
         document.documentElement.style.setProperty(
             '--warehouse-tray-max-height',
-            `calc(var(--block-height) * ${dockCfg.visibleRows} + ${(dockCfg.visibleRows - 1) * scale(dockCfg.rowGap)}px)`
+            'var(--warehouse-block-panel-h, calc(100% - var(--warehouse-message-row-h)))'
         );
     },
 

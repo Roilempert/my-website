@@ -1,6 +1,6 @@
 # Site shell grid
 
-**Canonical layout reference: 18 columns × 10 rows** (`CONFIG.siteGrid.columns` / `.rows`). Documented in `AGENTS.md` as the project shell standard.
+**Canonical layout reference: 24 columns × 12 rows** (`CONFIG.siteGrid.columns` / `.rows`). Documented in `AGENTS.md` as the project shell standard.
 
 Viewport-level **reference grid** for proportions, spacing, and default anchors. Separate from the **canvas grids** inside `#app` (physics macro grid, catalog layout, depth V2 meso/micro grids).
 
@@ -32,21 +32,25 @@ Edit `CONFIG.siteGrid` in [`js/config.js`](../../js/config.js):
 
 ```js
 siteGrid: {
-  columns: 18,
-  rows: 10,
-  padding: { value: 2.5, unit: 'rem' },  // ≈40px @ 16px root
+  columns: 24,
+  rows: 12,
+  padding: { value: 1.25, unit: 'rem' },  // 20px @ 16px root
   gap:       { value: 1.25, unit: 'rem' },
+  crossStep: 3,
   debug: false,
   regions: { /* base rects — see table below */ },
   regionsByLevel: {
-    2: { inspector: { colStart: 5, colEnd: 15, rowStart: 4, rowEnd: 8 } },
-    3: { inspector: { colStart: 6, colEnd: 14, rowStart: 3, rowEnd: 8 } }
-  }
+    2: { inspector: { colStart: 7, colEnd: 21, rowStart: 5, rowEnd: 10 } },
+    3: { inspector: { colStart: 8, colEnd: 19, rowStart: 4, rowEnd: 10 } }
+  },
+  contentColumns: { 1: 1, 2: 4, 3: 8 },
+  microNoteMinRows: 7
 }
 ```
 
 - **columns / rows** — track counts for cell-size math.
 - **padding / gap** — `{ value, unit }`; `rem` recommended.
+- **crossStep** — grid mark density (every Nth row/column intersection).
 - **regions** — grid-coordinate rectangles (`colEnd` / `rowEnd` exclusive). Derive `--site-layer-{name}-left/top/width/height`.
 - **regionsByLevel** — partial overrides per depth level (merged over `regions` at runtime).
 - **debug** — `true` draws column/row lines plus dashed region outlines (`#site-grid-debug-regions`).
@@ -59,24 +63,26 @@ Tokens are applied at boot and on every depth level change via `applySiteGridTok
 
 | Level | `contentColumns` | Column width | Viewport reference |
 |-------|------------------|--------------|-------------------|
-| L1 macro | `1` | 1 site col | 18 slots |
-| L2 meso | `3` | 3 site cols wide | ~6 cols visible in 18-col viewport |
-| L3 micro | `6` | 6 site cols wide | ~3 cols visible in viewport |
+| L1 macro | `1` | 1 site col | 24 slots |
+| L2 meso | `4` | 4 site cols wide | ~6 cols visible in 24-col viewport |
+| L3 micro | `8` | 8 site cols wide | ~3 cols visible in viewport |
 
 Tokens: `--site-meso-col-width`, `--site-micro-col-width`, `--site-meso-viewport-cols` (reference only).
 
 ## Region map (current)
 
-| Region key | UI | Element | Depth | Token usage |
-|------------|-----|---------|-------|-------------|
-| `nav` | Pan / edge-scroll | `#nav-surface` | All | Full viewport (reference) |
-| `canvas` | Main exploration | `#app` | All | `--scroll-breathing-room`, `--site-canvas-page-padding-x` |
-| `warehouse` | ACTION REPOSITORY | `.warehouse-shell` | All | Default dock `left` / `width` |
-| `blockBar` | Deployed blocks strip | `.depth-block-bar` | L2/L3 | Fixed `left` / `width` / `top` when visible |
-| `inspector` | Focus note card | `.artifact-inspector-panel` | All (L2/L3 overrides) | Panel position and size |
-| `filterFringe` | Filtered notes edge strip | `#filter-fringe-zone` | L2/L3 | `--v2-fringe-width`, top / max-height |
-| `navigationLayers` | Depth layer titles | `#site-navigation-layers` | All | Right strip — `--site-layer-navigationLayers-*` |
-| `navigationMaps` | Active-layer minimap | `#site-navigation-maps` | All | Bottom-right, right of warehouse — 3 cols × 2 rows |
+| Region key | UI | Element | Depth | Grid span (24×12) |
+|------------|-----|---------|-------|---------------------|
+| `nav` | Pan / edge-scroll | `#nav-surface` | All | Full viewport |
+| `canvas` | Main exploration | `#app` | All | rows 1–10 — `--scroll-breathing-room`, `--site-canvas-page-padding-x` |
+| `warehouse` | ACTION REPOSITORY | `.warehouse-shell` | All | rows 11–12 (2 rows) |
+| `warehouseDock` | Action dock | `.warehouse-dock` | All | cols 1–20, rows 11–12 |
+| `warehouseMap` | Minimap panel | `.warehouse-map` | All | cols 21–24, rows 11–12 |
+| `blockBar` | Deployed blocks strip | `.depth-block-bar` | L2/L3 | cols 1–20, row 10 |
+| `inspector` | Focus note card | `.artifact-inspector-panel` | All (L2/L3 overrides) | See `regionsByLevel` |
+| `filterFringe` | Filtered notes edge strip | `#filter-fringe-zone` | L2/L3 | cols 23–24, rows 1–10 |
+| `navigationLayers` | Depth layer titles | `#site-navigation-layers` | All | cols 23–24, rows 1–6 |
+| `navigationMaps` | Active-layer minimap | `#site-navigation-maps` | All | cols 21–24, rows 11–12 (4×2 cells) |
 | `resetButton` | Warehouse RESET (×) | `.warehouse-reset` | All | Fixed anchor when workspace active |
 
 **Deferred:** deployed surface blocks, link canvas, hover ID badge, workspace void, film grain.
@@ -104,4 +110,4 @@ Tokens: `--site-meso-col-width`, `--site-micro-col-width`, `--site-meso-viewport
 ## What stays untouched
 
 - `#app` internal grids, physics, workspace secondary grid — see [`docs/CHECKPOINT.md`](../CHECKPOINT.md).
-- Block drag, pan, scroll clamp logic.
+- Block drag, pan, scroll clamp logic (`CONFIG.navigation.contentPadding` stays ~120px).
