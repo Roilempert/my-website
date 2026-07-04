@@ -8,11 +8,11 @@
     </mask>
   </defs>
   <g class="layer-nav-marker__skeleton" mask="url(#layer-nav-marker-spine-gap)">
-    <path class="layer-nav-marker__part layer-nav-marker__corner layer-nav-marker__corner-top" d="M0,.5c3,0,5,2.5,5,5"/>
-    <line class="layer-nav-marker__part layer-nav-marker__spine" x1="5" y1="5.5" x2="5" y2="97.5" stroke-linecap="square"/>
+    <path class="layer-nav-marker__part layer-nav-marker__corner layer-nav-marker__corner-top" d="M2.12,-.5c1.72,0,2.88,1.44,2.88,2.88"/>
+    <line class="layer-nav-marker__part layer-nav-marker__spine" x1="5" y1="2.38" x2="5" y2="100.62" stroke-linecap="square"/>
     <line class="layer-nav-marker__part layer-nav-marker__cell-border" x1=".5" y1="33.94" x2="5" y2="33.94"/>
     <line class="layer-nav-marker__part layer-nav-marker__cell-border" x1=".5" y1="69.06" x2="5" y2="69.06"/>
-    <path class="layer-nav-marker__part layer-nav-marker__corner layer-nav-marker__corner-bottom" d="M0,102.5c3,0,5-2.5,5-5"/>
+    <path class="layer-nav-marker__part layer-nav-marker__corner layer-nav-marker__corner-bottom" d="M2.12,103.5c1.72,0,2.88-1.44,2.88-2.88"/>
   </g>
   <g class="layer-nav-marker__selection">
     <line class="layer-nav-marker__part layer-nav-marker__cross" x1="8.81" y1="85.83" x2=".81" y2="77.83"/>

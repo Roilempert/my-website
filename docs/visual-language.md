@@ -98,7 +98,7 @@ Four classes replace legacy `--type-*` / ratzif22 / NarkissTam body.
 - **Action dock** (15 cols): separate bg color 6 panel, radius 5px, **left side** of the shell.
   - Inner corner decorations: two marks on the dock right edge, paired with two marks on the map left edge around the dock/map gap
   - Message/statistics inset: top/right 10px → `var(--space-10)`; left/bottom 20px → `var(--space-20)`; message paragraph indent 20px → `var(--space-20)`
-  - Statistics (3 cols): live rows for `בלוקים בשימוש`, `קשרים פעילים`, and `פתקים מחוברים`; category labels stick to the right of the panel, numeric output sticks left on the same line; rows use normal text line-height spacing
+  - Statistics (3 cols): live rows for `בלוקים בשימוש`, `חיבורים פעילים`, and `פתקים מחוברים`; category labels stick to the right of the panel, numeric output sticks left on the same line; rows use normal text line-height spacing; values count up/down live until they reach the current output
   - Message port (0.5×12): `גררו להפעלה` (`.general-t`), middle area next to map; text top-aligned; no extra outer side inset beyond internal padding
   - Block panel (1.5×12): live blocks from sheet (`.general-t`), middle area next to map; content padding is 10px → `var(--space-10)`, including 10px below the separator hairline
 - **Map** (3 cols): separate bg color 6 panel, radius 5px, **right side** of the shell; live minimap with compact details (objects color 3).
@@ -182,6 +182,9 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-04 | Renamed the live connection stat to `חיבורים פעילים` and added animated counting for warehouse statistics values |
+| 2026-07-04 | Pushed the layer navigation marker curved corners outward to slightly overhang the top and bottom label edges |
+| 2026-07-04 | Reduced the layer navigation marker curved corners to match the 6px action dock corner decoration scale |
 | 2026-07-04 | Narrowed `.general-t` letter spacing trial to 5% |
 | 2026-07-04 | Centered the layer navigation marker divider ticks between the layer labels |
 | 2026-07-04 | Matched the layer navigation marker to 1px non-scaling hairlines and centered the `X` more accurately on labels |

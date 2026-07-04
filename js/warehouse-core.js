@@ -34,6 +34,12 @@ const ActionWarehouse = {
     statisticsElement: null,
     messagePortElement: null,
     mapMountElement: null,
+    statisticsRowElements: null,
+    statisticsDisplayValues: new Map(),
+    statisticsTargetValues: new Map(),
+    statisticsAnimationFrame: null,
+    statisticsAnimationStartedAt: 0,
+    statisticsAnimationDurationMs: 520,
 
     init() {
         this.ensurePhysicsMaps();
@@ -1335,7 +1341,7 @@ const ActionWarehouse = {
             ? this.getActiveCaptureBlocks()
             : [];
         const connectedNotes = new Set();
-        let activeConnections = 0;
+        let blockNoteConnections = 0;
 
         if (typeof AppState !== 'undefined' && Array.isArray(AppState.items) && activeBlocks.length) {
             AppState.items.forEach((item, noteIndex) => {
@@ -1346,7 +1352,7 @@ const ActionWarehouse = {
                         (item.authorCode === block.author || item.authorFullName === block.author);
                     if (!matchesTag && !matchesAuthor) return;
 
-                    activeConnections++;
+                    blockNoteConnections++;
                     connectedNotes.add(noteIndex);
                 });
             });
@@ -1354,30 +1360,40 @@ const ActionWarehouse = {
 
         return {
             blocksInUse,
-            activeConnections,
+            blockNoteConnections,
             connectedNotes: connectedNotes.size
         };
+    },
+
+    getStatisticRows(stats) {
+        return [
+            { key: 'blocksInUse', label: 'בלוקים בשימוש', value: stats.blocksInUse },
+            { key: 'blockNoteConnections', label: 'חיבורים פעילים', value: stats.blockNoteConnections },
+            { key: 'connectedNotes', label: 'פתקים מחוברים', value: stats.connectedNotes }
+        ];
     },
 
     formatStatisticValue(value) {
         return Number(value || 0).toLocaleString('he-IL');
     },
 
-    renderWarehouseStatistics() {
+    ensureWarehouseStatisticsRows(rows) {
         if (!this.statisticsElement) return;
 
-        const stats = this.getLiveStatistics();
-        const rows = [
-            { label: 'בלוקים בשימוש', value: stats.blocksInUse },
-            { label: 'קשרים פעילים', value: stats.activeConnections },
-            { label: 'פתקים מחוברים', value: stats.connectedNotes }
-        ];
+        const existingKeys = this.statisticsRowElements
+            ? [...this.statisticsRowElements.keys()].join('|')
+            : '';
+        const nextKeys = rows.map(row => row.key).join('|');
+        if (existingKeys === nextKeys) return;
+
         const list = document.createElement('dl');
         list.className = 'warehouse-statistics__list';
+        this.statisticsRowElements = new Map();
 
         rows.forEach(row => {
             const item = document.createElement('div');
             item.className = 'warehouse-statistics__row';
+            item.dataset.statistic = row.key;
 
             const label = document.createElement('dt');
             label.className = 'warehouse-statistics__label';
@@ -1385,13 +1401,87 @@ const ActionWarehouse = {
 
             const value = document.createElement('dd');
             value.className = 'warehouse-statistics__value';
-            value.textContent = this.formatStatisticValue(row.value);
+            value.textContent = this.formatStatisticValue(this.statisticsDisplayValues.get(row.key) ?? row.value);
 
             item.append(label, value);
             list.appendChild(item);
+            this.statisticsRowElements.set(row.key, { item, label, value });
         });
 
         this.statisticsElement.replaceChildren(list);
+    },
+
+    updateStatisticDisplayValues(rows, now = performance.now()) {
+        let shouldAnimate = false;
+        rows.forEach(row => {
+            const target = Number(row.value || 0);
+            const previousTarget = this.statisticsTargetValues.get(row.key);
+            if (previousTarget === target) return;
+
+            this.statisticsTargetValues.set(row.key, target);
+            if (!this.statisticsDisplayValues.has(row.key)) {
+                this.statisticsDisplayValues.set(row.key, target);
+                return;
+            }
+
+            shouldAnimate = true;
+        });
+
+        if (!shouldAnimate) {
+            this.paintStatisticValues();
+            return;
+        }
+
+        this.statisticsAnimationStartedAt = now;
+        if (!this.statisticsAnimationFrame) {
+            this.statisticsAnimationFrame = requestAnimationFrame((timestamp) => {
+                this.tickStatisticAnimation(timestamp);
+            });
+        }
+    },
+
+    tickStatisticAnimation(timestamp) {
+        const elapsed = Math.max(0, timestamp - this.statisticsAnimationStartedAt);
+        const progress = Math.min(1, elapsed / this.statisticsAnimationDurationMs);
+        const eased = 1 - Math.pow(1 - progress, 3);
+        let animating = false;
+
+        this.statisticsTargetValues.forEach((target, key) => {
+            const current = Number(this.statisticsDisplayValues.get(key) || 0);
+            const next = current + (target - current) * eased;
+            const close = Math.abs(target - next) < 0.5 || progress >= 1;
+
+            this.statisticsDisplayValues.set(key, close ? target : next);
+            if (!close) animating = true;
+        });
+
+        this.paintStatisticValues();
+
+        if (animating) {
+            this.statisticsAnimationFrame = requestAnimationFrame((nextTimestamp) => {
+                this.tickStatisticAnimation(nextTimestamp);
+            });
+        } else {
+            this.statisticsAnimationFrame = null;
+        }
+    },
+
+    paintStatisticValues() {
+        if (!this.statisticsRowElements) return;
+
+        this.statisticsRowElements.forEach((elements, key) => {
+            const value = this.statisticsDisplayValues.get(key) ?? this.statisticsTargetValues.get(key) ?? 0;
+            elements.value.textContent = this.formatStatisticValue(Math.round(value));
+        });
+    },
+
+    renderWarehouseStatistics() {
+        if (!this.statisticsElement) return;
+
+        const stats = this.getLiveStatistics();
+        const rows = this.getStatisticRows(stats);
+        this.ensureWarehouseStatisticsRows(rows);
+        this.updateStatisticDisplayValues(rows);
     },
 
     // Gray out docked tag/author pills when the workspace capture limit is reached

@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-04
 
-**Status:** open
+**Status:** good reference saved after layer-marker refinement
 
 ---
 
@@ -39,24 +39,26 @@ Use Playwright MCP whenever possible for visual verification.
 - Labels: `מאקרו`, `מזו`, `מיקרו`.
 - Active label: color 3 fill, color 6 text.
 - Inactive labels: color 6 fill, color 3 text.
-- Label type: `.general-h` / nav token at `4.375rem` = 70px on the 16px root.
-- Line height: derived from the 3-row stack formula; latest measured value was about `62.67px`.
+- Label type: `.general-h` / nav token at `3.625rem` = 58px on the 16px root.
+- Line height: derived from the 2.5-row stack formula.
 - Padding: `var(--space-10)` = 10px.
 - Radius: `var(--space-5)` = 5px.
-- Full three-label stack: `3 * var(--site-grid-cell-h)`, with two `var(--space-5)` gaps included.
+- Full three-label stack: `2.5 * var(--site-grid-cell-h)`, with two `var(--space-5)` gaps included.
 - Active label placement: aligns to the 75% vertical guide of shell row 4.
 - Active label column: back in the original right-aligned column, no permanent offset.
 - Inactive hover only: label shifts left by `var(--space-20)` = 20px.
 - Active hover: no shift.
-- Selection marker SVG: `assets/ui/layer-nav-marker.svg`, mounted as `.site-navigation-layers__marker`, on the right side of the active label.
+- Selection marker SVG: `assets/ui/layer-nav-marker.svg`, mounted once as `.site-navigation-layers__marker` on the layer panel, on the right side of the full stack.
+- Marker skeleton: fixed curved vertical skeleton, 1px non-scaling hairline, two centered divider ticks, 6px curved corners overhanging the top/bottom label edges by about 1px.
+- Marker selection: only the `X` moves; the vertical spine gap is a transparent SVG mask moving with the `X`, so content behind the gap remains visible.
 
 Key CSS variables in `styles.css`:
 
 ```
---type-nav-size: 4.375rem;
+--type-nav-size: 3.625rem;
 --layer-nav-box-pad: var(--space-10);
 --layer-nav-hover-shift: calc(-1 * var(--space-20));
---layer-nav-stack-h: calc(3 * var(--site-grid-cell-h));
+--layer-nav-stack-h: calc(2.5 * var(--site-grid-cell-h));
 --layer-nav-row-gap: var(--space-5);
 --layer-nav-label-h: calc((var(--layer-nav-stack-h) - 2 * var(--layer-nav-row-gap)) / 3);
 --layer-nav-line-h: calc(var(--layer-nav-label-h) - var(--layer-nav-box-pad) * 2);
@@ -66,8 +68,8 @@ Key CSS variables in `styles.css`:
 Runtime token source in `js/config.js`:
 
 ```
-TYPE_SCALE.generalH.sizePt = 70
-TYPE_SCALE.nav.sizeRem = 4.375
+TYPE_SCALE.generalH.sizePt = 58
+TYPE_SCALE.nav.sizeRem = 3.625
 ```
 
 If `js/config.js` changes, run:
@@ -176,7 +178,7 @@ Current locked layer-navigation state:
 - Active label is back in the original right-aligned column.
 - Inactive hover only shifts left by `var(--space-20)` = 20px.
 - Active hover does not shift.
-- Marker SVG: `assets/ui/layer-nav-marker.svg`, mounted on the right side of the active label.
+- Marker SVG: `assets/ui/layer-nav-marker.svg`, mounted on the layer panel as a fixed skeleton on the right side of the stack.
 
 Workflow:
 
@@ -212,3 +214,13 @@ Latest verified state before this handoff:
 - Active label returned to original column after a temporary 20px active offset experiment.
 - Inactive hover remains a 20px left movement.
 - `ReadLints` was clear after the latest layer-nav edit.
+
+Latest good reference after commit `4c4818c` follow-up refinements:
+
+- Marker parent: `.site-navigation-layers`.
+- Marker corner size: about `6.01px × 6.01px`, matching `decoration-corner-tr.svg`.
+- Corner overhang: top about `1.025px`, bottom about `1.017px`.
+- Divider ticks: centered between label gaps with measured deltas about `0.016px` and `-0.024px`.
+- `X` center: verified within a fraction of a pixel on all rows after settle.
+- Spine gap: implemented with SVG mask `#layer-nav-marker-spine-gap`; no visible background-colored gap stroke.
+- Inactive hover remains matrix x = `-20`; active hover remains `none`.
