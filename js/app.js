@@ -11604,24 +11604,48 @@ const ArtifactInspector = {
         flyerNote.style.width = `${slot.width}px`;
     },
 
-    _syncFlyerCardSlot() {
-        const slot = this.flyer?.querySelector('.artifact-inspector-focus__card-slot');
-        if (!slot || !this._openFirstCard) return;
-        slot.style.height = `${this._openFirstCard.height * (8 / 6)}px`;
-    },
+    _handoffFocusToPanel() {
+        const flyerScaler = this.flyer?.querySelector('.artifact-inspector-focus__card-scaler');
+        const flyerTags = this.flyer?.querySelector('.micro-mock__tags');
+        const flyingCard = flyerScaler?.querySelector('.micro-mock__card.note-card');
+        const panelFocus = this.panel?.querySelector('.artifact-inspector-focus');
+        const panelNote = panelFocus?.querySelector('.artifact-inspector-focus__note');
+        const panelScaler = panelFocus?.querySelector('.artifact-inspector-focus__card-scaler');
 
-    _syncPanelSpacer() {
-        const flyerNote = this.flyer?.querySelector('.artifact-inspector-flyer__note');
-        const tags = this.flyer?.querySelector('.micro-mock__tags');
-        const spacer = this.panel?.querySelector('.artifact-inspector-focus-spacer');
-        if (!flyerNote || !spacer || !this._openFirstCard) return;
+        if (!flyingCard || !panelScaler || !panelFocus || !this._openFirstCard) {
+            if (this.flyer) {
+                this.flyer.innerHTML = '';
+                this.flyer.classList.remove('is-preparing', 'is-opening', 'is-landed');
+                this.flyer.setAttribute('aria-hidden', 'true');
+            }
+            return;
+        }
 
-        const visualH = this._openFirstCard.height * (8 / 6);
-        const gap = parseFloat(getComputedStyle(flyerNote).rowGap
-            || getComputedStyle(flyerNote).gap) || 0;
-        const tagsH = tags?.offsetHeight || 0;
-        const tagsBlock = tags ? gap + tagsH : 0;
-        spacer.style.height = `${visualH + tagsBlock + 40}px`;
+        const focusScale = 8 / 6;
+        const baseW = `${this._openFirstCard.width}px`;
+        const panelSlot = panelFocus.querySelector('.artifact-inspector-focus__card-slot');
+
+        flyingCard.style.width = baseW;
+        flyingCard.style.maxWidth = baseW;
+        flyingCard.style.boxSizing = 'border-box';
+
+        panelScaler.style.width = baseW;
+        panelScaler.style.transformOrigin = 'top center';
+        panelScaler.style.transform = `scale(${focusScale})`;
+        panelScaler.style.removeProperty('transition');
+
+        if (panelSlot) {
+            panelSlot.style.height = `${this._openFirstCard.height * focusScale}px`;
+        }
+
+        panelScaler.appendChild(flyingCard);
+        if (flyerTags && panelNote) panelNote.appendChild(flyerTags);
+
+        if (this.flyer) {
+            this.flyer.innerHTML = '';
+            this.flyer.classList.remove('is-preparing', 'is-opening', 'is-landed');
+            this.flyer.setAttribute('aria-hidden', 'true');
+        }
     },
 
     _runFocusOpenAnimation() {
@@ -11703,11 +11727,7 @@ const ArtifactInspector = {
             if (!skipMotion) flyerScaler.offsetHeight;
         }
 
-        this.flyer?.classList.remove('is-preparing', 'is-opening');
-        this.flyer?.classList.add('is-landed');
-
-        this._syncFlyerCardSlot();
-        this._syncPanelSpacer();
+        this._handoffFocusToPanel();
 
         this.panel?.classList.remove('is-opening');
         this.backdrop?.classList.remove('is-opening');
@@ -11731,7 +11751,13 @@ const ArtifactInspector = {
         const metaHtml = this.buildMetadataHTML(item);
         const relatedHtml = this.buildRelatedNotesHTML(item);
         return `
-            <div class="artifact-inspector-focus-spacer" aria-hidden="true"></div>
+            <div class="artifact-inspector-focus">
+                <div class="micro-mock__note artifact-inspector-focus__note">
+                    <div class="artifact-inspector-focus__card-slot">
+                        <div class="artifact-inspector-focus__card-scaler"></div>
+                    </div>
+                </div>
+            </div>
             ${metaHtml}
             ${relatedHtml}
         `;
@@ -11843,8 +11869,10 @@ const ArtifactInspector = {
     },
 
     _restoreSourceCard(noteId) {
+        const panelScaler = this.panel?.querySelector('.artifact-inspector-focus__card-scaler');
         const flyerScaler = this.flyer?.querySelector('.artifact-inspector-focus__card-scaler');
-        const card = flyerScaler?.querySelector('.micro-mock__card.note-card');
+        const card = panelScaler?.querySelector('.micro-mock__card.note-card')
+            || flyerScaler?.querySelector('.micro-mock__card.note-card');
         if (!card || !noteId) return;
 
         card.classList.remove('micro-mock__card--focus');
