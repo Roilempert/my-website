@@ -43,7 +43,7 @@ siteGrid: {
     2: { inspector: { colStart: 7, colEnd: 21, rowStart: 5, rowEnd: 10 } },
     3: { inspector: { colStart: 8, colEnd: 19, rowStart: 4, rowEnd: 10 } }
   },
-  contentColumns: { 1: 1, 2: 4, 3: 8 },
+  contentColumns: { 1: 1, 2: 4, 3: 6 },
   microNoteMinRows: 7
 }
 ```
@@ -65,7 +65,7 @@ Tokens are applied at boot and on every depth level change via `applySiteGridTok
 |-------|------------------|--------------|-------------------|
 | L1 macro | `1` | 1 site col | 24 slots |
 | L2 meso | `4` | 4 site cols wide | ~6 cols visible in 24-col viewport |
-| L3 micro | `8` | 8 site cols wide | ~3 cols visible in viewport |
+| L3 micro | `6` | 6 site cols wide | ~4 cols visible in viewport |
 
 Tokens: `--site-meso-col-width`, `--site-micro-col-width`, `--site-meso-viewport-cols` (reference only).
 

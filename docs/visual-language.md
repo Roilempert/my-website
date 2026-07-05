@@ -162,6 +162,7 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 
 | Property | Value |
 |----------|--------|
+| Column width | **6 site cols** (`contentColumns[3]`) — ~**4 cards** across viewport |
 | Column gap | 40px → `2.5rem` |
 | Min height | 7 site rows |
 | Card bg / text | color 1 / color 4 |
@@ -192,6 +193,7 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 - Popup scrollport spans the full viewport height; focused/related content can scroll to the top and bottom viewport edges
 - Focused note starts at the beginning of shell row 2 when the popup opens
 - Metadata panel below (40px gap): bg color 3, text color 4, radius 5px
+- **Metadata fields:** author shows **Author Code** in uppercase (e.g. `MFR`); typology shows Hebrew label from `CONFIG.data.typologyLabels` (e.g. `רשימה` for `List`)
 - **Related notes:** one section per tag subset of focus note that **exists on at least one other note**; omit unused combinations; 2 notes per row, 40px gap
 
 ---
@@ -214,6 +216,8 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-05 | L3 note column width **8 → 6 site cols** — ~4 cards across viewport (was ~3) |
+| 2026-07-05 | Focus metadata: author code uppercase (`MFR`); typology field Hebrew via `typologyLabels` |
 | 2026-07-05 | Site shell grid 18×10 → **24×12**; warehouse **2 rows** (rows 11–12); dock/map **20+4 cols**; statistics **4 cols**; contentColumns L2/L3 **4/8**; grid marks every 3rd line; L3 min height **7 rows** |
 | 2026-07-04 | English-only notes auto-detect to LTR (optional sheet override); mirrored card padding, ID lane, and L2 silhouette alignment |
 | 2026-07-04 | Freed layer nav label box height from fixed shell slots; padding now grows the binding box |

@@ -60,11 +60,11 @@ const CONFIG = {
             3: { inspector: { colStart: 8, colEnd: 19, rowStart: 4, rowEnd: 10 } }
         },
         // Site columns each content column spans (width reference only — not total column count)
-        contentColumns: { 1: 1, 2: 4, 3: 8 },
+        contentColumns: { 1: 1, 2: 4, 3: 6 },
         contentColumnScale: { 3: 1.0 },
         contentGapScale: 0.88,
         microNoteMinRows: 7,
-        macroCanvasScrollFactor: 1.5
+        macroCanvasScrollFactor: 2
     },
 
     /* --- Data Sources (local CSV in data/; remote Google Sheets as fallback) --- */
@@ -471,7 +471,7 @@ const CONFIG = {
         macroFocusDetailsWhenBlocks: true,
         macroFocusConnectors: false,
         macroBlockMarkers: true,
-        macroDotRadius: 1.15,
+        macroDotRadius: 1.265,
         macroDotFill: 'rgba(45, 45, 45, 0.45)',
         macroDotMutedFill: 'rgba(45, 45, 45, 0.14)',
         mesoMapDetailed: true,
@@ -510,8 +510,8 @@ const CONFIG = {
         sharedReferenceScale: true,
         /* Fixed viewport marker UI size; map scale follows the visible map viewport */
         viewportMarkerMode: 'fixed',
-        viewportMarkerWidthRatio: 0.72,
-        viewportMarkerHeightRatio: 0.4,
+        viewportMarkerWidthRatio: 0.792,
+        viewportMarkerHeightRatio: 0.44,
         /* Per-layer glyph size on the shared frame (not map scale) */
         levelGlyphScale: { 1: 0.78, 2: 0.72, 3: 1 },
         microMapCardInsetPx: 1.6,
@@ -1113,38 +1113,43 @@ function applySiteGridContentScale(root = document.documentElement) {
     );
 }
 
-/** Map note index → centered slot in the macro shell grid (2D spread, not top-heavy). */
+/** Minimum rows at full canvas width; require more columns than rows. */
+function computeMacroGridRowCount(total, placementCols) {
+    const minRows = Math.max(1, Math.ceil(total / placementCols));
+    for (let rows = 1; rows <= minRows; rows++) {
+        const colsInUse = Math.min(placementCols, Math.ceil(total / rows));
+        if (colsInUse > rows) return rows;
+    }
+    return minRows;
+}
+
+/** Map note index → centered slot in the macro shell grid (wide field). */
 function computeMacroGridSlot(index, total, placementCols, maxPlacementRows, colStep, rowStep) {
-    const minColsPerRow = Math.max(1, Math.ceil(placementCols / maxPlacementRows));
-    const rowsUsed = Math.min(
-        maxPlacementRows,
-        Math.max(1, Math.ceil(total / minColsPerRow))
-    );
-    const packInBand = Math.min(total, rowsUsed * placementCols);
+    let rowsUsed = computeMacroGridRowCount(total, placementCols);
+    if (rowsUsed * placementCols < total) {
+        rowsUsed = Math.ceil(total / placementCols);
+    }
 
     const toGrid = (colSlot, rowSlot) => ({
         gridColumn: `${colSlot * colStep + 1} / span ${colStep}`,
         gridRow: `${rowSlot * rowStep + 1} / span ${rowStep}`
     });
 
-    if (index < packInBand) {
-        const base = Math.floor(packInBand / rowsUsed);
-        const extra = packInBand % rowsUsed;
-        let rem = index;
-        for (let rowSlot = 0; rowSlot < rowsUsed; rowSlot++) {
-            const count = base + (rowSlot < extra ? 1 : 0);
-            if (rem < count) {
-                const colOffset = Math.floor((placementCols - count) / 2);
-                return toGrid(colOffset + rem, rowSlot);
-            }
-            rem -= count;
+    const base = Math.floor(total / rowsUsed);
+    const extra = total % rowsUsed;
+    let rem = index;
+    for (let rowSlot = 0; rowSlot < rowsUsed; rowSlot++) {
+        const count = base + (rowSlot < extra ? 1 : 0);
+        if (rem < count) {
+            const colOffset = Math.floor((placementCols - count) / 2);
+            return toGrid(colOffset + rem, rowSlot);
         }
+        rem -= count;
     }
 
-    const overflowIndex = index - packInBand;
-    const overflowRowSlot = rowsUsed + Math.floor(overflowIndex / placementCols);
-    const colSlot = overflowIndex % placementCols;
-    return toGrid(colSlot, overflowRowSlot);
+    const colSlot = index % placementCols;
+    const rowSlot = rowsUsed + Math.floor(index / placementCols);
+    return toGrid(colSlot, rowSlot);
 }
 
 function siteGridRegionRect(placement) {

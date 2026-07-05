@@ -19,6 +19,7 @@
     --space-40: 2.5rem;
     --space-60: 3.75rem;
     --divider-inset: var(--space-20);
+    --note-id-lane: var(--site-grid-cell-w); /* inner padding beside vertical ID; ID stays at --space-10 */
 
     /* Legacy aliases → exhibition tokens */
     --bg-main: var(--color-5);
@@ -1165,7 +1166,7 @@ body.view-level-3 .layer-dot {
 
 .note-card {
     background-color: var(--color-1);
-    padding: 1rem 1rem 1.5rem 2rem;
+    padding: 1rem 1rem 1.5rem var(--note-id-lane);
     display: flex;
     flex-direction: column;
     position: relative;
@@ -1182,7 +1183,7 @@ body.view-level-3 .layer-dot {
 /* English-only notes — LTR content inside Hebrew RTL site shell */
 .note-wrapper.is-note-ltr .note-card {
     direction: ltr;
-    padding: 1rem 2rem 1.5rem 1rem;
+    padding: 1rem var(--note-id-lane) 1.5rem 1rem;
 }
 
 .note-wrapper.is-note-ltr .note-idcode {
@@ -1208,7 +1209,7 @@ body.is-depth-v2.view-level-3 .note-wrapper.is-note-ltr .micro-mock__card.note-c
     direction: ltr;
     padding:
         calc(var(--site-grid-gap, 1.25rem) * 0.75 + var(--space-5))
-        6.25rem
+        var(--note-id-lane)
         var(--site-grid-gap, 1.25rem)
         var(--site-grid-gap, 1.25rem);
 }
@@ -1297,8 +1298,8 @@ body.is-depth-v2.view-level-3 .note-wrapper.is-note-ltr .micro-mock__card .note-
     --inspector-card-width: min(
         92vw,
         calc(
-            (100vw - 2 * var(--v2-meso-page-padding-x, 2.25rem) - (var(--v2-micro-viewport-cols, 3) - 1) * var(--v2-col-gap, 12px))
-            / var(--v2-micro-viewport-cols, 3)
+            (100vw - 2 * var(--v2-meso-page-padding-x, 2.25rem) - (var(--v2-micro-viewport-cols, 4) - 1) * var(--v2-col-gap, 12px))
+            / var(--v2-micro-viewport-cols, 4)
         )
     );
     width: var(--inspector-card-width);
@@ -1441,7 +1442,7 @@ body.site-grid .artifact-inspector-panel.is-open {
         calc(var(--site-grid-gap, 1.25rem) * 0.75 + var(--space-5))
         var(--site-grid-gap, 1.25rem)
         var(--site-grid-gap, 1.25rem)
-        6.25rem;
+        var(--note-id-lane);
 }
 
 .artifact-inspector-panel .note-idcode,
@@ -3041,8 +3042,8 @@ body.is-depth-v2.view-level-3 #app {
 
 body.is-depth-v2.view-level-3 #app.is-micro-grid-layout {
     --v2-micro-col-width: calc(
-        (100vw - 2 * var(--v2-meso-page-padding-x) - (var(--v2-micro-viewport-cols, 3) - 1) * var(--v2-col-gap))
-        / var(--v2-micro-viewport-cols, 3)
+        (100vw - 2 * var(--v2-meso-page-padding-x) - (var(--v2-micro-viewport-cols, 4) - 1) * var(--v2-col-gap))
+        / var(--v2-micro-viewport-cols, 4)
     );
     display: flex !important;
     flex-direction: row;
@@ -3664,7 +3665,7 @@ body.is-depth-v2.view-level-3 .micro-mock__card.note-card {
         calc(var(--site-grid-gap, 1.25rem) * 0.75 + var(--space-5))
         var(--site-grid-gap, 1.25rem)
         var(--site-grid-gap, 1.25rem)
-        6.25rem;
+        var(--note-id-lane);
     pointer-events: none;
     border: none;
     border-radius: var(--space-5);

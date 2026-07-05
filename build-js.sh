@@ -5,6 +5,7 @@ cd "$(dirname "$0")/js"
 # config.js loads separately from index.html — edit it, then refresh (no build needed)
 cat \
   idle-refresh.js \
+  text-direction.js \
   app-state.js \
   meso-gradient-visual-preset.js \
   meso-gradient-sdf-preset.js \

@@ -89,10 +89,14 @@ const ArtifactInspector = {
     },
 
     buildMetadataHTML(item) {
-        const author = item.authorFullName || item.authorCode || '—';
+        const author = item.authorCode
+            ? String(item.authorCode).trim().toUpperCase()
+            : (item.authorFullName || '—');
         const date = item.dateWritten || '—';
         const serial = item.id || '—';
-        const typology = item.typology || '—';
+        const typology = typeof getTypologyLabel === 'function'
+            ? (getTypologyLabel(item.typology) || item.typology || '—')
+            : (item.typology || '—');
         const tags = (item.tags || []).map(t => t.name).join('، ');
         return `
             <section class="artifact-inspector-metadata">

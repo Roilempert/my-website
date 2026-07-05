@@ -32,6 +32,51 @@ const IdleRefresh = {
 };
 
 /* ==========================================================================
+   Text direction — Latin-script LTR vs Hebrew/Arabic RTL note content
+   ========================================================================== */
+const TextDirection = {
+    RTL_SCRIPT_RE: /[\u0590-\u05FF\uFB1D-\uFB4F\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF]/,
+    LATIN_SCRIPT_RE: /\p{Script=Latin}/u,
+
+    LTR_OVERRIDE_RE: /^(ltr|left|en|english|fr|french|français|es|spanish|español|de|german|deutsch|it|italian|italiano|pt|portuguese|português|nl|dutch|pl|polish|sv|swedish|da|danish|no|norwegian|fi|finnish|cs|czech|ro|romanian|hu|hungarian|tr|turkish|ca|catalan|eu|basque|gl|galician|is|icelandic|la|latin)$/,
+
+    RTL_OVERRIDE_RE: /^(rtl|right|he|hebrew|ar|arabic)$/,
+
+    normalizeOverride(raw) {
+        const v = String(raw || '').trim().toLowerCase();
+        if (!v) return null;
+        if (this.LTR_OVERRIDE_RE.test(v)) return 'ltr';
+        if (this.RTL_OVERRIDE_RE.test(v)) return 'rtl';
+        return null;
+    },
+
+    detectFromText(title, body) {
+        const text = `${String(title || '')}\n${String(body || '')}`.trim();
+        if (!text) return 'rtl';
+        if (this.RTL_SCRIPT_RE.test(text)) return 'rtl';
+        if (this.LATIN_SCRIPT_RE.test(text)) return 'ltr';
+        return 'rtl';
+    },
+
+    resolve(title, body, overrideRaw) {
+        const override = this.normalizeOverride(overrideRaw);
+        if (override) return override;
+        return this.detectFromText(title, body);
+    },
+
+    applyToWrapper(wrapper, direction) {
+        if (!wrapper) return;
+        const dir = direction === 'ltr' ? 'ltr' : 'rtl';
+        wrapper.dataset.textDirection = dir;
+        wrapper.classList.toggle('is-note-ltr', dir === 'ltr');
+        wrapper.classList.toggle('is-note-rtl', dir === 'rtl');
+
+        wrapper.querySelectorAll('.note-card').forEach(card => {
+            card.setAttribute('dir', dir);
+        });
+    }
+};
+/* ==========================================================================
    02. DATA PIPELINE & STATE MANAGER
    ========================================================================== */
 const AppState = {
@@ -6133,6 +6178,67 @@ const DepthV2 = {
         return { layout, hidden };
     },
 
+    resolveLayoutItem(wrapper) {
+        const noteId = wrapper?.dataset?.noteId;
+        if (!noteId || typeof AppState === 'undefined') return null;
+        return AppState.items.find(i => String(i.id) === String(noteId)) ?? null;
+    },
+
+    estimateWrapperLayoutWeight(wrapper, level = 3) {
+        const item = this.resolveLayoutItem(wrapper);
+
+        if (level === 2 && typeof MesoMock !== 'undefined' && item) {
+            try {
+                const profile = MesoMock.buildProfile(item, wrapper);
+                const rowSpan = Math.max(1, profile.rowSpan || 1);
+                const lineCount = profile.lines?.length || 1;
+                return rowSpan * 10000 + lineCount * 120;
+            } catch (_) {
+                /* fall through to text estimate */
+            }
+        }
+
+        if (item) {
+            const title = String(item.title || '');
+            const body = String(item.body || '');
+            const titleChars = Array.from(title).length;
+            const bodyChars = Array.from(body).length;
+            const titleLines = Math.max(0, Math.ceil(titleChars / 24));
+            const bodyLines = Math.max(1, Math.ceil(bodyChars / 38));
+            const tagBonus = (item.tags?.length || 0) * 90;
+            const typologyBonus = item.typology ? 60 : 0;
+            const lineWeight = titleLines * 150 + bodyLines * 95;
+            const minBlock = level === 3 ? 720 : 480;
+            return Math.max(minBlock, lineWeight + tagBonus + typologyBonus);
+        }
+
+        return level === 3 ? 720 : 480;
+    },
+
+    /** Balance column stacks by estimated note height (LPT → shortest column). */
+    partitionWrappersIntoColumns(wrappers, colCount, level = 3) {
+        const buckets = Array.from({ length: colCount }, () => ({
+            weight: 0,
+            wrappers: []
+        }));
+
+        const ranked = wrappers.map((wrapper) => ({
+            wrapper,
+            weight: this.estimateWrapperLayoutWeight(wrapper, level)
+        })).sort((a, b) => b.weight - a.weight);
+
+        ranked.forEach(({ wrapper, weight }) => {
+            let target = 0;
+            for (let col = 1; col < colCount; col++) {
+                if (buckets[col].weight < buckets[target].weight) target = col;
+            }
+            buckets[target].wrappers.push(wrapper);
+            buckets[target].weight += weight;
+        });
+
+        return buckets.map((bucket) => bucket.wrappers);
+    },
+
     stashHiddenWrappers(app, hidden) {
         hidden.forEach(wrapper => {
             wrapper.classList.add('is-layout-excluded');
@@ -6357,20 +6463,15 @@ const DepthV2 = {
             return col;
         });
 
-        sorted.forEach((wrapper, index) => {
-            wrapper.classList.remove('is-layout-excluded');
-            wrapper.style.minHeight = '';
-            const stage = wrapper.querySelector('.note-stage');
-            if (stage) stage.style.minHeight = '';
-
-            const noteIndex = typeof MesoSpatialLayout !== 'undefined'
-                ? MesoSpatialLayout.getNoteIndex(wrapper)
-                : index;
-            const rank = ranks?.get(noteIndex);
-            const col = rank != null && Number.isFinite(rank)
-                ? ((rank % colCount) + colCount) % colCount
-                : index % colCount;
-            columns[col].appendChild(wrapper);
+        const columnGroups = this.partitionWrappersIntoColumns(sorted, colCount, 2);
+        columnGroups.forEach((group, colIndex) => {
+            group.forEach((wrapper) => {
+                wrapper.classList.remove('is-layout-excluded');
+                wrapper.style.minHeight = '';
+                const stage = wrapper.querySelector('.note-stage');
+                if (stage) stage.style.minHeight = '';
+                columns[colIndex].appendChild(wrapper);
+            });
         });
 
         columns.forEach(col => app.appendChild(col));
@@ -6411,30 +6512,33 @@ const DepthV2 = {
             return col;
         });
 
-        layout.forEach((wrapper, index) => {
-            wrapper.classList.remove('is-layout-excluded', 'is-catalog-anchored', 'is-meso-anchored', 'is-centered');
-            wrapper.style.removeProperty('--meso-mock-row-span');
-            wrapper.style.removeProperty('--micro-mock-row-span');
-            wrapper.style.gridColumn = '';
-            wrapper.style.gridRow = '';
-            wrapper.style.marginTop = '';
-            wrapper.style.minHeight = '';
-            wrapper.style.left = '';
-            wrapper.style.top = '';
-            wrapper.style.transform = '';
-            wrapper.style.removeProperty('--meso-frame-w');
-            wrapper.style.removeProperty('--meso-frame-h');
-            delete wrapper.dataset.mesoFrameReady;
-            const stage = wrapper.querySelector('.note-stage');
-            if (stage) {
-                stage.style.minHeight = '';
-                stage.style.transform = '';
-                stage.style.width = '';
-                stage.style.maxWidth = '';
-                stage.style.display = '';
-                delete stage.dataset.layoutAnchor;
-            }
-            columns[index % colCount].appendChild(wrapper);
+        const columnGroups = this.partitionWrappersIntoColumns(layout, colCount, 3);
+        columnGroups.forEach((group, colIndex) => {
+            group.forEach((wrapper) => {
+                wrapper.classList.remove('is-layout-excluded', 'is-catalog-anchored', 'is-meso-anchored', 'is-centered');
+                wrapper.style.removeProperty('--meso-mock-row-span');
+                wrapper.style.removeProperty('--micro-mock-row-span');
+                wrapper.style.gridColumn = '';
+                wrapper.style.gridRow = '';
+                wrapper.style.marginTop = '';
+                wrapper.style.minHeight = '';
+                wrapper.style.left = '';
+                wrapper.style.top = '';
+                wrapper.style.transform = '';
+                wrapper.style.removeProperty('--meso-frame-w');
+                wrapper.style.removeProperty('--meso-frame-h');
+                delete wrapper.dataset.mesoFrameReady;
+                const stage = wrapper.querySelector('.note-stage');
+                if (stage) {
+                    stage.style.minHeight = '';
+                    stage.style.transform = '';
+                    stage.style.width = '';
+                    stage.style.maxWidth = '';
+                    stage.style.display = '';
+                    delete stage.dataset.layoutAnchor;
+                }
+                columns[colIndex].appendChild(wrapper);
+            });
         });
 
         columns.forEach(col => app.appendChild(col));
@@ -11320,10 +11424,14 @@ const ArtifactInspector = {
     },
 
     buildMetadataHTML(item) {
-        const author = item.authorFullName || item.authorCode || '—';
+        const author = item.authorCode
+            ? String(item.authorCode).trim().toUpperCase()
+            : (item.authorFullName || '—');
         const date = item.dateWritten || '—';
         const serial = item.id || '—';
-        const typology = item.typology || '—';
+        const typology = typeof getTypologyLabel === 'function'
+            ? (getTypologyLabel(item.typology) || item.typology || '—')
+            : (item.typology || '—');
         const tags = (item.tags || []).map(t => t.name).join('، ');
         return `
             <section class="artifact-inspector-metadata">
