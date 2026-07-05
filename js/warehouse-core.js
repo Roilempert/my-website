@@ -37,6 +37,12 @@ const ActionWarehouse = {
 
     statisticsElement: null,
     messagePortElement: null,
+    hoverPortElement: null,
+    defaultMessageText: '',
+    moleculeHoverMessageActive: false,
+    hoverTypewriterTimer: null,
+    hoverTypewriterGeneration: 0,
+    hoverTypewriterNoteIndex: -1,
     mapMountElement: null,
     statisticsRowElements: null,
     statisticsDisplayValues: new Map(),
@@ -52,6 +58,7 @@ const ActionWarehouse = {
         this.refreshDisplayTokens();
 
         const messageText = dockCfg?.messageText || 'גררו להפעלה';
+        this.defaultMessageText = messageText;
         this.shellElement = document.createElement('div');
         this.shellElement.classList.add('warehouse-shell');
         this.shellElement.dataset.siteLayer = 'warehouse';
@@ -79,7 +86,11 @@ const ActionWarehouse = {
                         <span class="warehouse-panel-corner warehouse-panel-corner--br"></span>
                     </div>
                     <div class="warehouse-statistics general-t" aria-live="polite"></div>
-                    <div class="warehouse-message-port general-t">${messageText}</div>
+                    <div class="warehouse-message-band">
+                        <div class="warehouse-hover-port general-t" aria-live="polite"></div>
+                        <div class="warehouse-message-band__divider" aria-hidden="true"></div>
+                        <div class="warehouse-message-port general-t">${messageText}</div>
+                    </div>
                     <div class="action-warehouse">
                         <div class="warehouse-tray-layout">
                             <div class="warehouse-tray-section warehouse-tray-section--frames"></div>
@@ -101,6 +112,7 @@ const ActionWarehouse = {
         this.dockElement = this.shellElement.querySelector('.action-warehouse');
         this.depthBlockBarElement = this.shellElement.querySelector('.depth-block-bar');
         this.statisticsElement = this.shellElement.querySelector('.warehouse-statistics');
+        this.hoverPortElement = this.shellElement.querySelector('.warehouse-hover-port');
         this.messagePortElement = this.shellElement.querySelector('.warehouse-message-port');
         this.mapMountElement = this.shellElement.querySelector('#warehouse-map-mount');
         if (this.depthBlockBarElement) {
@@ -119,6 +131,57 @@ const ActionWarehouse = {
         this.resizeObserver.observe(this.shellElement);
         window.addEventListener('resize', () => this.updateScrollReserve());
         this.updateScrollReserve();
+    },
+
+    cancelHoverTypewriter() {
+        this.hoverTypewriterGeneration += 1;
+        if (this.hoverTypewriterTimer !== null) {
+            clearTimeout(this.hoverTypewriterTimer);
+            this.hoverTypewriterTimer = null;
+        }
+    },
+
+    playHoverTypewriter(text) {
+        if (!this.hoverPortElement) return;
+        this.cancelHoverTypewriter();
+        const generation = this.hoverTypewriterGeneration;
+        const msPerChar = CONFIG.warehouse?.dock?.messageTypewriterMsPerChar ?? 35;
+        this.hoverPortElement.textContent = '';
+        if (!text) return;
+
+        let index = 0;
+        const step = () => {
+            if (generation !== this.hoverTypewriterGeneration) return;
+            index += 1;
+            this.hoverPortElement.textContent = text.slice(0, index);
+            if (index < text.length) {
+                this.hoverTypewriterTimer = setTimeout(step, msPerChar);
+            } else {
+                this.hoverTypewriterTimer = null;
+            }
+        };
+        step();
+    },
+
+    setMoleculeHoverMessage(text, { isLtr = false, noteIndex = -1 } = {}) {
+        if (!this.hoverPortElement || !text) return;
+        if (this.moleculeHoverMessageActive && this.hoverTypewriterNoteIndex === noteIndex) return;
+
+        this.hoverTypewriterNoteIndex = noteIndex;
+        this.hoverPortElement.classList.toggle('is-note-ltr', isLtr);
+        this.hoverPortElement.classList.toggle('is-note-rtl', !isLtr);
+        this.hoverPortElement.classList.add('is-active');
+        this.moleculeHoverMessageActive = true;
+        this.playHoverTypewriter(text);
+    },
+
+    clearMoleculeHoverMessage() {
+        if (!this.hoverPortElement || !this.moleculeHoverMessageActive) return;
+        this.cancelHoverTypewriter();
+        this.hoverTypewriterNoteIndex = -1;
+        this.hoverPortElement.textContent = '';
+        this.hoverPortElement.classList.remove('is-active', 'is-note-ltr', 'is-note-rtl');
+        this.moleculeHoverMessageActive = false;
     },
 
     refreshDisplayTokens() {
@@ -311,17 +374,6 @@ const ActionWarehouse = {
 
         this.blocks.forEach(block => {
             if (block.state !== 'active' || block.nestedIn) return;
-
-            // Normalize deployed (page-space) blocks to viewport-fixed positioning
-            // so the snap-back animation runs in screen coordinates
-            const rect = block.element.getBoundingClientRect();
-            block.element.classList.remove('is-deployed');
-            block.element.classList.add('is-dragging');
-            block.x = rect.left;
-            block.y = rect.top;
-            this.applyTransform(block, 0);
-            void block.element.offsetWidth; // flush styles so the transition animates
-
             this.returnToDock(block);
         });
     },
@@ -921,32 +973,12 @@ const ActionWarehouse = {
         };
     },
 
-    showMacroIndicationSlot(block) {
-        const slot = block?.slotElement;
-        if (!slot || block.nestedIn) return;
-        block._macroIndicationSlotSnapshot = {
-            parent: slot,
-            nextSibling: block.element.nextSibling
-        };
-        this.markSlotEmpty(block);
-        document.body.appendChild(block.element);
-        block.element.style.display = 'none';
+    showMacroIndicationSlot(_block) {
+        /* Real block stays in the tray at default dock chrome — ghost arc only. */
     },
 
     clearMacroIndicationSlot(block) {
         if (!block) return;
-        block.element.style.removeProperty('display');
-        this.clearSlotEmpty(block);
-        const snap = block._macroIndicationSlotSnapshot;
-        if (snap?.parent) {
-            if (snap.nextSibling && snap.nextSibling.parentNode === snap.parent) {
-                snap.parent.insertBefore(block.element, snap.nextSibling);
-            } else {
-                snap.parent.appendChild(block.element);
-            }
-        } else if (block.slotElement) {
-            block.slotElement.appendChild(block.element);
-        }
         delete block._macroIndicationSlotSnapshot;
     },
 
@@ -959,6 +991,9 @@ const ActionWarehouse = {
         ghost.classList.add('is-macro-indication');
         ghost.removeAttribute('id');
         ghost.setAttribute('aria-hidden', 'true');
+        ghost.style.display = '';
+        ghost.style.visibility = 'visible';
+        ghost.style.removeProperty('transform');
         return ghost;
     },
 
@@ -990,10 +1025,11 @@ const ActionWarehouse = {
         const endRect = this.getMacroIndicationTargetRect(block, startRect);
         if (!startRect.width || !endRect.width) return;
 
+        const ghost = this.createMacroIndicationGhost(block);
+
         this.showMacroIndicationSlot(block);
         this._macroIndicationBlock = block;
 
-        const ghost = this.createMacroIndicationGhost(block);
         const cfg = CONFIG.warehouse;
         const startScale = cfg.depthDeployStartScale ?? 0.94;
 
@@ -1542,6 +1578,21 @@ const ActionWarehouse = {
         }
     },
 
+    prepareBlockReturnAnimation(block) {
+        const onCanvas = block.element.classList.contains('is-deployed');
+        const onDepthBar = block.element.classList.contains('is-depth-ui-mounted');
+        if (!onCanvas && !onDepthBar) return;
+
+        const rect = block.element.getBoundingClientRect();
+        document.body.appendChild(block.element);
+        block.element.classList.remove('is-deployed', 'is-depth-ui-mounted');
+        block.element.classList.add('is-dragging');
+        block.x = rect.left;
+        block.y = rect.top;
+        this.applyTransform(block, 0);
+        void block.element.offsetWidth;
+    },
+
     returnToDock(block) {
         if (block.type === 'frame' && (block.nestedBlocks || []).length > 0) {
             [...block.nestedBlocks].forEach(nested => {
@@ -1549,6 +1600,8 @@ const ActionWarehouse = {
                 this.returnToDock(nested);
             });
         }
+
+        this.prepareBlockReturnAnimation(block);
 
         const slotRect = block.slotElement.getBoundingClientRect();
         block.element.classList.add('is-returning');

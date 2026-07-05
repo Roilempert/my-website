@@ -17,6 +17,7 @@ const PhysicsEngine = {
     mouseClientX: 0,
     mouseClientY: 0,
     hoveredNoteIndex: -1,
+    moleculeHoverPinnedIndex: -1,
     repulsionHoldNoteIndex: -1,
     moleculeClickIntent: null,
     transitionFrozen: false,
@@ -131,7 +132,7 @@ const PhysicsEngine = {
         this.initMoleculePointer();
 
         this.moleculeHoverTitle = document.createElement('div');
-        this.moleculeHoverTitle.className = 'molecule-hover-title note-h';
+        this.moleculeHoverTitle.className = 'molecule-hover-title';
         this.moleculeHoverTitle.setAttribute('aria-hidden', 'true');
         document.body.appendChild(this.moleculeHoverTitle);
 
@@ -1642,26 +1643,148 @@ const PhysicsEngine = {
         document.addEventListener('pointercancel', this.onMoleculePointerUp);
     },
 
+    truncateHoverWords(text, maxWords) {
+        if (!text || maxWords <= 0) return '';
+        const words = text.trim().split(/\s+/).filter(Boolean);
+        if (words.length <= maxWords) return words.join(' ');
+        return words.slice(0, maxWords).join(' ');
+    },
+
+    noteHasAttachedBlocks(item) {
+        if (!item) return false;
+        if (Array.isArray(item.tags) && item.tags.length > 0) return true;
+        if (String(item.authorCode || item.authorFullName || '').trim()) return true;
+        if (String(item.typology || '').trim()) return true;
+        return false;
+    },
+
+    countAttachedHoverBlocks(item) {
+        if (!item) return 0;
+        let count = 0;
+        if (Array.isArray(item.tags) && item.tags.length > 0) {
+            count += item.tags.length;
+        }
+        if (String(item.typology || '').trim()) count += 1;
+        if (String(item.authorCode || item.authorFullName || '').trim()) count += 1;
+        return count;
+    },
+
+    resolveMoleculeHoverBlocksPerRow(item) {
+        const maxPerRow = CONFIG.depth?.moleculeHoverBlocksPerRow ?? 5;
+        const singleRowMax = CONFIG.depth?.moleculeHoverBlocksSingleRowMax ?? 6;
+        const count = this.countAttachedHoverBlocks(item);
+        return count > 0 && count <= singleRowMax ? count : maxPerRow;
+    },
+
+    shouldUseBlocksHover(item, noteIndex) {
+        const mode = CONFIG.depth?.moleculeHoverMode ?? 'mixed';
+        if (mode === 'title') return false;
+        if (mode === 'blocks') return true;
+        const pct = Math.max(0, Math.min(100, CONFIG.depth?.moleculeHoverBlocksPercent ?? 50));
+        const key = String(item?.id ?? noteIndex ?? '');
+        let h = 2166136261;
+        for (let i = 0; i < key.length; i++) {
+            h ^= key.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+        return ((h >>> 0) % 100) < pct;
+    },
+
+    clearMoleculeHoverLabel(label) {
+        if (!label) return;
+        label.textContent = '';
+        label.replaceChildren();
+        label.classList.remove('is-title-chip', 'is-blocks-row', 'note-title', 'note-body');
+    },
+
+    _measureSiteGridTokenPx(tokenName, property = 'height') {
+        if (typeof measureSiteGridTokenPx === 'function') {
+            return measureSiteGridTokenPx(tokenName, property);
+        }
+        const root = document.documentElement;
+        const raw = getComputedStyle(root).getPropertyValue(tokenName).trim();
+        if (!raw) return 0;
+
+        let probe = root.querySelector('[data-site-grid-measure]');
+        if (!probe) {
+            probe = document.createElement('div');
+            probe.dataset.siteGridMeasure = '';
+            probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;overflow:hidden;';
+            root.appendChild(probe);
+        }
+        probe.style.width = property === 'width' ? raw : '0';
+        probe.style.height = property === 'height' ? raw : '0';
+        const px = probe.getBoundingClientRect()[property === 'width' ? 'width' : 'height'];
+        probe.style.width = '0';
+        probe.style.height = '0';
+        return px;
+    },
+
+    _getSiteGridPaddingPx() {
+        return this._measureSiteGridTokenPx('--site-grid-padding', 'height');
+    },
+
+    _getSiteGridRowStridePx() {
+        const cellH = this._measureSiteGridTokenPx('--site-grid-cell-h', 'height');
+        const gap = this._measureSiteGridTokenPx('--site-grid-gap', 'height');
+        return cellH + gap;
+    },
+
+    _snapViewportYToShellRowTop(viewportY) {
+        const padding = this._getSiteGridPaddingPx();
+        const stride = this._getSiteGridRowStridePx();
+        if (stride <= 0) return viewportY;
+
+        const rowCount = CONFIG.siteGrid?.rows ?? 12;
+        const relative = viewportY - padding;
+        const rowIndex = Math.max(0, Math.min(rowCount - 1, Math.floor(relative / stride)));
+        return padding + rowIndex * stride;
+    },
+
+    positionMoleculeHoverLabel(label, bounds, isLtr) {
+        if (!label || !bounds) return;
+        label.style.top = `${this._snapViewportYToShellRowTop(bounds.minY)}px`;
+        label.style.left = `${isLtr ? bounds.minX : bounds.maxX}px`;
+    },
+
     resolveMoleculeHoverTitle(wrapper) {
-        if (!wrapper) return '';
+        if (!wrapper) return null;
+        const maxWords = CONFIG.depth?.moleculeHoverMaxWords ?? 10;
         const titleEl = wrapper.querySelector('.layer-full .note-title');
         const title = titleEl?.textContent?.trim();
         if (title) {
             const firstLine = title.split(/\r?\n/)[0].trim();
-            if (firstLine) return firstLine;
+            if (firstLine) {
+                return {
+                    text: this.truncateHoverWords(firstLine, maxWords),
+                    role: 'title'
+                };
+            }
         }
         const bodyEl = wrapper.querySelector('.layer-full .note-body');
         const body = bodyEl?.textContent?.trim();
-        if (body) return body.split(/\r?\n/)[0].trim();
-        return '';
+        if (body) {
+            const firstLine = body.split(/\r?\n/)[0].trim();
+            if (firstLine) {
+                return {
+                    text: this.truncateHoverWords(firstLine, maxWords),
+                    role: 'body'
+                };
+            }
+        }
+        return null;
     },
 
     updateMoleculeHoverState() {
         const label = this.moleculeHoverTitle;
+        const warehouse = typeof ActionWarehouse !== 'undefined' ? ActionWarehouse : null;
 
         const hideHover = () => {
+            this.clearMoleculeHoverLabel(label);
             label?.classList.remove('is-visible');
+            warehouse?.clearMoleculeHoverMessage();
             this.hoveredNoteIndex = -1;
+            this.moleculeHoverPinnedIndex = -1;
             document.body.classList.remove('is-molecule-hover');
         };
 
@@ -1689,30 +1812,58 @@ const PhysicsEngine = {
         if (!label) return;
 
         if (noteIndex < 0) {
+            this.moleculeHoverPinnedIndex = -1;
             label.classList.remove('is-visible');
+            warehouse?.clearMoleculeHoverMessage();
+            return;
+        }
+
+        if (noteIndex === this.moleculeHoverPinnedIndex && label.classList.contains('is-visible')) {
             return;
         }
 
         const bounds = this.moleculeViewportBounds(noteIndex);
         const wrapper = document.querySelectorAll('.note-wrapper')[noteIndex];
-        const hoverText = this.resolveMoleculeHoverTitle(wrapper);
-        if (!bounds || !hoverText) {
+        const item = typeof MicroMock !== 'undefined' ? MicroMock.resolveItem(wrapper) : null;
+        const isLtr = wrapper?.classList.contains('is-note-ltr');
+        const hoverMode = CONFIG.depth?.moleculeHoverMode ?? 'title';
+        const useBlocks = hoverMode !== 'title'
+            && item
+            && this.noteHasAttachedBlocks(item)
+            && this.shouldUseBlocksHover(item, noteIndex)
+            && typeof MicroMock !== 'undefined';
+
+        this.clearMoleculeHoverLabel(label);
+        warehouse?.clearMoleculeHoverMessage();
+
+        if (useBlocks) {
+            const blocksPerRow = this.resolveMoleculeHoverBlocksPerRow(item);
+            label.style.setProperty('--molecule-hover-blocks-per-row', String(blocksPerRow));
+            label.innerHTML = MicroMock.buildTagsRowHTML(item);
+            label.classList.add('is-blocks-row');
+        } else {
+            const hoverContent = this.resolveMoleculeHoverTitle(wrapper);
+            if (!hoverContent?.text) {
+                label.classList.remove('is-visible');
+                this.moleculeHoverPinnedIndex = -1;
+                return;
+            }
+            label.textContent = hoverContent.text;
+            label.classList.add('is-title-chip');
+            label.classList.add(hoverContent.role === 'body' ? 'note-body' : 'note-title');
+        }
+
+        if (!bounds) {
             label.classList.remove('is-visible');
+            this.moleculeHoverPinnedIndex = -1;
             return;
         }
 
-        const isLtr = wrapper?.classList.contains('is-note-ltr');
-        label.textContent = hoverText;
         label.classList.toggle('is-note-ltr', isLtr);
         label.classList.toggle('is-note-rtl', !isLtr);
-        if (isLtr) {
-            label.style.left = `${bounds.minX}px`;
-            label.style.top = `${bounds.minY}px`;
-        } else {
-            label.style.left = `${bounds.maxX}px`;
-            label.style.top = `${bounds.minY}px`;
-        }
+        this.positionMoleculeHoverLabel(label, bounds, isLtr);
         label.classList.add('is-visible');
+        this.moleculeHoverPinnedIndex = noteIndex;
     }
 };
 

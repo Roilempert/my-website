@@ -8,7 +8,7 @@
 
 ## What I want
 
-Continue exhibition polish for **deployed filter blocks** in **L2/L3** (meso/micro): blocks stack above the warehouse message panel, click-to-deploy with smooth motion, a full-width drop marker that fades (not resizes), and **empty dock slots** that keep the original pill shape and catalog position after selection.
+Continue exhibition polish for **deployed filter blocks** in **L2/L3** (meso/micro): blocks stack above the warehouse message band, click-to-deploy with smooth motion, a full-width drop marker that fades (not resizes), and **empty dock slots** that keep the original pill shape and catalog position after selection.
 
 ---
 
@@ -56,7 +56,7 @@ Do **not** edit `js/app.js` directly — it is bundled.
 |----------|--------|
 | Resting position | `.depth-block-bar.has-blocks` — right-anchored above dock, **10px** above shell (`var(--space-10)`) |
 | Stack order | RTL — first deployed = rightmost; **10px** gap between pills |
-| Clear button | `.warehouse-reset` — left edge aligned with **message panel** left (after statistics column), same 10px gap above dock |
+| Clear button | `.warehouse-reset` — left edge aligned with **message band** left (after statistics column), same 10px gap above dock |
 
 ### Drop marker (separate layer)
 
@@ -189,7 +189,7 @@ HTML structure (warehouse shell):
 2. Switch to **מסו** (L2).
 3. **Click** a dock block (no drag) — pill flies to stack above message row; drop marker fades out at full width (does not shrink to pill width).
 4. **Empty slot** — dashed pill same width as block, **same index** in tray (not moved to end).
-5. Deploy 2+ blocks — stack RTL, 10px gaps, clear button left above message panel.
+5. Deploy 2+ blocks — stack RTL, 10px gaps, clear button left above message band.
 6. **Drag** from dock still works; drop marker fades on release.
 7. **נקה לוח** returns blocks; empty slots cleared.
 
@@ -225,7 +225,7 @@ Target: `stayedInPlace: true`, `slotW ≈ beforeW`, `mounted: true`.
 
 ### Playwright — drop zone width during deploy
 
-During `is-depth-drop-active`, drop zone width should match message panel width (~1253px @ 1920), not pill width (~84px).
+During `is-depth-drop-active`, drop zone width should match message band width (~1253px @ 1920), not pill width (~84px).
 
 ---
 
@@ -256,8 +256,8 @@ Read first:
 
 **Locked baseline — do not break without explicit request:**
 
-- Deployed blocks: right-anchored stack above message panel, 10px above dock, 10px between pills.
-- Clear button: left edge = message panel left, 10px above dock.
+- Deployed blocks: right-anchored stack above message band, 10px above dock, 10px between pills.
+- Clear button: left edge = message band left, 10px above dock.
 - Drop marker: full-width strip, block height, color-5 50% fill, corner decorations, **fade only** (no resize to pill width).
 - Click deploy: fixed-position arc animation; `.is-deploying-to-bar` visible during flight.
 - Empty slot: pill-shaped, measured width/height, **catalog order preserved** (no jump to tray end).
@@ -292,7 +292,7 @@ Read first:
 
 | When | What |
 |------|------|
-| 2026-07-05 | Repositioned depth block stack + clear button above message panel |
+| 2026-07-05 | Repositioned depth block stack + clear button above message band |
 | 2026-07-05 | Drop indicator: corners + color-5 fill; separated drop zone layer; block-height strip |
 | 2026-07-05 | Click-to-deploy; fixed invisible animation (visibility + fixed vs absolute coords) |
 | 2026-07-05 | Empty slot: pill size via `markSlotEmpty`; catalog position via `restoreDockTrayOrder` |

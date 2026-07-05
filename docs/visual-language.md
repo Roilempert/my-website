@@ -63,7 +63,7 @@ Four classes replace legacy `--type-*` / ratzif22 / NarkissTam body.
 |-------|-----------|------|------|-------|-----|
 | `.general-h` | `NarkissYair-Bold-TRIAL.woff2` | `calc(3.625rem + 10pt)` | `calc(3.5rem + 10pt)` | — | Layer labels; inspector ID title; related-notes section title |
 | `.general-t` | `NarkissYair-BoldMono-TRIAL.woff2` | `1rem` | `1` | letter-spacing 5%, no synthesis | Warehouse, blocks, **active** layer label, metadata labels/details, note ID |
-| `.note-h` | `Neoklass-BoldItalic-TRIAL.woff2` | `2.84375rem` | `0.9` | letter-spacing −2% | Note titles |
+| `.note-h` | `TheBasics-Dots.woff2` | `24pt` (`2rem` / 32px) | `0.9` | — | Note titles |
 | `.note-t` | `FrankRuhl_Universal-Mono.woff2` | `1.125rem` | `1.2` | — | Note body |
 
 **Retired for exhibition UI:** `ratzif22`, NarkissTam on note body, NarkissYair Regular for chrome.
@@ -97,15 +97,18 @@ Four classes replace legacy `--type-*` / ratzif22 / NarkissTam body.
 - **Shell:** **2 rows** high, cols 1–24 inside padding; transparent outer wrapper with **4 corner decorations** (5×5, color 3, static).
 - **Action dock** (20 cols): separate bg color 6 panel, radius 5px, **left side** of the shell.
   - Inner corner decorations: two marks on the dock right edge, paired with two marks on the map left edge around the dock/map gap
-  - Message/statistics inset: top/right 10px → `var(--space-10)`; left/bottom 20px → `var(--space-20)`; message paragraph indent 20px → `var(--space-20)`
+  - Message/statistics inset: top/right 10px → `var(--space-10)`; left/bottom 20px → `var(--space-20)`; system-message paragraph indent 20px → `var(--space-20)`
   - Statistics (4 cols): live rows for `בלוקים בשימוש`, `חיבורים פעילים`, and `פתקים מחוברים`; category labels stick to the right of the panel, numeric output sticks left on the same line; rows use normal text line-height spacing; values count up/down live until they reach the current output
-  - Message port (0.5× row): `גררו להפעלה` (`.general-t`), middle area next to map; text top-aligned; no extra outer side inset beyond internal padding
+  - **Message band** (0.5× row height, dock cols 5–20): split **1/4 + 3/4** (hover port / system message) by a vertical divider (`.warehouse-message-band__divider`, color 3 hairline, 5px top inset, extends to block-tray hairline)
+    - **Hover port** (left, **¼** width, `.warehouse-hover-port`): reserved dock chrome; L1 note hover uses floating canvas label instead
+    - **System message port** (right, **¾** width, `.warehouse-message-port`): static system copy `גררו להפעלה` (`CONFIG.warehouse.dock.messageText`) — `.general-t`, top-aligned, 20px paragraph indent; unaffected by note hover
   - Block panel: live blocks from sheet (`.general-t`), middle area next to map; content padding is 10px → `var(--space-10)`, including 10px below the separator hairline
 - **Map** (4 cols): separate bg color 6 panel, radius 5px, **right side** of the shell; live minimap with compact details (objects color 3).
 - **Dock/map gap:** one site-grid gap between the action dock panel and map panel.
 - **Panel dividers:** color 3 hairlines with 5px → `var(--space-5)` endpoint breathing room.
   - between statistics and dock content: vertical divider ends 5px from dock top/bottom
-  - above the block tray / under the message port: horizontal divider starts at the statistics divider and ends 5px from the dock right edge, creating a joined rotated T shape
+  - between hover port and system message: vertical divider at message-band midpoint — 5px top inset, extends to the block-tray hairline (T join with horizontal divider)
+  - above the block tray / under the message band: horizontal divider starts at the statistics divider and ends 5px from the dock right edge, creating a joined rotated T shape
 - **Viewport marker:** compact, **fixed** at center of map frame — does **not** move; map **content** pans behind it, clipped to panel bounds. Marker proportions follow the raw browser viewport; L1 uses live macro dots, and L2 uses stable meso frame rectangles with original line silhouettes drawn inside them.
 - **Remove:** English `ACTION REPOSITORY` label.
 
@@ -144,18 +147,22 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 
 ### Deployed block
 
-- **20px** above dock top, **10px** inset from dock right edge
-- Clear: **`נקה לוח`**, fill color 6 (= RESET)
+- **10px** above dock top (`var(--space-10)`); clear **`נקה לוח`** left edge aligned with **message band** left (after statistics column) — same on L1/L2/L3
+- Clear: fill color 6 (= RESET)
 - Block counter appears inside the live statistics panel
 
 ### L1 dock block click (macro)
 
-- Tap a docked block (no drag): **muted ghost** clone (`is-macro-indication` — irrelevant/muted variant: fill color 2, text color 5, tag dot color 5) arcs from tray to the visible L1 canvas center; dock slot shows **empty-slot ghost** (color 6 fill, color 2 hollow ring + label) for the animation duration only; real block stays in tray until dragged
+- Tap a docked block (no drag): **muted ghost** clone (`is-macro-indication` — irrelevant/muted variant: fill color 2, text color 5, tag dot color 5) arcs from tray to the visible L1 canvas center; **tray slot keeps the real block in default dock chrome** during the animation; real block stays in tray until dragged
 - Same arc easing as L2/L3 click-deploy (`macroIndicationDuration` 720ms / shared arc lift)
 
 ### L1 molecule hover
 
-- Hull outline thickens on hover; **first text row** (`.note-h` title, or first body line if title empty) appears in a fixed label anchored above the hull — RTL notes anchor top-right, LTR top-left
+- Hull outline thickens on hover (`body.is-molecule-hover`)
+- **Title mode** (`moleculeHoverMode: 'title'` — current default): floating `.molecule-hover-title` pinned on hover start; **Y** snaps to the shell row top at/above the molecule hull (`measureSiteGridTokenPx`); **X** stays on the hull edge (RTL `maxX` / LTR `minX`); first title line (or body fallback), `.note-h` scale, transparent background; word cap 10; RTL top-right / LTR top-left
+- **Blocks / mixed modes** (optional): same floating label with attached-block pill row via `MicroMock.buildTagsRowHTML`; config: `moleculeHoverMode`, `moleculeHoverBlocksPercent`, `moleculeHoverBlocksPerRow`, `moleculeHoverBlocksSingleRowMax`
+- Warehouse hover port (`.warehouse-hover-port`) remains in the message band but is unused for L1 hover
+- Code path: `PhysicsEngine.updateMoleculeHoverState()`
 
 ### Layer navigation (right)
 
@@ -210,7 +217,7 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 - **Open motion:** the clicked L3 card DOM moves into a fixed `.artifact-inspector-flyer` shell (no HTML rebuild); top-left FLIP on the scaler from source rect → shell row 2; one element, one proportional scale path; shadow only after landing; source `.note-wrapper` hidden (`visibility: hidden` on wrapper + descendants). **L1 macro:** molecule click builds a synthetic L3 card (no visible grid card at macro); FLIP starts from molecule hull center at L3 width; tap on hull or dot via `openMacroNoteAt` (physics hit test + nav-surface tap)
 - Popup scrollport spans the full viewport height; focused/related content can scroll to the top and bottom viewport edges
 - Focused note starts at the beginning of shell row 2 when the popup opens
-- Metadata panel below (40px gap): bg color 3, text color 4, radius 5px
+- Metadata panel below focus card: bg color 6, text color 3, radius 5px; **details block** (`.artifact-inspector-metadata__details`) bottom aligns to **shell row 10** (last content row above warehouse) on short notes; long notes keep `metadataMinGap` (60px) below the focus card
 - **Metadata fields:** author shows **Author Code** in uppercase (e.g. `MFR`); typology shows Hebrew label from `CONFIG.data.typologyLabels` (e.g. `רשימה` for `List`)
 - **Related notes:** one section per tag subset of focus note that **exists on at least one other note**; omit unused combinations; 2 notes per row, 40px gap
 
@@ -234,6 +241,32 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-05 | L1 molecule hover restored to floating `.molecule-hover-title` on canvas (title mode); warehouse hover port unused |
+| 2026-07-05 | Focus inspector: details panel bottom aligns to shell row 10; gap sync targets `.artifact-inspector-metadata__details` |
+| 2026-07-05 | L1 molecule hover: warehouse **hover port** (left) + **system message port** (right) with flickering cursor; midpoint divider; title types on hover (`messageTypewriterMsPerChar: 35`) |
+| 2026-07-05 | L1 hover: position pinned on hover start (no follow); blocks row max 5 pills/row (`moleculeHoverBlocksPerRow`) — **superseded for title mode** by dock hover port |
+| 2026-07-05 | Removed `.note-h` / `.note-title` letter-spacing (`−0.02em`) |
+| 2026-07-05 | L1 dock click indication: tray slot stays default pill during ghost arc (no empty-slot ghost) |
+| 2026-07-05 | L1 hover A/B trial: `mixed` mode — title chip vs attached-block pill row (`moleculeHoverMode`, `moleculeHoverBlocksPercent`) |
+| 2026-07-05 | L1 hover label font reverted to **TheBasics-Dots** (matches `.note-h`) |
+| 2026-07-05 | L1 hover label font: **Narkiss Yair Bold** at `var(--type-display-size)` |
+| 2026-07-05 | L1 hover label: balanced inset — 10px inline / 5px block + `line-height: 1` (font metrics were inflating vertical) |
+| 2026-07-05 | L1 hover label typography matches source: `.note-title` or `.note-body` (not forced `.note-h`) |
+| 2026-07-05 | L1 hover label: word cap (`moleculeHoverMaxWords: 10`) at whole-word boundaries; no ellipsis |
+| 2026-07-05 | L1 hover label: removed ellipsis; max width `min(80vw, 56rem)` (was `min(42vw, 28rem)`) |
+| 2026-07-05 | L1 molecule hover label: focus-card shadow (`0 8px 32px rgba(16,16,16,0.14)`) |
+| 2026-07-05 | Restored `.note-h` note titles to `TheBasics-Dots.woff2` (24pt, weight 400) |
+| 2026-07-05 | `.note-h` weight reduced from Black (900) to Bold (700) — `MiriamLibre-Bold.woff2` |
+| 2026-07-05 | L1 molecule hover label padding set to `var(--space-10)` (10px) all sides |
+| 2026-07-05 | L1 molecule hover label padding tightened to `var(--space-5)` (5px) |
+| 2026-07-05 | L1 molecule hover label: note-card frame (color 1 fill, 5px radius, L3 padding) hugging title text |
+| 2026-07-05 | Reduced `.note-h` note title size to **24pt** (`2rem` / 32px) |
+| 2026-07-05 | Reduced `.note-h` note title size from `2.84375rem` (45.5px) to `2.25rem` (36px) |
+| 2026-07-05 | `.note-h` note titles switched to `MiriamLibre-Black.woff2` at unchanged `2.84375rem` size |
+| 2026-07-05 | Stanza (מחרוזת) wavy typology underline reduced to 1px stroke in 3px box |
+| 2026-07-05 | Trial: `.note-h` note titles switched to `TheBasics-Dots.woff2` at unchanged `2.84375rem` size |
+| 2026-07-05 | Switched `.note-h` note titles to `FrankRuhl_Universal-Mono` at unchanged `2.84375rem` size |
+| 2026-07-05 | L1 clear button (`נקה לוח`) aligned with L2/L3 — message panel left edge, 10px above dock |
 | 2026-07-05 | L1 molecule hover: first title line (`.note-h`) above hull; restored full macro deploy arc to canvas center |
 | 2026-07-05 | L1 dock click indication: slower (720ms), full travel to canvas center; tray slot shows empty-slot ghost during animation only |
 | 2026-07-05 | L1 focus tap: hull/dot click opens inspector via `openMacroNoteAt`; nav-surface tap uses physics hit test; `index.html` cache-busts `app.js` on build |

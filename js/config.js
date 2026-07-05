@@ -9,10 +9,10 @@ const scale = (px) => Math.round(px * VISUAL_SCALE);
 const TYPE_SCALE = {
     generalH: { sizePt: 71.33, linePt: 69.33, weight: 700 },
     generalT: { sizeRem: 1, line: 1, weight: 700 },
-    noteH:    { sizePt: 45.5, line: 0.9, weight: 700, style: 'italic', letterSpacing: '-0.02em' },
+    noteH:    { sizePt: 24, line: 0.9, weight: 400, style: 'normal' },
     noteT:    { sizePt: 18, line: 1.2, weight: 400 },
     /* Legacy aliases for gradual migration */
-    display: { sizeRem: 2.84375, sizePx: 45.5, line: 0.9, weight: 700, style: 'italic' },
+    display: { sizeRem: 2, sizePx: 32, line: 0.9, weight: 400, style: 'normal' },
     body:    { sizeRem: 1.125, sizePx: 18, line: 1.2, weight: 400, maxCh: 55 },
     meta:    { sizeRem: 1, sizePx: 16, line: 1, weight: 700 },
     ui:      { sizeRem: 1, line: 1, weight: 700 },
@@ -187,6 +187,11 @@ const CONFIG = {
         noteClickPath: 'direct-l3',      // 'direct-l3' | 'l2-preview-then-l3'
         clickDragThreshold: 6,           // px — below = click navigate, above = drag
         moleculeClickPadding: 16,        // px — extra hit area around hull for L1 note click
+        moleculeHoverMaxWords: 10,       // L1 hover label — first line, whole words only
+        moleculeHoverMode: 'title',      // 'title' | 'blocks' | 'mixed' — L1 hover label mode
+        moleculeHoverBlocksPercent: 50,  // mixed: stable hash % of notes → attached-block row
+        moleculeHoverBlocksPerRow: 5,    // blocks-row hover: max pills per row before wrapping
+        moleculeHoverBlocksSingleRowMax: 6, // ≤ this count → single row (e.g. 6 pills stay on one line)
         transition: {
             scrollDuration: 520,
             fxDuration: 480,
@@ -521,7 +526,10 @@ const CONFIG = {
     /* --- Artifact Inspector (focus/isolation overlay) --- */
     inspector: {
         openDuration: 0.48,         // s; focus card FLIP on fixed flyer layer
-        closeDuration: 350          // ms; must match the CSS transition on .note-wrapper
+        closeDuration: 350,         // ms; must match the CSS transition on .note-wrapper
+        metadataMinGap: 60,         // px; min gap below focus note when it extends past align row
+        cardAnchorRow: 2,           // shell row where focus card top lands
+        metadataAlignRow: 10        // shell row whose bottom the details panel aligns to (last content row)
     },
 
     /* --- Physics Engine (Matter.js) --- */
@@ -653,6 +661,7 @@ const CONFIG = {
             rowGap: 6,
             cornerDecorationSrc: 'assets/ui/decoration-corner-tr.svg',
             messageText: 'גררו להפעלה',
+            messageTypewriterMsPerChar: 35,
             blockTrayGap: { value: 3.75, unit: 'rem' }
         },
 

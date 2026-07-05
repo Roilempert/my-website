@@ -325,6 +325,81 @@ const ArtifactInspector = {
         };
     },
 
+    _getSiteGridRowStridePx() {
+        const rootStyle = getComputedStyle(document.documentElement);
+        const cellH = parseFloat(rootStyle.getPropertyValue('--site-grid-cell-h')) || 0;
+        const gap = parseFloat(rootStyle.getPropertyValue('--site-grid-gap')) || 0;
+        return cellH + gap;
+    },
+
+    _getInspectorMetadataShellRowBottomOffsetPx() {
+        const cardAnchorRow = CONFIG.inspector?.cardAnchorRow ?? 2;
+        const alignRow = CONFIG.inspector?.metadataAlignRow
+            ?? CONFIG.siteGrid?.rows
+            ?? 12;
+        const rowsBelowCard = Math.max(0, alignRow - cardAnchorRow);
+        const rootStyle = getComputedStyle(document.documentElement);
+        const cellH = parseFloat(rootStyle.getPropertyValue('--site-grid-cell-h')) || 0;
+        return rowsBelowCard * this._getSiteGridRowStridePx() + cellH;
+    },
+
+    _measureFocusBlockEndPx() {
+        const panel = this.panel;
+        const focus = panel?.querySelector('.artifact-inspector-focus');
+        if (!panel || !focus) return 0;
+
+        const panelStyle = getComputedStyle(panel);
+        const contentTop = panel.getBoundingClientRect().top
+            + (parseFloat(panelStyle.paddingTop) || 0);
+
+        let end = focus.getBoundingClientRect().bottom - contentTop;
+
+        focus.querySelectorAll('.micro-mock__card.note-card, .micro-mock__tags').forEach((el) => {
+            end = Math.max(end, el.getBoundingClientRect().bottom - contentTop);
+        });
+
+        return end;
+    },
+
+    _syncFocusCardSlotHeight() {
+        const panelSlot = this.panel?.querySelector(
+            '.artifact-inspector-focus__card-slot'
+        );
+        const card = this.panel?.querySelector(
+            '.artifact-inspector-focus__card-scaler .micro-mock__card.note-card'
+        );
+        if (!panelSlot || !card) return;
+
+        const cardHeight = card.getBoundingClientRect().height;
+        if (cardHeight > 0) {
+            panelSlot.style.height = `${Math.ceil(cardHeight)}px`;
+        }
+    },
+
+    _syncMetadataPanelGap() {
+        const metadata = this.panel?.querySelector('.artifact-inspector-metadata');
+        const details = metadata?.querySelector('.artifact-inspector-metadata__details');
+        if (!metadata || !details || !this.panel) return;
+
+        this._syncFocusCardSlotHeight();
+
+        const minGap = CONFIG.inspector?.metadataMinGap ?? 60;
+        const rowBottomOffset = this._getInspectorMetadataShellRowBottomOffsetPx();
+        const focusEnd = this._measureFocusBlockEndPx();
+
+        const metadataRect = metadata.getBoundingClientRect();
+        const detailsRect = details.getBoundingClientRect();
+        const detailsOffsetInMetadata = detailsRect.bottom - metadataRect.top;
+
+        const metadataTopForShortAlign = rowBottomOffset - detailsOffsetInMetadata;
+        const longNote = focusEnd + minGap > metadataTopForShortAlign;
+        const gap = longNote
+            ? minGap
+            : Math.max(minGap, metadataTopForShortAlign - focusEnd);
+
+        this.panel.style.setProperty('--inspector-metadata-gap', `${Math.round(gap)}px`);
+    },
+
     _applyFocusLandingLayout() {
         const cardSlot = this._getFocusLandingRect();
         if (!cardSlot || !this.panel) return null;
@@ -470,6 +545,13 @@ const ArtifactInspector = {
 
         this._handoffFocusToPanel();
 
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                this._syncFocusCardSlotHeight();
+                this._syncMetadataPanelGap();
+            });
+        });
+
         this.panel?.classList.remove('is-opening');
         this.backdrop?.classList.remove('is-opening');
     },
@@ -513,17 +595,21 @@ const ArtifactInspector = {
         const typology = typeof getTypologyLabel === 'function'
             ? (getTypologyLabel(item.typology) || item.typology || '—')
             : (item.typology || '—');
-        const tags = (item.tags || []).map(t => t.name).join('، ');
+        const blocksHtml = typeof MicroMock !== 'undefined'
+            ? MicroMock.buildTagsRowHTML(item)
+            : '';
         return `
             <section class="artifact-inspector-metadata">
-                <div class="artifact-inspector-metadata__header">
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h" aria-hidden="true">^</span>
-                    <h2 class="artifact-inspector-metadata__id general-h">${this.escapeHtml(item.id || '')}</h2>
+                <div class="artifact-inspector-metadata__scroll-glyphs" aria-hidden="true">
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
                 </div>
+                <h2 class="artifact-inspector-metadata__id general-h">${this.escapeHtml(item.id || '')}</h2>
                 <div class="artifact-inspector-metadata__grid">
                     <div class="artifact-inspector-metadata__tags">
                         <h3 class="general-t">תגיות</h3>
-                        <div class="artifact-inspector-metadata__tag-list general-t">${this.escapeHtml(tags || '—')}</div>
+                        <div class="artifact-inspector-metadata__tag-list">${blocksHtml}</div>
                     </div>
                     <dl class="artifact-inspector-metadata__details general-t">
                         <div><dt>מחבר</dt><dd>${this.escapeHtml(author)}</dd></div>
@@ -659,6 +745,7 @@ const ArtifactInspector = {
         this.panel.innerHTML = '';
         this.panel.style.removeProperty('width');
         this.panel.style.removeProperty('left');
+        this.panel.style.removeProperty('--inspector-metadata-gap');
         delete this.panel.dataset.noteId;
 
         if (this.flyer) {

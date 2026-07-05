@@ -77,6 +77,7 @@ Tokens: `--site-meso-col-width`, `--site-micro-col-width`, `--site-meso-viewport
 | `canvas` | Main exploration | `#app` | All | rows 1–10 — `--scroll-breathing-room`, `--site-canvas-page-padding-x` |
 | `warehouse` | ACTION REPOSITORY | `.warehouse-shell` | All | rows 11–12 (2 rows) |
 | `warehouseDock` | Action dock | `.warehouse-dock` | All | cols 1–20, rows 11–12 |
+| `warehouseMessageBand` | Message row (hover + system) | `.warehouse-message-band` | All | cols 5–20, row 11 (top half of dock) |
 | `warehouseMap` | Minimap panel | `.warehouse-map` | All | cols 21–24, rows 11–12 |
 | `blockBar` | Deployed blocks strip | `.depth-block-bar` | L2/L3 | cols 1–20, row 10 |
 | `inspector` | Focus note card | `.artifact-inspector-panel` | All (L2/L3 overrides) | See `regionsByLevel` |

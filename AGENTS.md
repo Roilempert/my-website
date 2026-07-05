@@ -66,6 +66,9 @@ Canvas grids inside `#app` (macro physics, L2 meso, L3 micro) are separate and w
 | **Window** | Elliptical slot inside a frame where another block lands. | `.frame-slot-window` |
 | **Snap** | Locking a regular block into a spread frame window; inner block remains a capture anchor. | `snapBlockIntoFrame` / `nestedBlock` |
 | **Warehouse** | Bottom portal storing all blocks; includes RESET. | `.action-warehouse` |
+| **Message band** | Top half-row of action dock (after statistics): hover port, midpoint divider, system message. | `.warehouse-message-band` |
+| **Hover port** | Left **¼** of message band; reserved dock chrome (L1 hover uses floating canvas label). | `.warehouse-hover-port` |
+| **System message** | Right **¾** of message band; static dock instruction (`גררו להפעלה`). | `.warehouse-message-port` |
 | **Slot** | Single block storage cell in the warehouse. | `.block-slot` |
 | **Surface** | Canvas area where blocks are placed so notes orbit them — the cleared center in the work grid. | — |
 | **Canvas** | Full workspace (wider than the viewport) where notes and blocks live. | `#app` |

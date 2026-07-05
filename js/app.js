@@ -1,4 +1,4 @@
-/* app build 20260705125853 */
+/* app build 20260705200519 */
 /* ==========================================================================
    01. SYSTEM BOOTSTRAP
    ========================================================================== */
@@ -12082,6 +12082,81 @@ const ArtifactInspector = {
         };
     },
 
+    _getSiteGridRowStridePx() {
+        const rootStyle = getComputedStyle(document.documentElement);
+        const cellH = parseFloat(rootStyle.getPropertyValue('--site-grid-cell-h')) || 0;
+        const gap = parseFloat(rootStyle.getPropertyValue('--site-grid-gap')) || 0;
+        return cellH + gap;
+    },
+
+    _getInspectorMetadataShellRowBottomOffsetPx() {
+        const cardAnchorRow = CONFIG.inspector?.cardAnchorRow ?? 2;
+        const alignRow = CONFIG.inspector?.metadataAlignRow
+            ?? CONFIG.siteGrid?.rows
+            ?? 12;
+        const rowsBelowCard = Math.max(0, alignRow - cardAnchorRow);
+        const rootStyle = getComputedStyle(document.documentElement);
+        const cellH = parseFloat(rootStyle.getPropertyValue('--site-grid-cell-h')) || 0;
+        return rowsBelowCard * this._getSiteGridRowStridePx() + cellH;
+    },
+
+    _measureFocusBlockEndPx() {
+        const panel = this.panel;
+        const focus = panel?.querySelector('.artifact-inspector-focus');
+        if (!panel || !focus) return 0;
+
+        const panelStyle = getComputedStyle(panel);
+        const contentTop = panel.getBoundingClientRect().top
+            + (parseFloat(panelStyle.paddingTop) || 0);
+
+        let end = focus.getBoundingClientRect().bottom - contentTop;
+
+        focus.querySelectorAll('.micro-mock__card.note-card, .micro-mock__tags').forEach((el) => {
+            end = Math.max(end, el.getBoundingClientRect().bottom - contentTop);
+        });
+
+        return end;
+    },
+
+    _syncFocusCardSlotHeight() {
+        const panelSlot = this.panel?.querySelector(
+            '.artifact-inspector-focus__card-slot'
+        );
+        const card = this.panel?.querySelector(
+            '.artifact-inspector-focus__card-scaler .micro-mock__card.note-card'
+        );
+        if (!panelSlot || !card) return;
+
+        const cardHeight = card.getBoundingClientRect().height;
+        if (cardHeight > 0) {
+            panelSlot.style.height = `${Math.ceil(cardHeight)}px`;
+        }
+    },
+
+    _syncMetadataPanelGap() {
+        const metadata = this.panel?.querySelector('.artifact-inspector-metadata');
+        const details = metadata?.querySelector('.artifact-inspector-metadata__details');
+        if (!metadata || !details || !this.panel) return;
+
+        this._syncFocusCardSlotHeight();
+
+        const minGap = CONFIG.inspector?.metadataMinGap ?? 60;
+        const rowBottomOffset = this._getInspectorMetadataShellRowBottomOffsetPx();
+        const focusEnd = this._measureFocusBlockEndPx();
+
+        const metadataRect = metadata.getBoundingClientRect();
+        const detailsRect = details.getBoundingClientRect();
+        const detailsOffsetInMetadata = detailsRect.bottom - metadataRect.top;
+
+        const metadataTopForShortAlign = rowBottomOffset - detailsOffsetInMetadata;
+        const longNote = focusEnd + minGap > metadataTopForShortAlign;
+        const gap = longNote
+            ? minGap
+            : Math.max(minGap, metadataTopForShortAlign - focusEnd);
+
+        this.panel.style.setProperty('--inspector-metadata-gap', `${Math.round(gap)}px`);
+    },
+
     _applyFocusLandingLayout() {
         const cardSlot = this._getFocusLandingRect();
         if (!cardSlot || !this.panel) return null;
@@ -12227,6 +12302,13 @@ const ArtifactInspector = {
 
         this._handoffFocusToPanel();
 
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                this._syncFocusCardSlotHeight();
+                this._syncMetadataPanelGap();
+            });
+        });
+
         this.panel?.classList.remove('is-opening');
         this.backdrop?.classList.remove('is-opening');
     },
@@ -12270,17 +12352,21 @@ const ArtifactInspector = {
         const typology = typeof getTypologyLabel === 'function'
             ? (getTypologyLabel(item.typology) || item.typology || '—')
             : (item.typology || '—');
-        const tags = (item.tags || []).map(t => t.name).join('، ');
+        const blocksHtml = typeof MicroMock !== 'undefined'
+            ? MicroMock.buildTagsRowHTML(item)
+            : '';
         return `
             <section class="artifact-inspector-metadata">
-                <div class="artifact-inspector-metadata__header">
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h" aria-hidden="true">^</span>
-                    <h2 class="artifact-inspector-metadata__id general-h">${this.escapeHtml(item.id || '')}</h2>
+                <div class="artifact-inspector-metadata__scroll-glyphs" aria-hidden="true">
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
                 </div>
+                <h2 class="artifact-inspector-metadata__id general-h">${this.escapeHtml(item.id || '')}</h2>
                 <div class="artifact-inspector-metadata__grid">
                     <div class="artifact-inspector-metadata__tags">
                         <h3 class="general-t">תגיות</h3>
-                        <div class="artifact-inspector-metadata__tag-list general-t">${this.escapeHtml(tags || '—')}</div>
+                        <div class="artifact-inspector-metadata__tag-list">${blocksHtml}</div>
                     </div>
                     <dl class="artifact-inspector-metadata__details general-t">
                         <div><dt>מחבר</dt><dd>${this.escapeHtml(author)}</dd></div>
@@ -12416,6 +12502,7 @@ const ArtifactInspector = {
         this.panel.innerHTML = '';
         this.panel.style.removeProperty('width');
         this.panel.style.removeProperty('left');
+        this.panel.style.removeProperty('--inspector-metadata-gap');
         delete this.panel.dataset.noteId;
 
         if (this.flyer) {
@@ -12456,6 +12543,7 @@ const PhysicsEngine = {
     mouseClientX: 0,
     mouseClientY: 0,
     hoveredNoteIndex: -1,
+    moleculeHoverPinnedIndex: -1,
     repulsionHoldNoteIndex: -1,
     moleculeClickIntent: null,
     transitionFrozen: false,
@@ -12570,7 +12658,7 @@ const PhysicsEngine = {
         this.initMoleculePointer();
 
         this.moleculeHoverTitle = document.createElement('div');
-        this.moleculeHoverTitle.className = 'molecule-hover-title note-h';
+        this.moleculeHoverTitle.className = 'molecule-hover-title';
         this.moleculeHoverTitle.setAttribute('aria-hidden', 'true');
         document.body.appendChild(this.moleculeHoverTitle);
 
@@ -14081,26 +14169,148 @@ const PhysicsEngine = {
         document.addEventListener('pointercancel', this.onMoleculePointerUp);
     },
 
+    truncateHoverWords(text, maxWords) {
+        if (!text || maxWords <= 0) return '';
+        const words = text.trim().split(/\s+/).filter(Boolean);
+        if (words.length <= maxWords) return words.join(' ');
+        return words.slice(0, maxWords).join(' ');
+    },
+
+    noteHasAttachedBlocks(item) {
+        if (!item) return false;
+        if (Array.isArray(item.tags) && item.tags.length > 0) return true;
+        if (String(item.authorCode || item.authorFullName || '').trim()) return true;
+        if (String(item.typology || '').trim()) return true;
+        return false;
+    },
+
+    countAttachedHoverBlocks(item) {
+        if (!item) return 0;
+        let count = 0;
+        if (Array.isArray(item.tags) && item.tags.length > 0) {
+            count += item.tags.length;
+        }
+        if (String(item.typology || '').trim()) count += 1;
+        if (String(item.authorCode || item.authorFullName || '').trim()) count += 1;
+        return count;
+    },
+
+    resolveMoleculeHoverBlocksPerRow(item) {
+        const maxPerRow = CONFIG.depth?.moleculeHoverBlocksPerRow ?? 5;
+        const singleRowMax = CONFIG.depth?.moleculeHoverBlocksSingleRowMax ?? 6;
+        const count = this.countAttachedHoverBlocks(item);
+        return count > 0 && count <= singleRowMax ? count : maxPerRow;
+    },
+
+    shouldUseBlocksHover(item, noteIndex) {
+        const mode = CONFIG.depth?.moleculeHoverMode ?? 'mixed';
+        if (mode === 'title') return false;
+        if (mode === 'blocks') return true;
+        const pct = Math.max(0, Math.min(100, CONFIG.depth?.moleculeHoverBlocksPercent ?? 50));
+        const key = String(item?.id ?? noteIndex ?? '');
+        let h = 2166136261;
+        for (let i = 0; i < key.length; i++) {
+            h ^= key.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+        return ((h >>> 0) % 100) < pct;
+    },
+
+    clearMoleculeHoverLabel(label) {
+        if (!label) return;
+        label.textContent = '';
+        label.replaceChildren();
+        label.classList.remove('is-title-chip', 'is-blocks-row', 'note-title', 'note-body');
+    },
+
+    _measureSiteGridTokenPx(tokenName, property = 'height') {
+        if (typeof measureSiteGridTokenPx === 'function') {
+            return measureSiteGridTokenPx(tokenName, property);
+        }
+        const root = document.documentElement;
+        const raw = getComputedStyle(root).getPropertyValue(tokenName).trim();
+        if (!raw) return 0;
+
+        let probe = root.querySelector('[data-site-grid-measure]');
+        if (!probe) {
+            probe = document.createElement('div');
+            probe.dataset.siteGridMeasure = '';
+            probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;overflow:hidden;';
+            root.appendChild(probe);
+        }
+        probe.style.width = property === 'width' ? raw : '0';
+        probe.style.height = property === 'height' ? raw : '0';
+        const px = probe.getBoundingClientRect()[property === 'width' ? 'width' : 'height'];
+        probe.style.width = '0';
+        probe.style.height = '0';
+        return px;
+    },
+
+    _getSiteGridPaddingPx() {
+        return this._measureSiteGridTokenPx('--site-grid-padding', 'height');
+    },
+
+    _getSiteGridRowStridePx() {
+        const cellH = this._measureSiteGridTokenPx('--site-grid-cell-h', 'height');
+        const gap = this._measureSiteGridTokenPx('--site-grid-gap', 'height');
+        return cellH + gap;
+    },
+
+    _snapViewportYToShellRowTop(viewportY) {
+        const padding = this._getSiteGridPaddingPx();
+        const stride = this._getSiteGridRowStridePx();
+        if (stride <= 0) return viewportY;
+
+        const rowCount = CONFIG.siteGrid?.rows ?? 12;
+        const relative = viewportY - padding;
+        const rowIndex = Math.max(0, Math.min(rowCount - 1, Math.floor(relative / stride)));
+        return padding + rowIndex * stride;
+    },
+
+    positionMoleculeHoverLabel(label, bounds, isLtr) {
+        if (!label || !bounds) return;
+        label.style.top = `${this._snapViewportYToShellRowTop(bounds.minY)}px`;
+        label.style.left = `${isLtr ? bounds.minX : bounds.maxX}px`;
+    },
+
     resolveMoleculeHoverTitle(wrapper) {
-        if (!wrapper) return '';
+        if (!wrapper) return null;
+        const maxWords = CONFIG.depth?.moleculeHoverMaxWords ?? 10;
         const titleEl = wrapper.querySelector('.layer-full .note-title');
         const title = titleEl?.textContent?.trim();
         if (title) {
             const firstLine = title.split(/\r?\n/)[0].trim();
-            if (firstLine) return firstLine;
+            if (firstLine) {
+                return {
+                    text: this.truncateHoverWords(firstLine, maxWords),
+                    role: 'title'
+                };
+            }
         }
         const bodyEl = wrapper.querySelector('.layer-full .note-body');
         const body = bodyEl?.textContent?.trim();
-        if (body) return body.split(/\r?\n/)[0].trim();
-        return '';
+        if (body) {
+            const firstLine = body.split(/\r?\n/)[0].trim();
+            if (firstLine) {
+                return {
+                    text: this.truncateHoverWords(firstLine, maxWords),
+                    role: 'body'
+                };
+            }
+        }
+        return null;
     },
 
     updateMoleculeHoverState() {
         const label = this.moleculeHoverTitle;
+        const warehouse = typeof ActionWarehouse !== 'undefined' ? ActionWarehouse : null;
 
         const hideHover = () => {
+            this.clearMoleculeHoverLabel(label);
             label?.classList.remove('is-visible');
+            warehouse?.clearMoleculeHoverMessage();
             this.hoveredNoteIndex = -1;
+            this.moleculeHoverPinnedIndex = -1;
             document.body.classList.remove('is-molecule-hover');
         };
 
@@ -14128,30 +14338,58 @@ const PhysicsEngine = {
         if (!label) return;
 
         if (noteIndex < 0) {
+            this.moleculeHoverPinnedIndex = -1;
             label.classList.remove('is-visible');
+            warehouse?.clearMoleculeHoverMessage();
+            return;
+        }
+
+        if (noteIndex === this.moleculeHoverPinnedIndex && label.classList.contains('is-visible')) {
             return;
         }
 
         const bounds = this.moleculeViewportBounds(noteIndex);
         const wrapper = document.querySelectorAll('.note-wrapper')[noteIndex];
-        const hoverText = this.resolveMoleculeHoverTitle(wrapper);
-        if (!bounds || !hoverText) {
+        const item = typeof MicroMock !== 'undefined' ? MicroMock.resolveItem(wrapper) : null;
+        const isLtr = wrapper?.classList.contains('is-note-ltr');
+        const hoverMode = CONFIG.depth?.moleculeHoverMode ?? 'title';
+        const useBlocks = hoverMode !== 'title'
+            && item
+            && this.noteHasAttachedBlocks(item)
+            && this.shouldUseBlocksHover(item, noteIndex)
+            && typeof MicroMock !== 'undefined';
+
+        this.clearMoleculeHoverLabel(label);
+        warehouse?.clearMoleculeHoverMessage();
+
+        if (useBlocks) {
+            const blocksPerRow = this.resolveMoleculeHoverBlocksPerRow(item);
+            label.style.setProperty('--molecule-hover-blocks-per-row', String(blocksPerRow));
+            label.innerHTML = MicroMock.buildTagsRowHTML(item);
+            label.classList.add('is-blocks-row');
+        } else {
+            const hoverContent = this.resolveMoleculeHoverTitle(wrapper);
+            if (!hoverContent?.text) {
+                label.classList.remove('is-visible');
+                this.moleculeHoverPinnedIndex = -1;
+                return;
+            }
+            label.textContent = hoverContent.text;
+            label.classList.add('is-title-chip');
+            label.classList.add(hoverContent.role === 'body' ? 'note-body' : 'note-title');
+        }
+
+        if (!bounds) {
             label.classList.remove('is-visible');
+            this.moleculeHoverPinnedIndex = -1;
             return;
         }
 
-        const isLtr = wrapper?.classList.contains('is-note-ltr');
-        label.textContent = hoverText;
         label.classList.toggle('is-note-ltr', isLtr);
         label.classList.toggle('is-note-rtl', !isLtr);
-        if (isLtr) {
-            label.style.left = `${bounds.minX}px`;
-            label.style.top = `${bounds.minY}px`;
-        } else {
-            label.style.left = `${bounds.maxX}px`;
-            label.style.top = `${bounds.minY}px`;
-        }
+        this.positionMoleculeHoverLabel(label, bounds, isLtr);
         label.classList.add('is-visible');
+        this.moleculeHoverPinnedIndex = noteIndex;
     }
 };
 
@@ -14194,6 +14432,12 @@ const ActionWarehouse = {
 
     statisticsElement: null,
     messagePortElement: null,
+    hoverPortElement: null,
+    defaultMessageText: '',
+    moleculeHoverMessageActive: false,
+    hoverTypewriterTimer: null,
+    hoverTypewriterGeneration: 0,
+    hoverTypewriterNoteIndex: -1,
     mapMountElement: null,
     statisticsRowElements: null,
     statisticsDisplayValues: new Map(),
@@ -14209,6 +14453,7 @@ const ActionWarehouse = {
         this.refreshDisplayTokens();
 
         const messageText = dockCfg?.messageText || 'גררו להפעלה';
+        this.defaultMessageText = messageText;
         this.shellElement = document.createElement('div');
         this.shellElement.classList.add('warehouse-shell');
         this.shellElement.dataset.siteLayer = 'warehouse';
@@ -14236,7 +14481,11 @@ const ActionWarehouse = {
                         <span class="warehouse-panel-corner warehouse-panel-corner--br"></span>
                     </div>
                     <div class="warehouse-statistics general-t" aria-live="polite"></div>
-                    <div class="warehouse-message-port general-t">${messageText}</div>
+                    <div class="warehouse-message-band">
+                        <div class="warehouse-hover-port general-t" aria-live="polite"></div>
+                        <div class="warehouse-message-band__divider" aria-hidden="true"></div>
+                        <div class="warehouse-message-port general-t">${messageText}</div>
+                    </div>
                     <div class="action-warehouse">
                         <div class="warehouse-tray-layout">
                             <div class="warehouse-tray-section warehouse-tray-section--frames"></div>
@@ -14258,6 +14507,7 @@ const ActionWarehouse = {
         this.dockElement = this.shellElement.querySelector('.action-warehouse');
         this.depthBlockBarElement = this.shellElement.querySelector('.depth-block-bar');
         this.statisticsElement = this.shellElement.querySelector('.warehouse-statistics');
+        this.hoverPortElement = this.shellElement.querySelector('.warehouse-hover-port');
         this.messagePortElement = this.shellElement.querySelector('.warehouse-message-port');
         this.mapMountElement = this.shellElement.querySelector('#warehouse-map-mount');
         if (this.depthBlockBarElement) {
@@ -14276,6 +14526,57 @@ const ActionWarehouse = {
         this.resizeObserver.observe(this.shellElement);
         window.addEventListener('resize', () => this.updateScrollReserve());
         this.updateScrollReserve();
+    },
+
+    cancelHoverTypewriter() {
+        this.hoverTypewriterGeneration += 1;
+        if (this.hoverTypewriterTimer !== null) {
+            clearTimeout(this.hoverTypewriterTimer);
+            this.hoverTypewriterTimer = null;
+        }
+    },
+
+    playHoverTypewriter(text) {
+        if (!this.hoverPortElement) return;
+        this.cancelHoverTypewriter();
+        const generation = this.hoverTypewriterGeneration;
+        const msPerChar = CONFIG.warehouse?.dock?.messageTypewriterMsPerChar ?? 35;
+        this.hoverPortElement.textContent = '';
+        if (!text) return;
+
+        let index = 0;
+        const step = () => {
+            if (generation !== this.hoverTypewriterGeneration) return;
+            index += 1;
+            this.hoverPortElement.textContent = text.slice(0, index);
+            if (index < text.length) {
+                this.hoverTypewriterTimer = setTimeout(step, msPerChar);
+            } else {
+                this.hoverTypewriterTimer = null;
+            }
+        };
+        step();
+    },
+
+    setMoleculeHoverMessage(text, { isLtr = false, noteIndex = -1 } = {}) {
+        if (!this.hoverPortElement || !text) return;
+        if (this.moleculeHoverMessageActive && this.hoverTypewriterNoteIndex === noteIndex) return;
+
+        this.hoverTypewriterNoteIndex = noteIndex;
+        this.hoverPortElement.classList.toggle('is-note-ltr', isLtr);
+        this.hoverPortElement.classList.toggle('is-note-rtl', !isLtr);
+        this.hoverPortElement.classList.add('is-active');
+        this.moleculeHoverMessageActive = true;
+        this.playHoverTypewriter(text);
+    },
+
+    clearMoleculeHoverMessage() {
+        if (!this.hoverPortElement || !this.moleculeHoverMessageActive) return;
+        this.cancelHoverTypewriter();
+        this.hoverTypewriterNoteIndex = -1;
+        this.hoverPortElement.textContent = '';
+        this.hoverPortElement.classList.remove('is-active', 'is-note-ltr', 'is-note-rtl');
+        this.moleculeHoverMessageActive = false;
     },
 
     refreshDisplayTokens() {
@@ -14468,17 +14769,6 @@ const ActionWarehouse = {
 
         this.blocks.forEach(block => {
             if (block.state !== 'active' || block.nestedIn) return;
-
-            // Normalize deployed (page-space) blocks to viewport-fixed positioning
-            // so the snap-back animation runs in screen coordinates
-            const rect = block.element.getBoundingClientRect();
-            block.element.classList.remove('is-deployed');
-            block.element.classList.add('is-dragging');
-            block.x = rect.left;
-            block.y = rect.top;
-            this.applyTransform(block, 0);
-            void block.element.offsetWidth; // flush styles so the transition animates
-
             this.returnToDock(block);
         });
     },
@@ -15078,32 +15368,12 @@ const ActionWarehouse = {
         };
     },
 
-    showMacroIndicationSlot(block) {
-        const slot = block?.slotElement;
-        if (!slot || block.nestedIn) return;
-        block._macroIndicationSlotSnapshot = {
-            parent: slot,
-            nextSibling: block.element.nextSibling
-        };
-        this.markSlotEmpty(block);
-        document.body.appendChild(block.element);
-        block.element.style.display = 'none';
+    showMacroIndicationSlot(_block) {
+        /* Real block stays in the tray at default dock chrome — ghost arc only. */
     },
 
     clearMacroIndicationSlot(block) {
         if (!block) return;
-        block.element.style.removeProperty('display');
-        this.clearSlotEmpty(block);
-        const snap = block._macroIndicationSlotSnapshot;
-        if (snap?.parent) {
-            if (snap.nextSibling && snap.nextSibling.parentNode === snap.parent) {
-                snap.parent.insertBefore(block.element, snap.nextSibling);
-            } else {
-                snap.parent.appendChild(block.element);
-            }
-        } else if (block.slotElement) {
-            block.slotElement.appendChild(block.element);
-        }
         delete block._macroIndicationSlotSnapshot;
     },
 
@@ -15116,6 +15386,9 @@ const ActionWarehouse = {
         ghost.classList.add('is-macro-indication');
         ghost.removeAttribute('id');
         ghost.setAttribute('aria-hidden', 'true');
+        ghost.style.display = '';
+        ghost.style.visibility = 'visible';
+        ghost.style.removeProperty('transform');
         return ghost;
     },
 
@@ -15147,10 +15420,11 @@ const ActionWarehouse = {
         const endRect = this.getMacroIndicationTargetRect(block, startRect);
         if (!startRect.width || !endRect.width) return;
 
+        const ghost = this.createMacroIndicationGhost(block);
+
         this.showMacroIndicationSlot(block);
         this._macroIndicationBlock = block;
 
-        const ghost = this.createMacroIndicationGhost(block);
         const cfg = CONFIG.warehouse;
         const startScale = cfg.depthDeployStartScale ?? 0.94;
 
@@ -15699,6 +15973,21 @@ const ActionWarehouse = {
         }
     },
 
+    prepareBlockReturnAnimation(block) {
+        const onCanvas = block.element.classList.contains('is-deployed');
+        const onDepthBar = block.element.classList.contains('is-depth-ui-mounted');
+        if (!onCanvas && !onDepthBar) return;
+
+        const rect = block.element.getBoundingClientRect();
+        document.body.appendChild(block.element);
+        block.element.classList.remove('is-deployed', 'is-depth-ui-mounted');
+        block.element.classList.add('is-dragging');
+        block.x = rect.left;
+        block.y = rect.top;
+        this.applyTransform(block, 0);
+        void block.element.offsetWidth;
+    },
+
     returnToDock(block) {
         if (block.type === 'frame' && (block.nestedBlocks || []).length > 0) {
             [...block.nestedBlocks].forEach(nested => {
@@ -15706,6 +15995,8 @@ const ActionWarehouse = {
                 this.returnToDock(nested);
             });
         }
+
+        this.prepareBlockReturnAnimation(block);
 
         const slotRect = block.slotElement.getBoundingClientRect();
         block.element.classList.add('is-returning');
