@@ -27,6 +27,7 @@ const ActionWarehouse = {
     _orbitTransitionTicks: 0,
     _kinematicEntryTicks: 0,
     _prevKinematicActive: false,
+    _depthDeployAnimating: null,
     filteredNoteIndices: new Set(),
     filterExitByNote: new Map(),   // noteIndex → { phase: 'hollow'|'peel', phaseStart }
     _navigationMapBlockCount: 0,
@@ -59,6 +60,14 @@ const ActionWarehouse = {
                 <span class="warehouse-shell__corner warehouse-shell__corner--br"></span>
             </div>
             <button type="button" class="warehouse-reset general-t" aria-label="נקה לוח">נקה לוח</button>
+            <div class="depth-block-bar__drop-zone" aria-hidden="true">
+                <div class="depth-block-bar__corners warehouse-panel-corners" aria-hidden="true">
+                    <span class="warehouse-panel-corner warehouse-panel-corner--tl"></span>
+                    <span class="warehouse-panel-corner warehouse-panel-corner--tr"></span>
+                    <span class="warehouse-panel-corner warehouse-panel-corner--bl"></span>
+                    <span class="warehouse-panel-corner warehouse-panel-corner--br"></span>
+                </div>
+            </div>
             <div class="depth-block-bar" aria-hidden="true"></div>
             <div class="warehouse-layout">
                 <div class="warehouse-dock">
@@ -139,8 +148,12 @@ const ActionWarehouse = {
         );
     },
 
-    // Footprint of the dock: extends #app scroll range so dots can clear the overlay
+    // L1: grid-aligned chrome below canvas (warehouse shell top); L2/L3: measured dock footprint
     getScrollReserve() {
+        const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+        if (level === 1 && typeof getSiteL1BottomChromePx === 'function') {
+            return getSiteL1BottomChromePx();
+        }
         const raw = getComputedStyle(document.documentElement).getPropertyValue('--warehouse-reserve');
         return parseFloat(raw) || 0;
     },
@@ -160,6 +173,48 @@ const ActionWarehouse = {
             reserve += Math.ceil(this.depthBlockBarElement.getBoundingClientRect().height + scale(8));
         }
         document.documentElement.style.setProperty('--warehouse-reserve', `${reserve}px`);
+    },
+
+    showDepthDropIndicator() {
+        this.shellElement?.classList.remove('is-depth-drop-fading');
+        this.shellElement?.classList.add('is-depth-drop-active');
+    },
+
+    fadeDepthDropIndicator() {
+        const shell = this.shellElement;
+        if (!shell?.classList.contains('is-depth-drop-active')) {
+            shell?.classList.remove('is-depth-drop-fading');
+            return;
+        }
+        shell.classList.remove('is-depth-drop-active');
+        shell.classList.add('is-depth-drop-fading');
+        clearTimeout(this._depthDropFadeTimer);
+        this._depthDropFadeTimer = setTimeout(() => {
+            shell.classList.remove('is-depth-drop-fading');
+        }, 280);
+    },
+
+    clearDepthDropIndicator() {
+        clearTimeout(this._depthDropFadeTimer);
+        this.shellElement?.classList.remove('is-depth-drop-active', 'is-depth-drop-fading');
+    },
+
+    markSlotEmpty(block) {
+        const slot = block?.slotElement;
+        if (!slot || block.nestedIn) return;
+        const { width, height } = this.blockMetrics(block);
+        slot.style.width = `${Math.ceil(width)}px`;
+        slot.style.height = `${Math.ceil(height)}px`;
+        slot.classList.add('is-empty');
+        this.restoreDockTrayOrder();
+    },
+
+    clearSlotEmpty(block) {
+        const slot = block?.slotElement;
+        if (!slot) return;
+        slot.classList.remove('is-empty');
+        slot.style.removeProperty('width');
+        slot.style.removeProperty('height');
     },
 
     // Wheel over the tray scrolls vertically through all tag blocks
@@ -279,6 +334,15 @@ const ActionWarehouse = {
     reorderDockTrayByRelevance(coTags, coAuthors, coTypologies = new Set()) {
         if (!this.trayBlocksElement) return;
         this.ensureDockTrayBaseOrder();
+
+        const hasReservedSlot = this._dockTrayBaseOrder.some(block =>
+            block.slotElement?.classList.contains('is-empty') &&
+            block.slotElement?.parentElement === this.trayBlocksElement
+        );
+        if (hasReservedSlot) {
+            this.restoreDockTrayOrder();
+            return;
+        }
 
         const relevant = [];
         const irrelevant = [];
@@ -653,7 +717,7 @@ const ActionWarehouse = {
         if (!this.depthBlockBarElement || block.nestedIn) return;
 
         block.element.classList.remove('is-dragging', 'is-returning', 'is-nested');
-        block.element.classList.add('is-deployed', 'is-depth-ui-mounted');
+        block.element.classList.add('is-deployed', 'is-depth-ui-mounted', 'is-selected');
         block.element.style.transform = '';
         block.state = 'active';
 
@@ -680,12 +744,128 @@ const ActionWarehouse = {
         ).length;
 
         this.depthBlockBarElement.classList.toggle('has-blocks', deployedCount > 0);
-        this.depthBlockBarElement.classList.remove('is-drop-active');
+        this.fadeDepthDropIndicator();
         if (this.shellElement) {
             this.shellElement.classList.toggle('is-workspace-active', deployedCount > 0);
         }
         this.updateScrollReserve();
         this.updateDotFocusFilter();
+    },
+
+    measureDepthBarSlotRect(block) {
+        if (!this.depthBlockBarElement) return null;
+
+        const bar = this.depthBlockBarElement;
+        const hadBlocks = bar.classList.contains('has-blocks');
+        if (!hadBlocks) bar.classList.add('has-blocks');
+
+        block.element.style.visibility = 'hidden';
+        block.element.style.transform = 'none';
+        bar.appendChild(block.element);
+        if (block.type === 'frame') this.refreshFrameLayout(block);
+
+        const rect = block.element.getBoundingClientRect();
+        block.element.remove();
+        block.element.style.visibility = '';
+        block.element.style.transform = '';
+
+        if (!hadBlocks) bar.classList.remove('has-blocks');
+        return rect;
+    },
+
+    _depthDeployEase(t) {
+        return 1 - Math.pow(1 - t, 3);
+    },
+
+    _runDepthDeployMotion(block, startRect, endRect, onDone) {
+        const cfg = CONFIG.warehouse;
+        const duration = cfg.depthDeployDuration ?? 520;
+        const startScale = cfg.depthDeployStartScale ?? 0.94;
+        const arcLift = Math.min(
+            cfg.depthDeployArcLift ?? scale(14),
+            Math.abs(startRect.top - endRect.top) * 0.15 + scale(6)
+        );
+        const el = block.element;
+        const t0 = performance.now();
+        let finished = false;
+
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            if (block._depthDeployRaf) {
+                cancelAnimationFrame(block._depthDeployRaf);
+                block._depthDeployRaf = null;
+            }
+            clearTimeout(block._depthDeployTimeout);
+            block._depthDeployTimeout = null;
+            el.style.transform = '';
+            el.classList.remove('is-deploying-to-bar');
+            onDone?.();
+        };
+
+        const tick = (now) => {
+            const raw = Math.min(1, (now - t0) / duration);
+            const e = this._depthDeployEase(raw);
+            const x = startRect.left + (endRect.left - startRect.left) * e;
+            const y = startRect.top + (endRect.top - startRect.top) * e -
+                arcLift * Math.sin(raw * Math.PI);
+            const s = startScale + (1 - startScale) * e;
+            el.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${s})`;
+
+            if (raw < 1) {
+                block._depthDeployRaf = requestAnimationFrame(tick);
+            } else {
+                finish();
+            }
+        };
+
+        block._depthDeployTimeout = setTimeout(finish, duration + 32);
+        block._depthDeployRaf = requestAnimationFrame(tick);
+    },
+
+    animateDeployToDepthBar(block) {
+        if (!this.depthBlockBarElement || block.nestedIn) return;
+        if (block.state !== 'docked') return;
+        if (this.isActiveCaptureBlock(block) && this.isWarehouseCaptureFull()) return;
+        if (!this._depthDeployAnimating) this._depthDeployAnimating = new Set();
+        if (this._depthDeployAnimating.has(block)) return;
+
+        const startRect = block.element.getBoundingClientRect();
+        if (!block._depthUiSnapshot) {
+            block._depthUiSnapshot = {
+                parent: block.slotElement,
+                nextSibling: null,
+                x: 0,
+                y: 0,
+                depthUiOnly: true
+            };
+        }
+
+        this.markSlotEmpty(block);
+        block.state = 'active';
+        block.element.classList.add('is-selected');
+
+        const endRect = this.measureDepthBarSlotRect(block);
+        if (!endRect || endRect.width < 1) {
+            this.clearSlotEmpty(block);
+            block.state = 'docked';
+            block.element.classList.remove('is-selected');
+            this.deployBlockToDepthBar(block);
+            return;
+        }
+
+        this._depthDeployAnimating.add(block);
+        this.showDepthDropIndicator();
+
+        document.body.appendChild(block.element);
+        block.element.classList.add('is-deploying-to-bar');
+        block.element.style.transform =
+            `translate3d(${startRect.left}px, ${startRect.top}px, 0) scale(${CONFIG.warehouse.depthDeployStartScale ?? 0.94})`;
+
+        this._runDepthDeployMotion(block, startRect, endRect, () => {
+            this.deployBlockToDepthBar(block);
+            this._depthDeployAnimating.delete(block);
+        });
     },
 
     placeBlockOnCanvasFromDepthUi(block) {
@@ -711,7 +891,7 @@ const ActionWarehouse = {
         if (drag.hoverFrame) {
             drag.hoverFrame.element.classList.remove('is-drop-target');
         }
-        this.depthBlockBarElement?.classList.remove('is-drop-active');
+        this.fadeDepthDropIndicator();
 
         if (this.isPointOverDock(e.clientX, e.clientY)) {
             if (drag.pullFromFrame && block.nestedIn) this.ejectFromFrame(block);
@@ -776,7 +956,7 @@ const ActionWarehouse = {
         block.element.classList.add('is-dragging');
         block.element.classList.remove('is-deployed', 'is-nested', 'is-depth-ui-mounted');
         if (!pullFromFrame) {
-            block.slotElement.classList.add('is-empty');
+            this.markSlotEmpty(block);
         }
         document.body.appendChild(block.element);
         this.applyTransform(block, 0);
@@ -795,7 +975,7 @@ const ActionWarehouse = {
         block.carryOrbitWhileDragging = depthUi ? false : !!liftFromSurface;
 
         if (depthUi) {
-            this.depthBlockBarElement?.classList.add('is-drop-active');
+            this.showDepthDropIndicator();
         }
 
         this.dragState = {
@@ -861,6 +1041,25 @@ const ActionWarehouse = {
             return;
         }
 
+        if (depthUi && block.state === 'docked' && !block.nestedIn &&
+            !this._depthDeployAnimating?.has(block)) {
+            this.dragState = {
+                block: block,
+                clickPending: true,
+                depthUi: true,
+                depthUiClickDeploy: true,
+                startClientX: e.clientX,
+                startClientY: e.clientY,
+                pointerX: e.clientX,
+                pointerY: e.clientY
+            };
+            this.boundMove = (ev) => this.onPointerMove(ev);
+            this.boundUp = (ev) => this.endDrag(ev);
+            document.addEventListener('pointermove', this.boundMove);
+            document.addEventListener('pointerup', this.boundUp);
+            return;
+        }
+
         this.beginDragLift(block, e, { depthUi });
         this.boundMove = (ev) => this.onPointerMove(ev);
         this.boundUp = (ev) => this.endDrag(ev);
@@ -886,8 +1085,8 @@ const ActionWarehouse = {
                 document.removeEventListener('pointerup', this.boundUp);
                 this.dragState = null;
                 this.beginDragLift(block, e, {
-                    depthUi: false,
-                    liftFromSurface: true,
+                    depthUi: !!drag.depthUiClickDeploy,
+                    liftFromSurface: !drag.depthUiClickDeploy,
                     startClientX: drag.startClientX,
                     startClientY: drag.startClientY,
                     restoreX,
@@ -974,9 +1173,12 @@ const ActionWarehouse = {
                 e.clientY - drag.startClientY
             );
             const clickThreshold = CONFIG.depth.clickDragThreshold ?? 6;
-            if (moved < clickThreshold &&
-                typeof DepthTransitionOrchestrator !== 'undefined') {
-                DepthTransitionOrchestrator.runBlockClick(block);
+            if (moved < clickThreshold) {
+                if (drag.depthUiClickDeploy) {
+                    this.animateDeployToDepthBar(block);
+                } else if (typeof DepthTransitionOrchestrator !== 'undefined') {
+                    DepthTransitionOrchestrator.runBlockClick(block);
+                }
             }
             return;
         }
@@ -1119,9 +1321,9 @@ const ActionWarehouse = {
         }
 
         setTimeout(() => {
-            block.element.classList.remove('is-dragging', 'is-deployed', 'is-returning', 'is-nested', 'is-depth-ui-mounted');
+            block.element.classList.remove('is-dragging', 'is-deployed', 'is-returning', 'is-nested', 'is-depth-ui-mounted', 'is-selected');
             block.element.style.transform = '';
-            block.slotElement.classList.remove('is-empty');
+            this.clearSlotEmpty(block);
             block.slotElement.appendChild(block.element);
             delete block._depthUiSnapshot;
             if (this.isDepthUiLevel()) {
@@ -1266,6 +1468,7 @@ const ActionWarehouse = {
         if (this.depthBlockBarElement) {
             this.depthBlockBarElement.classList.remove('has-blocks');
         }
+        this.clearDepthDropIndicator();
         this.updateScrollReserve();
     },
 

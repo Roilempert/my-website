@@ -44,7 +44,7 @@ siteGrid: {
     3: { inspector: { colStart: 8, colEnd: 19, rowStart: 4, rowEnd: 10 } }
   },
   contentColumns: { 1: 1, 2: 4, 3: 6 },
-  microNoteMinRows: 7
+  microNoteMinRows: 6
 }
 ```
 
@@ -95,6 +95,7 @@ Tokens: `--site-meso-col-width`, `--site-micro-col-width`, `--site-meso-viewport
 | `--site-grid-cell-w`, `--site-grid-cell-h` | One cell in the content area |
 | `--site-layer-{name}-left/top/width/height` | Region rect per `regions` entry |
 | `--scroll-breathing-room` | Set to `var(--site-layer-canvas-top)` when `canvas` region exists |
+| `--site-l1-bottom-chrome` | L1 only — `calc(100vh - var(--site-layer-warehouse-top))`; canvas padding + scroll clamp |
 | `--site-canvas-page-padding-x` | Set to `var(--site-grid-padding)` for L2/L3 page inset |
 
 ## DOM labels

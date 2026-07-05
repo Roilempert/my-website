@@ -2,6 +2,18 @@
    05b. SITE NAVIGATION — layer labels (top-right) + minimap (bottom-right)
    Two separate UI parts; see CONFIG.layerNavigation vs CONFIG.navigationMap.
    ========================================================================== */
+function createLayerLabelElement(labelText) {
+    const label = document.createElement('span');
+    label.className = 'site-navigation-layers__label';
+
+    const text = document.createElement('span');
+    text.className = 'site-navigation-layers__label-text';
+    text.textContent = labelText;
+    label.appendChild(text);
+
+    return label;
+}
+
 const NavigationMap = {
     layersPanel: null,
     mapsPanel: null,
@@ -148,9 +160,7 @@ const NavigationMap = {
             title.type = 'button';
             title.className = 'site-navigation-layers__title';
             title.dataset.level = String(level);
-            const label = document.createElement('span');
-            label.className = 'site-navigation-layers__label';
-            label.textContent = layerCfg?.labels?.[level] || `L${level}`;
+            const label = createLayerLabelElement(layerCfg?.labels?.[level] || `L${level}`);
             title.appendChild(label);
             title.addEventListener('pointerdown', (e) => e.stopPropagation());
             title.addEventListener('click', (e) => {
@@ -786,13 +796,25 @@ const NavigationMap = {
         }
     },
 
+    getMapContentOffset() {
+        const t = this._baseTransform;
+        if (!t) return { x: 0, y: 0 };
+        // Fixed marker: pan is CSS-only on the canvas — do not add to toMap offset.
+        if (this.usesFixedViewportMarker()) {
+            return { x: t.baseOffsetX, y: t.baseOffsetY };
+        }
+        return {
+            x: t.baseOffsetX + this._panDisplayX,
+            y: t.baseOffsetY + this._panDisplayY
+        };
+    },
+
     getEffectiveTransform() {
         if (!this._baseTransform?.contentBounds) return null;
 
         const t = this._baseTransform;
         const panBounds = t.panBounds || t.contentBounds;
-        const offsetX = t.baseOffsetX + this._panDisplayX;
-        const offsetY = t.baseOffsetY + this._panDisplayY;
+        const { x: offsetX, y: offsetY } = this.getMapContentOffset();
 
         return {
             ...t,
@@ -919,6 +941,9 @@ const NavigationMap = {
     },
 
     getMapPanBounds() {
+        if (this._activeLevel === 1) {
+            return this.getMapDrawBounds() || SpatialNavigation.getScrollAlignedMapBounds(1);
+        }
         return SpatialNavigation.getScrollAlignedMapBounds(this._activeLevel);
     },
 
@@ -951,10 +976,12 @@ const NavigationMap = {
         let followX = base.anchorX - (vpCenterX - panBounds.minX) * scale;
         let followY = base.anchorY - (vpCenterY - panBounds.minY) * scale;
 
-        const scrollPan = this.getScrollPanLimits(base, panBounds, scale, viewport);
-        if (scrollPan) {
-            followX = Math.max(scrollPan.minOffX, Math.min(scrollPan.maxOffX, followX));
-            followY = Math.max(scrollPan.minOffY, Math.min(scrollPan.maxOffY, followY));
+        if (this.getMapStyle().viewportFollowClamp !== false) {
+            const scrollPan = this.getScrollPanLimits(base, panBounds, scale, viewport);
+            if (scrollPan) {
+                followX = Math.max(scrollPan.minOffX, Math.min(scrollPan.maxOffX, followX));
+                followY = Math.max(scrollPan.minOffY, Math.min(scrollPan.maxOffY, followY));
+            }
         }
 
         return {
@@ -1358,10 +1385,13 @@ const NavigationMap = {
     computeFixedMarkerScale(viewport) {
         if (!viewport) return null;
         const fixed = this.getFixedViewportMarkerSize(viewport);
-        return Math.min(
-            fixed.w / Math.max(1, viewport.width),
-            fixed.h / Math.max(1, viewport.height)
-        );
+        const scaleW = fixed.w / Math.max(1, viewport.width);
+        const scaleH = fixed.h / Math.max(1, viewport.height);
+        // L1 band is taller than wide — height binding fills the marker vertically.
+        if (this._activeLevel === 1 && scaleH > scaleW) {
+            return scaleH;
+        }
+        return Math.min(scaleW, scaleH);
     },
 
     computeTransform(frameBounds, viewport, canvasW, canvasH, options = {}) {
@@ -1500,8 +1530,7 @@ const NavigationMap = {
 
         const t = this._baseTransform;
         const panBounds = t.panBounds || contentBounds;
-        const offsetX = t.baseOffsetX + this._panDisplayX;
-        const offsetY = t.baseOffsetY + this._panDisplayY;
+        const { x: offsetX, y: offsetY } = this.getMapContentOffset();
         const effective = {
             ...t,
             offsetX,
@@ -1512,10 +1541,24 @@ const NavigationMap = {
             })
         };
 
-        const vpTl = vp ? effective.toMap(vp.left, vp.top) : t.vpTl;
-        const vpBr = vp
-            ? effective.toMap(vp.left + vp.width, vp.top + vp.height)
-            : t.vpBr;
+        let vpTl;
+        let vpBr;
+        if (this.usesFixedViewportMarker() && vp) {
+            const fixed = this.getFixedViewportMarkerSize(vp);
+            vpTl = {
+                x: t.anchorX - fixed.w / 2 - this._panDisplayX,
+                y: t.anchorY - fixed.h / 2 - this._panDisplayY
+            };
+            vpBr = {
+                x: t.anchorX + fixed.w / 2 - this._panDisplayX,
+                y: t.anchorY + fixed.h / 2 - this._panDisplayY
+            };
+        } else {
+            vpTl = vp ? effective.toMap(vp.left, vp.top) : t.vpTl;
+            vpBr = vp
+                ? effective.toMap(vp.left + vp.width, vp.top + vp.height)
+                : t.vpBr;
+        }
 
         this._lastTransform = {
             contentBounds,
@@ -1560,6 +1603,11 @@ const NavigationMap = {
         this.applyCanvasPan();
         this.updateViewportMarker(base, vp);
         this.syncLastTransform(this._activeLevel, base.contentBounds, vp);
+        const blockActive = typeof ActionWarehouse !== 'undefined' &&
+            ActionWarehouse.getActiveBlockCount?.() > 0;
+        if (this._activeLevel === 1 && blockActive && this.ctx && base) {
+            this.drawMapContent(this.ctx, base, 1);
+        }
         const shouldEcho = this.shouldDrawViewportMarkerEcho();
         if (shouldEcho) {
             this.drawMapContent(this.ctx, base, this._activeLevel);
@@ -2615,6 +2663,10 @@ const NavigationMap = {
     clampMapPan(panX, panY) {
         const base = this._baseTransform;
         if (!base) return { x: panX, y: panY };
+
+        if (this.getMapStyle().viewportFollowClamp === false) {
+            return { x: panX, y: panY };
+        }
 
         const panBounds = base.panBounds || base.contentBounds;
         const vp = this.getMapViewportMarkerRect();

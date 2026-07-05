@@ -63,7 +63,7 @@ const CONFIG = {
         contentColumns: { 1: 1, 2: 4, 3: 6 },
         contentColumnScale: { 3: 1.0 },
         contentGapScale: 0.88,
-        microNoteMinRows: 7,
+        microNoteMinRows: 6,
         macroCanvasScrollFactor: 2
     },
 
@@ -523,6 +523,7 @@ const CONFIG = {
 
     /* --- Artifact Inspector (focus/isolation overlay) --- */
     inspector: {
+        openDuration: 0.48,         // s; focus card FLIP on fixed flyer layer
         closeDuration: 350          // ms; must match the CSS transition on .note-wrapper
     },
 
@@ -743,6 +744,9 @@ const CONFIG = {
         },
 
         returnDuration: 350,
+        depthDeployDuration: 520,
+        depthDeployStartScale: 0.94,
+        depthDeployArcLift: scale(14),
 
         frame: {
             filter: {
@@ -913,6 +917,46 @@ function siteGridSpanWidth(span) {
 function siteGridSpanHeight(span) {
     if (span <= 1) return 'var(--site-grid-cell-h)';
     return `calc(${span} * var(--site-grid-cell-h) + ${span - 1} * var(--site-grid-gap))`;
+}
+
+/** Resolve a site-grid CSS length token to pixels (for scroll reserve math). */
+function measureSiteGridTokenPx(tokenName, property = 'height') {
+    const root = document.documentElement;
+    const raw = getComputedStyle(root).getPropertyValue(tokenName).trim();
+    if (!raw) return 0;
+
+    let probe = root.querySelector('[data-site-grid-measure]');
+    if (!probe) {
+        probe = document.createElement('div');
+        probe.dataset.siteGridMeasure = '';
+        probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;overflow:hidden;';
+        root.appendChild(probe);
+    }
+    probe.style.width = property === 'width' ? raw : '0';
+    probe.style.height = property === 'height' ? raw : '0';
+    const px = probe.getBoundingClientRect()[property === 'width' ? 'width' : 'height'];
+    probe.style.width = '0';
+    probe.style.height = '0';
+    return px;
+}
+
+/** L1 viewport chrome below the canvas region — aligned to warehouse shell top. */
+function getSiteL1BottomChromePx() {
+    const wh = document.querySelector('.warehouse-shell');
+    if (wh) {
+        return Math.max(0, Math.ceil(window.innerHeight - wh.getBoundingClientRect().top));
+    }
+    return measureSiteGridTokenPx('--site-l1-bottom-chrome');
+}
+
+/** Visible canvas height on L1 — viewport minus warehouse shell chrome. */
+function getSiteL1VisibleViewportHeightPx() {
+    const wh = document.querySelector('.warehouse-shell');
+    if (wh) {
+        return Math.max(0, wh.getBoundingClientRect().top);
+    }
+    const chrome = getSiteL1BottomChromePx();
+    return Math.max(0, window.innerHeight - chrome);
 }
 
 /** Shell grid line position — viewport-fixed reference (padding origin). */
@@ -1359,6 +1403,14 @@ function applySiteGridTokens(root = document.documentElement, level = null) {
     if (regions.canvas) {
         root.style.setProperty('--scroll-breathing-room', 'var(--site-layer-canvas-top)');
         root.style.setProperty('--site-canvas-page-padding-x', 'var(--site-grid-padding)');
+        if (g.regions?.warehouse) {
+            root.style.setProperty(
+                '--site-l1-bottom-chrome',
+                'calc(100vh - var(--site-layer-warehouse-top))'
+            );
+        } else {
+            root.style.removeProperty('--site-l1-bottom-chrome');
+        }
     }
 
     if (regions.filterFringe) {

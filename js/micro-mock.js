@@ -61,23 +61,31 @@ const MicroMock = {
         return `<span class="action-block action-block--typology micro-mock__typology-block general-t" data-typology="${this.escapeHTML(typology)}" data-typology-pattern="${pattern}">${inner}</span>`;
     },
 
-    buildCardHTML(item, options = {}) {
+    buildCardOnlyHTML(item, options = {}) {
         const title = String(item.title || '').trim();
         const titleHTML = title
             ? `<h2 class="note-title note-h">${this.escapeHTML(title)}</h2>`
             : '';
         const focusClass = options.focusScale ? ' micro-mock__card--focus' : '';
         const dir = item.textDirection === 'ltr' ? 'ltr' : 'rtl';
-        const card = `<div class="micro-mock__card note-card${focusClass}" data-note-id="${this.escapeHTML(item.id)}" dir="${dir}">` +
+        return `<div class="micro-mock__card note-card${focusClass}" data-note-id="${this.escapeHTML(item.id)}" dir="${dir}">` +
             `<div class="note-idcode general-t">${this.escapeHTML(item.id)}</div>` +
             titleHTML +
             `<div class="note-body note-t">${this.escapeHTML(item.body)}</div>` +
             `</div>`;
-        const tags = `<div class="micro-mock__tags">` +
+    },
+
+    buildTagsRowHTML(item) {
+        return `<div class="micro-mock__tags">` +
             `${this.buildTagsHTML(item.tags, { noteStyle: true })}` +
             `${this.buildTypologyHTML(item)}` +
             `${this.buildAuthorHTML(item)}` +
             `</div>`;
+    },
+
+    buildCardHTML(item, options = {}) {
+        const card = this.buildCardOnlyHTML(item, options);
+        const tags = this.buildTagsRowHTML(item);
         return `<div class="micro-mock__note">${card}${tags}</div>`;
     },
 

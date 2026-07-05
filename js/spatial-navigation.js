@@ -156,7 +156,9 @@ const SpatialNavigation = {
         const pad = CONFIG.navigation.contentPadding;
         const vw = window.innerWidth;
         const vh = window.innerHeight;
-        const bottomPad = pad + (forLevel === 1 ? ActionWarehouse.getScrollReserve() : 0);
+        const bottomPad = forLevel === 1
+            ? ActionWarehouse.getScrollReserve()
+            : pad;
 
         return {
             rect,
@@ -458,7 +460,7 @@ const SpatialNavigation = {
         let chromeTop = window.innerHeight;
         const selectors = ['.warehouse-shell', '.site-navigation-maps'];
         if (forLevel >= 2) {
-            selectors.push('.depth-block-bar.has-blocks', '.depth-block-bar.is-drop-active');
+            selectors.push('.depth-block-bar.has-blocks', '.warehouse-shell.is-depth-drop-active');
         }
 
         selectors.forEach((selector) => {
@@ -491,14 +493,25 @@ const SpatialNavigation = {
         return this.getCatalogViewportPageRect(forLevel);
     },
 
-    // Minimap marker viewport — match the raw browser viewport, including partially covered rows.
+    // Minimap viewport — L1 clips to visible canvas above warehouse; other levels use full browser viewport.
     getNavigationMapViewportPageRect(forLevel = DepthController.currentLevel) {
-        void forLevel;
+        const scrollX = window.pageXOffset;
+        const scrollY = window.pageYOffset;
+        const width = window.innerWidth;
+
+        if (forLevel === 1 && typeof getSiteL1VisibleViewportHeightPx === 'function') {
+            return {
+                left: scrollX,
+                top: scrollY,
+                width,
+                height: Math.round(getSiteL1VisibleViewportHeightPx())
+            };
+        }
 
         return {
-            left: window.pageXOffset,
-            top: window.pageYOffset,
-            width: window.innerWidth,
+            left: scrollX,
+            top: scrollY,
+            width,
             height: window.innerHeight
         };
     },

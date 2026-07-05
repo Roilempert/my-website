@@ -164,7 +164,7 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 |----------|--------|
 | Column width | **6 site cols** (`contentColumns[3]`) — ~**4 cards** across viewport |
 | Column gap | 40px → `2.5rem` |
-| Min height | 7 site rows |
+| Min height | 6 site rows |
 | Card bg / text | color 1 / color 4 |
 | Border | none |
 | Radius | 5px → `var(--space-5)` |
@@ -189,7 +189,9 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 ### Focus popup (inspector, all levels)
 
 - Backdrop: color 3 @ 20% opacity
-- Note scales **6 cols → 8 cols** proportionally
+- Note scales **6 cols → 8 cols** proportionally via `--focus-card-scale` (`8/6`); inspector width is measured from the clicked card (`sourceWidth × 8/6`), not the site token alone; card interior keeps L3 proportions; tag/author/typology blocks stay grid pill size
+- **Panel scaler:** `transform: scale(var(--focus-card-scale))` with measured `margin-bottom` lift — same scale path as the flyer; reserves height for tags/metadata
+- **Open motion:** the clicked L3 card DOM moves into a fixed `.artifact-inspector-flyer` shell (no HTML rebuild); top-left FLIP on the scaler from source rect → shell row 2; one element, one proportional scale path; shadow only after landing; source `.note-wrapper` hidden (`visibility: hidden` on wrapper + descendants)
 - Popup scrollport spans the full viewport height; focused/related content can scroll to the top and bottom viewport edges
 - Focused note starts at the beginning of shell row 2 when the popup opens
 - Metadata panel below (40px gap): bg color 3, text color 4, radius 5px
@@ -216,6 +218,10 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-05 | Layer navigation: removed corner decorations from label boxes |
+| 2026-07-05 | L1 minimap viewport clipped to visible canvas (`warehouse-top`); pan/marker aligned with scroll clamp |
+| 2026-07-05 | Focus open FLIP: single L3 card DOM through flyer → panel (no rebuild); unified `transform: scale(8/6)` end-to-end; pixel-slot alignment; shadow only after landing; card restored to grid on close |
+| 2026-07-05 | L3 note min height **7 → 6 site rows** |
 | 2026-07-05 | L3 note column width **8 → 6 site cols** — ~4 cards across viewport (was ~3) |
 | 2026-07-05 | Focus metadata: author code uppercase (`MFR`); typology field Hebrew via `typologyLabels` |
 | 2026-07-05 | Site shell grid 18×10 → **24×12**; warehouse **2 rows** (rows 11–12); dock/map **20+4 cols**; statistics **4 cols**; contentColumns L2/L3 **4/8**; grid marks every 3rd line; L3 min height **7 rows** |
