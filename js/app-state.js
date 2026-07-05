@@ -399,9 +399,75 @@ const AppState = {
         });
     },
 
+    /** Pan the viewport to the L3 block-study cluster (notes stay in canvas flow). */
+    centerMicroFocusCluster(options = {}) {
+        const app = document.getElementById('app');
+        if (!app || !app.classList.contains('is-micro-grid-layout')) return;
+        if (typeof CatalogState === 'undefined' || !CatalogState.hasFocus) return;
+
+        SpatialNavigation.bypassScrollClamp(
+            options.smooth
+                ? CONFIG.warehouse.workspaceGrid.rushDuration + 450
+                : 300
+        );
+
+        const reserve = typeof ActionWarehouse !== 'undefined'
+            ? ActionWarehouse.getScrollReserve()
+            : 0;
+
+        const scrollToCluster = () => {
+            const viewMidY = (window.innerHeight - reserve) / 2;
+            let minL = Infinity;
+            let minT = Infinity;
+            let maxR = -Infinity;
+            let maxB = -Infinity;
+
+            app.querySelectorAll(':scope > .micro-grid-column .note-wrapper:not(.is-layout-excluded)').forEach((wrapper) => {
+                const noteIndex = parseInt(wrapper.dataset.noteIndex, 10);
+                const role = CatalogState.noteRoles?.get(noteIndex);
+                if (role !== 'emphasized' && role !== 'captured' && role !== 'stretched') return;
+
+                const rect = wrapper.getBoundingClientRect();
+                if (rect.width < 1 && rect.height < 1) return;
+                minL = Math.min(minL, rect.left);
+                minT = Math.min(minT, rect.top);
+                maxR = Math.max(maxR, rect.right);
+                maxB = Math.max(maxB, rect.bottom);
+            });
+
+            if (!Number.isFinite(minL)) return;
+
+            const cx = (minL + maxR) / 2;
+            const cy = (minT + maxB) / 2;
+            const dX = cx - window.innerWidth / 2;
+            const dY = cy - viewMidY;
+
+            if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return;
+
+            window.scrollBy({
+                left: dX,
+                top: dY,
+                behavior: options.smooth ? 'smooth' : 'auto'
+            });
+        };
+
+        requestAnimationFrame(() => {
+            scrollToCluster();
+            requestAnimationFrame(scrollToCluster);
+        });
+    },
+
     centerMesoViewport(options = {}) {
         const app = document.getElementById('app');
         if (!app) return;
+
+        if (app.classList.contains('is-micro-grid-layout') &&
+            typeof CatalogState !== 'undefined' &&
+            CatalogState.hasFocus &&
+            options.centerMode !== 'canvas') {
+            this.centerMicroFocusCluster(options);
+            return;
+        }
 
         if (typeof ToroidalPan !== 'undefined' && ToroidalPan.isEnabled()) {
             ToroidalPan.centerOnContent(options);

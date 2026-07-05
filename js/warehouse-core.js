@@ -28,6 +28,9 @@ const ActionWarehouse = {
     _kinematicEntryTicks: 0,
     _prevKinematicActive: false,
     _depthDeployAnimating: null,
+    _macroIndicationAnimating: null,
+    _macroIndicationGhost: null,
+    _macroIndicationBlock: null,
     filteredNoteIndices: new Set(),
     filterExitByNote: new Map(),   // noteIndex → { phase: 'hollow'|'peel', phaseStart }
     _navigationMapBlockCount: 0,
@@ -205,6 +208,13 @@ const ActionWarehouse = {
         const { width, height } = this.blockMetrics(block);
         slot.style.width = `${Math.ceil(width)}px`;
         slot.style.height = `${Math.ceil(height)}px`;
+        let ghost = slot.querySelector('.block-slot__ghost');
+        if (!ghost) {
+            ghost = document.createElement('div');
+            ghost.className = 'block-slot__ghost general-t';
+            slot.appendChild(ghost);
+        }
+        ghost.innerHTML = this.buildSlotGhostInnerHTML(block);
         slot.classList.add('is-empty');
         this.restoreDockTrayOrder();
     },
@@ -213,8 +223,56 @@ const ActionWarehouse = {
         const slot = block?.slotElement;
         if (!slot) return;
         slot.classList.remove('is-empty');
+        slot.querySelector('.block-slot__ghost')?.remove();
         slot.style.removeProperty('width');
         slot.style.removeProperty('height');
+    },
+
+    buildSlotGhostInnerHTML(block) {
+        const label = this.getBlockGhostLabel(block);
+        const safeLabel = typeof escapeTypologyHtml === 'function'
+            ? escapeTypologyHtml(label)
+            : String(label || '').replace(/</g, '&lt;');
+        return `<span class="block-slot__glyph-ring" aria-hidden="true"></span>` +
+            `<span class="block-slot__ghost-label">${safeLabel}</span>`;
+    },
+
+    getBlockGhostLabel(block) {
+        if (block.type === 'author') return block.author || '';
+        if (block.type === 'typology') {
+            return typeof getTypologyLabel === 'function'
+                ? getTypologyLabel(block.typology)
+                : (block.typology || '');
+        }
+        return block.tag || '';
+    },
+
+    syncBlockRemovable(block) {
+        if (!block?.element || block.type === 'frame') return;
+        const deployed = block.element.classList.contains('is-deployed');
+        const selected = block.element.classList.contains('is-selected');
+        const depthUi = this.isDepthUiLevel();
+        const removable = deployed && !block.nestedIn && (!depthUi || selected);
+        block.element.classList.toggle('is-removable', removable);
+    },
+
+    syncAllBlockRemovables() {
+        this.blocks.forEach(block => this.syncBlockRemovable(block));
+    },
+
+    wireBlockRemoveMark(block) {
+        const removeMark = document.createElement('span');
+        removeMark.className = 'block-remove-mark';
+        removeMark.setAttribute('aria-hidden', 'true');
+        removeMark.textContent = '×';
+        removeMark.addEventListener('pointerdown', (e) => e.stopPropagation());
+        removeMark.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (this.dragState) return;
+            if (!block.element.classList.contains('is-removable')) return;
+            this.returnToDock(block);
+        });
+        block.element.insertBefore(removeMark, block.element.firstChild);
     },
 
     // Wheel over the tray scrolls vertically through all tag blocks
@@ -231,6 +289,7 @@ const ActionWarehouse = {
     resetAll() {
         if (this.dragState) return;
 
+        this.clearMacroIndicationGhost();
         this.ensurePhysicsMaps();
         this.stretchBindingByNote.clear();
         this.stretchGroupCounts.clear();
@@ -392,6 +451,7 @@ const ActionWarehouse = {
                 : 'regular';
         }
         el.dataset.type = def.type || 'tag';
+        if (def.color) el.style.setProperty('--block-tag-color', def.color);
 
         const label = isAuthor ? def.author : (isTypology ? null : def.tag);
         const glyphHTML = (isAuthor || isTypology)
@@ -422,7 +482,10 @@ const ActionWarehouse = {
             x: 0, y: 0
         };
 
+        this.wireBlockRemoveMark(block);
+
         el.addEventListener('pointerdown', (e) => {
+            if (e.target.closest('.block-remove-mark')) return;
             e.stopPropagation();
             this.startDrag(block, e);
         });
@@ -736,6 +799,7 @@ const ActionWarehouse = {
 
         this.depthBlockBarElement.appendChild(block.element);
         if (block.type === 'frame') this.refreshFrameLayout(block);
+        this.syncBlockRemovable(block);
 
         const deployedCount = this.blocks.filter(b =>
             b.state === 'active' &&
@@ -777,29 +841,27 @@ const ActionWarehouse = {
         return 1 - Math.pow(1 - t, 3);
     },
 
-    _runDepthDeployMotion(block, startRect, endRect, onDone) {
+    _runArcViewportMotion(el, startRect, endRect, options = {}, onDone) {
         const cfg = CONFIG.warehouse;
-        const duration = cfg.depthDeployDuration ?? 520;
-        const startScale = cfg.depthDeployStartScale ?? 0.94;
-        const arcLift = Math.min(
+        const duration = options.duration ?? cfg.depthDeployDuration ?? 520;
+        const startScale = options.startScale ?? cfg.depthDeployStartScale ?? 0.94;
+        const arcLift = options.arcLift ?? Math.min(
             cfg.depthDeployArcLift ?? scale(14),
             Math.abs(startRect.top - endRect.top) * 0.15 + scale(6)
         );
-        const el = block.element;
+        const state = options.state || {};
         const t0 = performance.now();
         let finished = false;
 
         const finish = () => {
             if (finished) return;
             finished = true;
-            if (block._depthDeployRaf) {
-                cancelAnimationFrame(block._depthDeployRaf);
-                block._depthDeployRaf = null;
+            if (state.raf) {
+                cancelAnimationFrame(state.raf);
+                state.raf = null;
             }
-            clearTimeout(block._depthDeployTimeout);
-            block._depthDeployTimeout = null;
-            el.style.transform = '';
-            el.classList.remove('is-deploying-to-bar');
+            clearTimeout(state.timeout);
+            state.timeout = null;
             onDone?.();
         };
 
@@ -813,14 +875,148 @@ const ActionWarehouse = {
             el.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${s})`;
 
             if (raw < 1) {
-                block._depthDeployRaf = requestAnimationFrame(tick);
+                state.raf = requestAnimationFrame(tick);
             } else {
                 finish();
             }
         };
 
-        block._depthDeployTimeout = setTimeout(finish, duration + 32);
-        block._depthDeployRaf = requestAnimationFrame(tick);
+        state.timeout = setTimeout(finish, duration + 32);
+        state.raf = requestAnimationFrame(tick);
+        return state;
+    },
+
+    _runDepthDeployMotion(block, startRect, endRect, onDone) {
+        const el = block.element;
+        block._depthDeployState = block._depthDeployState || {};
+        this._runArcViewportMotion(el, startRect, endRect, {
+            state: block._depthDeployState
+        }, () => {
+            el.style.transform = '';
+            el.classList.remove('is-deploying-to-bar');
+            onDone?.();
+        });
+    },
+
+    getMacroIndicationTargetRect(block, startRect) {
+        const { width, height } = this.blockMetrics(block);
+        const visibleBottom = typeof getSiteL1VisibleViewportHeightPx === 'function'
+            ? getSiteL1VisibleViewportHeightPx()
+            : window.innerHeight * 0.72;
+        const centerY = visibleBottom * 0.5;
+        const fullTarget = {
+            left: window.innerWidth * 0.5 - width / 2,
+            top: centerY - height / 2,
+            width,
+            height
+        };
+        if (!startRect) return fullTarget;
+
+        const travel = CONFIG.warehouse.macroIndicationTravel ?? 0.38;
+        return {
+            left: startRect.left + (fullTarget.left - startRect.left) * travel,
+            top: startRect.top + (fullTarget.top - startRect.top) * travel,
+            width,
+            height
+        };
+    },
+
+    showMacroIndicationSlot(block) {
+        const slot = block?.slotElement;
+        if (!slot || block.nestedIn) return;
+        block._macroIndicationSlotSnapshot = {
+            parent: slot,
+            nextSibling: block.element.nextSibling
+        };
+        this.markSlotEmpty(block);
+        document.body.appendChild(block.element);
+        block.element.style.display = 'none';
+    },
+
+    clearMacroIndicationSlot(block) {
+        if (!block) return;
+        block.element.style.removeProperty('display');
+        this.clearSlotEmpty(block);
+        const snap = block._macroIndicationSlotSnapshot;
+        if (snap?.parent) {
+            if (snap.nextSibling && snap.nextSibling.parentNode === snap.parent) {
+                snap.parent.insertBefore(block.element, snap.nextSibling);
+            } else {
+                snap.parent.appendChild(block.element);
+            }
+        } else if (block.slotElement) {
+            block.slotElement.appendChild(block.element);
+        }
+        delete block._macroIndicationSlotSnapshot;
+    },
+
+    createMacroIndicationGhost(block) {
+        const ghost = block.element.cloneNode(true);
+        ghost.classList.remove(
+            'is-dragging', 'is-deployed', 'is-selected', 'is-removable',
+            'is-returning', 'is-nested', 'is-depth-ui-mounted', 'is-deploying-to-bar'
+        );
+        ghost.classList.add('is-macro-indication');
+        ghost.removeAttribute('id');
+        ghost.setAttribute('aria-hidden', 'true');
+        return ghost;
+    },
+
+    clearMacroIndicationGhost() {
+        const ghost = this._macroIndicationGhost;
+        if (ghost) {
+            if (ghost._macroIndicationState?.raf) {
+                cancelAnimationFrame(ghost._macroIndicationState.raf);
+            }
+            clearTimeout(ghost._macroIndicationState?.timeout);
+            ghost.remove();
+            this._macroIndicationGhost = null;
+        }
+        if (this._macroIndicationBlock) {
+            this.clearMacroIndicationSlot(this._macroIndicationBlock);
+            this._macroIndicationBlock = null;
+        }
+        this._macroIndicationAnimating?.clear();
+    },
+
+    animateMacroDeployIndication(block) {
+        if (DepthController.currentLevel !== 1 || block.state !== 'docked' || block.nestedIn) return;
+        if (!this._macroIndicationAnimating) this._macroIndicationAnimating = new Set();
+        if (this._macroIndicationAnimating.has(block)) return;
+
+        this.clearMacroIndicationGhost();
+
+        const startRect = block.element.getBoundingClientRect();
+        const endRect = this.getMacroIndicationTargetRect(block, startRect);
+        if (!startRect.width || !endRect.width) return;
+
+        this.showMacroIndicationSlot(block);
+        this._macroIndicationBlock = block;
+
+        const ghost = this.createMacroIndicationGhost(block);
+        const cfg = CONFIG.warehouse;
+        const startScale = cfg.depthDeployStartScale ?? 0.94;
+
+        document.body.appendChild(ghost);
+        this._macroIndicationGhost = ghost;
+        this._macroIndicationAnimating.add(block);
+        ghost._macroIndicationState = {};
+        ghost.style.transform =
+            `translate3d(${startRect.left}px, ${startRect.top}px, 0) scale(${startScale})`;
+
+        this._runArcViewportMotion(ghost, startRect, endRect, {
+            duration: cfg.macroIndicationDuration ?? cfg.depthDeployDuration ?? 720,
+            state: ghost._macroIndicationState
+        }, () => {
+            this._macroIndicationAnimating.delete(block);
+            this.clearMacroIndicationSlot(block);
+            this._macroIndicationBlock = null;
+            ghost.classList.add('is-fading');
+            setTimeout(() => {
+                if (ghost.parentNode) ghost.remove();
+                if (this._macroIndicationGhost === ghost) this._macroIndicationGhost = null;
+            }, cfg.macroIndicationFadeMs ?? 320);
+        });
     },
 
     animateDeployToDepthBar(block) {
@@ -1041,6 +1237,46 @@ const ActionWarehouse = {
             return;
         }
 
+        if (!depthUi &&
+            DepthController.currentLevel === 1 &&
+            block.state === 'docked' &&
+            !block.nestedIn) {
+            this.dragState = {
+                block: block,
+                clickPending: true,
+                macroClickIndicate: true,
+                depthUi: false,
+                startClientX: e.clientX,
+                startClientY: e.clientY,
+                pointerX: e.clientX,
+                pointerY: e.clientY
+            };
+            this.boundMove = (ev) => this.onPointerMove(ev);
+            this.boundUp = (ev) => this.endDrag(ev);
+            document.addEventListener('pointermove', this.boundMove);
+            document.addEventListener('pointerup', this.boundUp);
+            return;
+        }
+
+        if (depthUi && block.element.classList.contains('is-removable') &&
+            block.element.classList.contains('is-depth-ui-mounted')) {
+            this.dragState = {
+                block: block,
+                clickPending: true,
+                depthUiReturn: true,
+                depthUi: true,
+                startClientX: e.clientX,
+                startClientY: e.clientY,
+                pointerX: e.clientX,
+                pointerY: e.clientY
+            };
+            this.boundMove = (ev) => this.onPointerMove(ev);
+            this.boundUp = (ev) => this.endDrag(ev);
+            document.addEventListener('pointermove', this.boundMove);
+            document.addEventListener('pointerup', this.boundUp);
+            return;
+        }
+
         if (depthUi && block.state === 'docked' && !block.nestedIn &&
             !this._depthDeployAnimating?.has(block)) {
             this.dragState = {
@@ -1060,6 +1296,7 @@ const ActionWarehouse = {
             return;
         }
 
+        this.clearMacroIndicationGhost();
         this.beginDragLift(block, e, { depthUi });
         this.boundMove = (ev) => this.onPointerMove(ev);
         this.boundUp = (ev) => this.endDrag(ev);
@@ -1084,9 +1321,10 @@ const ActionWarehouse = {
                 document.removeEventListener('pointermove', this.boundMove);
                 document.removeEventListener('pointerup', this.boundUp);
                 this.dragState = null;
+                this.clearMacroIndicationGhost();
                 this.beginDragLift(block, e, {
                     depthUi: !!drag.depthUiClickDeploy,
-                    liftFromSurface: !drag.depthUiClickDeploy,
+                    liftFromSurface: !drag.depthUiClickDeploy && !drag.macroClickIndicate,
                     startClientX: drag.startClientX,
                     startClientY: drag.startClientY,
                     restoreX,
@@ -1176,6 +1414,11 @@ const ActionWarehouse = {
             if (moved < clickThreshold) {
                 if (drag.depthUiClickDeploy) {
                     this.animateDeployToDepthBar(block);
+                } else if (drag.macroClickIndicate) {
+                    this.animateMacroDeployIndication(block);
+                } else if (drag.depthUiReturn ||
+                    block.element.classList.contains('is-removable')) {
+                    this.returnToDock(block);
                 } else if (typeof DepthTransitionOrchestrator !== 'undefined') {
                     DepthTransitionOrchestrator.runBlockClick(block);
                 }
@@ -1208,8 +1451,13 @@ const ActionWarehouse = {
             block.element.classList.remove('is-dragging');
             block.element.classList.add('is-deployed');
             this.applyTransform(block, 0);
+            this.syncBlockRemovable(block);
             if (block.body) {
                 Matter.Body.setPosition(block.body, { x: block.bodyX, y: block.bodyY });
+            }
+            if (block.element.classList.contains('is-removable')) {
+                this.returnToDock(block);
+                return;
             }
             DepthTransitionOrchestrator.runBlockClick(block);
             return;
@@ -1287,6 +1535,7 @@ const ActionWarehouse = {
         this.applyTransform(block, 0);
         this.syncFrameBodyOwnership(block);
         if (block.type === 'frame') this.refreshFrameLayout(block);
+        this.syncBlockRemovable(block);
         this.updateWorkspaceState();
         if (typeof NavigationMap !== 'undefined') {
             NavigationMap.flushPendingBlockLayoutRender();
@@ -1321,7 +1570,7 @@ const ActionWarehouse = {
         }
 
         setTimeout(() => {
-            block.element.classList.remove('is-dragging', 'is-deployed', 'is-returning', 'is-nested', 'is-depth-ui-mounted', 'is-selected');
+            block.element.classList.remove('is-dragging', 'is-deployed', 'is-returning', 'is-nested', 'is-depth-ui-mounted', 'is-selected', 'is-removable');
             block.element.style.transform = '';
             this.clearSlotEmpty(block);
             block.slotElement.appendChild(block.element);
@@ -1558,6 +1807,8 @@ const ActionWarehouse = {
         if (blockCountChanged && typeof NavigationMap !== 'undefined') {
             NavigationMap.onBlockLayoutChanged();
         }
+
+        this.syncAllBlockRemovables();
     },
 
     getLiveStatistics() {
@@ -1872,5 +2123,7 @@ const ActionWarehouse = {
         if (typeof NavigationMap !== 'undefined' && level >= 2) {
             NavigationMap.notifyMapRefreshTick(false);
         }
+
+        this.syncAllBlockRemovables();
     }
 };

@@ -28,7 +28,7 @@ const MicroMock = {
 
     buildTagsHTML(tags, options = {}) {
         const pillClass = options.noteStyle
-            ? 'micro-mock__tag-pill general-t'
+            ? 'micro-mock__tag-pill action-block--attached general-t'
             : 'action-block micro-mock__tag-block general-t';
         if (!tags?.length) {
             return `<span class="${pillClass}">` +
@@ -45,7 +45,7 @@ const MicroMock = {
     buildAuthorHTML(item) {
         const author = String(item?.authorCode || item?.authorFullName || '').trim();
         if (!author) return '';
-        return `<span class="action-block action-block--author micro-mock__author-block general-t">` +
+        return `<span class="action-block action-block--author action-block--attached micro-mock__author-block general-t">` +
             `<span class="block-label">${this.escapeHTML(author)}</span></span>`;
     },
 
@@ -58,7 +58,7 @@ const MicroMock = {
         const inner = typeof buildTypologyBlockInnerHTML === 'function'
             ? buildTypologyBlockInnerHTML(typology)
             : `<span class="block-label">${this.escapeHTML(typology)}</span>`;
-        return `<span class="action-block action-block--typology micro-mock__typology-block general-t" data-typology="${this.escapeHTML(typology)}" data-typology-pattern="${pattern}">${inner}</span>`;
+        return `<span class="action-block action-block--typology action-block--attached micro-mock__typology-block general-t" data-typology="${this.escapeHTML(typology)}" data-typology-pattern="${pattern}">${inner}</span>`;
     },
 
     buildCardOnlyHTML(item, options = {}) {

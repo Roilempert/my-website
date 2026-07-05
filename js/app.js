@@ -1,3 +1,4 @@
+/* app build 20260705125853 */
 /* ==========================================================================
    01. SYSTEM BOOTSTRAP
    ========================================================================== */
@@ -477,9 +478,75 @@ const AppState = {
         });
     },
 
+    /** Pan the viewport to the L3 block-study cluster (notes stay in canvas flow). */
+    centerMicroFocusCluster(options = {}) {
+        const app = document.getElementById('app');
+        if (!app || !app.classList.contains('is-micro-grid-layout')) return;
+        if (typeof CatalogState === 'undefined' || !CatalogState.hasFocus) return;
+
+        SpatialNavigation.bypassScrollClamp(
+            options.smooth
+                ? CONFIG.warehouse.workspaceGrid.rushDuration + 450
+                : 300
+        );
+
+        const reserve = typeof ActionWarehouse !== 'undefined'
+            ? ActionWarehouse.getScrollReserve()
+            : 0;
+
+        const scrollToCluster = () => {
+            const viewMidY = (window.innerHeight - reserve) / 2;
+            let minL = Infinity;
+            let minT = Infinity;
+            let maxR = -Infinity;
+            let maxB = -Infinity;
+
+            app.querySelectorAll(':scope > .micro-grid-column .note-wrapper:not(.is-layout-excluded)').forEach((wrapper) => {
+                const noteIndex = parseInt(wrapper.dataset.noteIndex, 10);
+                const role = CatalogState.noteRoles?.get(noteIndex);
+                if (role !== 'emphasized' && role !== 'captured' && role !== 'stretched') return;
+
+                const rect = wrapper.getBoundingClientRect();
+                if (rect.width < 1 && rect.height < 1) return;
+                minL = Math.min(minL, rect.left);
+                minT = Math.min(minT, rect.top);
+                maxR = Math.max(maxR, rect.right);
+                maxB = Math.max(maxB, rect.bottom);
+            });
+
+            if (!Number.isFinite(minL)) return;
+
+            const cx = (minL + maxR) / 2;
+            const cy = (minT + maxB) / 2;
+            const dX = cx - window.innerWidth / 2;
+            const dY = cy - viewMidY;
+
+            if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return;
+
+            window.scrollBy({
+                left: dX,
+                top: dY,
+                behavior: options.smooth ? 'smooth' : 'auto'
+            });
+        };
+
+        requestAnimationFrame(() => {
+            scrollToCluster();
+            requestAnimationFrame(scrollToCluster);
+        });
+    },
+
     centerMesoViewport(options = {}) {
         const app = document.getElementById('app');
         if (!app) return;
+
+        if (app.classList.contains('is-micro-grid-layout') &&
+            typeof CatalogState !== 'undefined' &&
+            CatalogState.hasFocus &&
+            options.centerMode !== 'canvas') {
+            this.centerMicroFocusCluster(options);
+            return;
+        }
 
         if (typeof ToroidalPan !== 'undefined' && ToroidalPan.isEnabled()) {
             ToroidalPan.centerOnContent(options);
@@ -4152,7 +4219,7 @@ const MicroMock = {
 
     buildTagsHTML(tags, options = {}) {
         const pillClass = options.noteStyle
-            ? 'micro-mock__tag-pill general-t'
+            ? 'micro-mock__tag-pill action-block--attached general-t'
             : 'action-block micro-mock__tag-block general-t';
         if (!tags?.length) {
             return `<span class="${pillClass}">` +
@@ -4169,7 +4236,7 @@ const MicroMock = {
     buildAuthorHTML(item) {
         const author = String(item?.authorCode || item?.authorFullName || '').trim();
         if (!author) return '';
-        return `<span class="action-block action-block--author micro-mock__author-block general-t">` +
+        return `<span class="action-block action-block--author action-block--attached micro-mock__author-block general-t">` +
             `<span class="block-label">${this.escapeHTML(author)}</span></span>`;
     },
 
@@ -4182,7 +4249,7 @@ const MicroMock = {
         const inner = typeof buildTypologyBlockInnerHTML === 'function'
             ? buildTypologyBlockInnerHTML(typology)
             : `<span class="block-label">${this.escapeHTML(typology)}</span>`;
-        return `<span class="action-block action-block--typology micro-mock__typology-block general-t" data-typology="${this.escapeHTML(typology)}" data-typology-pattern="${pattern}">${inner}</span>`;
+        return `<span class="action-block action-block--typology action-block--attached micro-mock__typology-block general-t" data-typology="${this.escapeHTML(typology)}" data-typology-pattern="${pattern}">${inner}</span>`;
     },
 
     buildCardOnlyHTML(item, options = {}) {
@@ -6247,6 +6314,142 @@ const DepthV2 = {
         return buckets.map((bucket) => bucket.wrappers);
     },
 
+    /** Column band centered on the micro canvas (not the viewport). */
+    getMicroClusterBandIndices(colCount, bandCols) {
+        const centerCol = Math.floor(colCount / 2);
+        const bandStart = Math.max(0, Math.min(colCount - bandCols, centerCol - Math.floor(bandCols / 2)));
+        return Array.from({ length: bandCols }, (_, i) => bandStart + i);
+    },
+
+    /** Role priority for L3 block-study clustering (lower = earlier in cluster). */
+    _microFocusRoleRank(role) {
+        if (role === 'stretched') return 0;
+        if (role === 'captured') return 1;
+        if (role === 'emphasized') return 2;
+        return 3;
+    },
+
+    /** When blocks are active, pull matching notes to the front of the L3 layout stream. */
+    sortWrappersForMicroLayout(wrappers) {
+        const hasFocus = typeof CatalogState !== 'undefined' && CatalogState.hasFocus;
+        if (!hasFocus) {
+            return typeof MesoSpatialLayout !== 'undefined'
+                ? MesoSpatialLayout.sortWrappersByRank(wrappers)
+                : wrappers;
+        }
+
+        const relevant = [];
+        const neutral = [];
+        const getIndex = typeof MesoSpatialLayout !== 'undefined'
+            ? (w) => MesoSpatialLayout.getNoteIndex(w)
+            : (w) => [...document.querySelectorAll('.note-wrapper')].indexOf(w);
+
+        wrappers.forEach(wrapper => {
+            const noteIndex = getIndex(wrapper);
+            const role = CatalogState.noteRoles?.get(noteIndex);
+            if (role === 'stretched' || role === 'captured' || role === 'emphasized') {
+                relevant.push({ wrapper, noteIndex, role });
+            } else {
+                neutral.push(wrapper);
+            }
+        });
+
+        const ranks = typeof MesoSpatialLayout !== 'undefined'
+            ? MesoSpatialLayout.getLayoutRanks()
+            : CatalogState?.macroRank;
+
+        relevant.sort((a, b) => {
+            const ra = this._microFocusRoleRank(a.role);
+            const rb = this._microFocusRoleRank(b.role);
+            if (ra !== rb) return ra - rb;
+            return (ranks?.get(a.noteIndex) ?? a.noteIndex) - (ranks?.get(b.noteIndex) ?? b.noteIndex);
+        });
+
+        const sortNeutral = typeof MesoSpatialLayout !== 'undefined'
+            ? (list) => MesoSpatialLayout.sortWrappersByRank(list, ranks)
+            : (list) => list;
+
+        return [
+            ...relevant.map(entry => entry.wrapper),
+            ...sortNeutral(neutral)
+        ];
+    },
+
+    /**
+     * L3 with active blocks: pack relevant notes into a canvas-centered column band,
+     * balance the rest with LPT across remaining columns.
+     */
+    partitionWrappersForMicroFocus(wrappers, colCount, level = 3) {
+        const hasFocus = typeof CatalogState !== 'undefined' && CatalogState.hasFocus;
+        if (!hasFocus) {
+            return this.partitionWrappersIntoColumns(wrappers, colCount, level);
+        }
+
+        const buckets = Array.from({ length: colCount }, () => ({
+            weight: 0,
+            wrappers: []
+        }));
+
+        const getIndex = typeof MesoSpatialLayout !== 'undefined'
+            ? (w) => MesoSpatialLayout.getNoteIndex(w)
+            : (w) => [...document.querySelectorAll('.note-wrapper')].indexOf(w);
+
+        const relevant = [];
+        const neutral = [];
+
+        wrappers.forEach(wrapper => {
+            const noteIndex = getIndex(wrapper);
+            const role = CatalogState.noteRoles?.get(noteIndex);
+            if (role === 'stretched' || role === 'captured' || role === 'emphasized') {
+                relevant.push(wrapper);
+            } else {
+                neutral.push(wrapper);
+            }
+        });
+
+        const lensCfg = CONFIG.depth.v2?.workspaceLens || {};
+        const bandCols = Math.min(
+            colCount,
+            Math.max(2, lensCfg.microClusterCols ?? 4)
+        );
+        const bandIndices = this.getMicroClusterBandIndices(colCount, bandCols);
+        const bandSet = new Set(bandIndices);
+
+        relevant.forEach((wrapper, i) => {
+            const col = bandIndices[i % bandCols];
+            const weight = this.estimateWrapperLayoutWeight(wrapper, level);
+            buckets[col].wrappers.push(wrapper);
+            buckets[col].weight += weight;
+        });
+
+        const neutralCols = [];
+        for (let col = 0; col < colCount; col++) {
+            if (!bandSet.has(col)) neutralCols.push(col);
+        }
+
+        if (neutralCols.length) {
+            const rankedNeutral = neutral.map(wrapper => ({
+                wrapper,
+                weight: this.estimateWrapperLayoutWeight(wrapper, level)
+            })).sort((a, b) => b.weight - a.weight);
+
+            rankedNeutral.forEach(({ wrapper, weight }) => {
+                let target = neutralCols[0];
+                for (let i = 1; i < neutralCols.length; i++) {
+                    const col = neutralCols[i];
+                    if (buckets[col].weight < buckets[target].weight) target = col;
+                }
+                buckets[target].wrappers.push(wrapper);
+                buckets[target].weight += weight;
+            });
+        }
+
+        return {
+            groups: buckets.map(bucket => bucket.wrappers),
+            bandIndices
+        };
+    },
+
     stashHiddenWrappers(app, hidden) {
         hidden.forEach(wrapper => {
             wrapper.classList.add('is-layout-excluded');
@@ -6507,12 +6710,14 @@ const DepthV2 = {
             CatalogState.rebuildFromWarehouse();
         }
 
+        const colCount = grid.colCount || 12;
+
         this.restoreMesoColumnLayout();
         this.clearFringeZone();
 
-        const colCount = grid.colCount || 12;
         const allWrappers = this.collectAllNoteWrappers(app);
         const { layout, hidden } = this.partitionWrappersForLayout(allWrappers);
+        const sortedLayout = this.sortWrappersForMicroLayout(layout);
 
         const columns = Array.from({ length: colCount }, () => {
             const col = document.createElement('div');
@@ -6520,8 +6725,14 @@ const DepthV2 = {
             return col;
         });
 
-        const columnGroups = this.partitionWrappersIntoColumns(layout, colCount, 3);
+        const focusPartition = this.partitionWrappersForMicroFocus(sortedLayout, colCount, 3);
+        const columnGroups = Array.isArray(focusPartition)
+            ? focusPartition
+            : focusPartition.groups;
+
         columnGroups.forEach((group, colIndex) => {
+            columns[colIndex].style.paddingTop = '';
+            columns[colIndex].style.transform = '';
             group.forEach((wrapper) => {
                 wrapper.classList.remove('is-layout-excluded', 'is-catalog-anchored', 'is-meso-anchored', 'is-centered');
                 wrapper.style.removeProperty('--meso-mock-row-span');
@@ -6572,6 +6783,9 @@ const DepthV2 = {
         } else if (level === 3) {
             this.layoutMicroGrid(options);
             if (typeof MicroMock !== 'undefined') MicroMock.applyAll();
+            if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
+                AppState.centerMicroFocusCluster({ smooth: options.smooth !== false });
+            }
         }
         this._notifyMapLayoutReady();
     },
@@ -6864,7 +7078,9 @@ const DepthV2 = {
             if (typeof MicroMock !== 'undefined') {
                 MicroMock.applyAll();
             }
-            if (typeof AppState !== 'undefined') {
+            if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
+                AppState.centerMicroFocusCluster({ smooth: true });
+            } else if (typeof AppState !== 'undefined') {
                 requestAnimationFrame(() => {
                     AppState.centerCanvasOnLayerEnter();
                 });
@@ -8071,6 +8287,16 @@ const SpatialNavigation = {
             try { captureEl.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
         }
 
+        if (wasTap && DepthController.currentLevel === 1 &&
+            typeof ArtifactInspector !== 'undefined' &&
+            ArtifactInspector.openMacroNoteAt(tapX, tapY)) {
+            this.updateDepthPanCursor(e.clientX, e.clientY);
+            if (typeof NavigationMap !== 'undefined') {
+                NavigationMap.schedulePanUpdate();
+            }
+            return;
+        }
+
         if (wasTap && this.isDepthCanvasLevel()) {
             this.dispatchDepthNoteTap(tapX, tapY);
         }
@@ -8188,17 +8414,16 @@ const SpatialNavigation = {
         return this.getCatalogViewportPageRect(forLevel);
     },
 
-    // Minimap viewport — L1 clips to visible canvas above warehouse; other levels use full browser viewport.
+    // Minimap viewport — L1 matches visible canvas band above warehouse; L2/L3 use raw browser viewport.
     getNavigationMapViewportPageRect(forLevel = DepthController.currentLevel) {
         const scrollX = window.pageXOffset;
         const scrollY = window.pageYOffset;
-        const width = window.innerWidth;
 
         if (forLevel === 1 && typeof getSiteL1VisibleViewportHeightPx === 'function') {
             return {
                 left: scrollX,
                 top: scrollY,
-                width,
+                width: window.innerWidth,
                 height: Math.round(getSiteL1VisibleViewportHeightPx())
             };
         }
@@ -8206,7 +8431,7 @@ const SpatialNavigation = {
         return {
             left: scrollX,
             top: scrollY,
-            width,
+            width: window.innerWidth,
             height: window.innerHeight
         };
     },
@@ -9415,6 +9640,123 @@ const NavigationMap = {
         });
     },
 
+    // #region agent log
+    _debugMapAlignment(source, hypothesisId = 'ALL') {
+        if (this._activeLevel !== 1 || !this._baseTransform) return;
+        const now = performance.now();
+        if (source === 'pan' && now - (this._debugAlignLogAt || 0) < 400) return;
+        this._debugAlignLogAt = now;
+        try {
+            const vp = this.getMapViewportMarkerRect();
+            const vpClientTop = vp.top - window.pageYOffset;
+            const vpClientBottom = vpClientTop + vp.height;
+            const vpClientLeft = vp.left - window.pageXOffset;
+            const vpClientRight = vpClientLeft + vp.width;
+            const bandBottom = Math.min(whTop, window.innerHeight);
+            const eff = this.getEffectiveTransform();
+            const marker = document.querySelector('.site-navigation-maps__viewport-marker');
+            const wrap = document.querySelector('.site-navigation-maps__map-wrap');
+            if (!eff || !marker || !wrap || !this.canvas) return;
+            const markerR = marker.getBoundingClientRect();
+            const wrapR = wrap.getBoundingClientRect();
+            const panX = this._panDisplayX;
+            const panY = this._panDisplayY;
+            const cssH = this.canvas.clientHeight;
+            const cssW = this.canvas.clientWidth;
+            const wrapCx = wrapR.left + wrapR.width / 2;
+            const wrapCy = wrapR.top + wrapR.height / 2;
+            const errX = [];
+            const errY = [];
+            const relXs = [];
+            const relYs = [];
+            let screenCount = 0;
+            let inMarker = 0;
+            let outsideTop = 0;
+            let outsideBottom = 0;
+            let outsideLeft = 0;
+            let outsideRight = 0;
+            document.querySelectorAll('#app .layer-dot').forEach((dot) => {
+                const dr = dot.getBoundingClientRect();
+                if (dr.width < 1 ||
+                    dr.top < 0 || dr.bottom > bandBottom ||
+                    dr.left < vpClientLeft || dr.right > vpClientRight) return;
+                screenCount++;
+                const pageX = dr.left + dr.width / 2 + window.pageXOffset;
+                const pageY = dr.top + dr.height / 2 + window.pageYOffset;
+                const mp = eff.toMap(pageX, pageY);
+                const visX = wrapCx + panX + (mp.x - cssW / 2);
+                const visY = wrapCy + panY + (mp.y - cssH / 2);
+                const relX = (visX - markerR.left) / markerR.width;
+                const relY = (visY - markerR.top) / markerR.height;
+                errX.push(relX - (pageX - vp.left) / vp.width);
+                errY.push(relY - (pageY - vp.top) / vp.height);
+                relXs.push(relX);
+                relYs.push(relY);
+                if (relX >= 0 && relX <= 1 && relY >= 0 && relY <= 1) {
+                    inMarker++;
+                } else {
+                    if (relY < 0) outsideTop++;
+                    else if (relY > 1) outsideBottom++;
+                    if (relX < 0) outsideLeft++;
+                    else if (relX > 1) outsideRight++;
+                }
+            });
+            const avg = (arr) => arr.length ? arr.reduce((a, v) => a + v, 0) / arr.length : null;
+            const scrollPan = SpatialNavigation.getScrollAlignedMapBounds(1);
+            const drawPan = this.getMapDrawBounds();
+            fetch('http://127.0.0.1:7699/ingest/ba1e7923-43c5-435b-9e85-9bf447e897b8', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e84f18' },
+                body: JSON.stringify({
+                    sessionId: 'e84f18',
+                    runId: 'post-fix-v12',
+                    hypothesisId,
+                    location: 'navigation-map.js:_debugMapAlignment',
+                    message: source,
+                    data: {
+                        source,
+                        scrollY: Math.round(window.pageYOffset),
+                        scrollX: Math.round(window.pageXOffset),
+                        vpH: Math.round(vp.height),
+                        vpW: Math.round(vp.width),
+                        vpTopClient: Math.round(vpClientTop),
+                        innerH: window.innerHeight,
+                        whTop: Math.round(whTop),
+                        scale: this._baseTransform.scale,
+                        panX: +panX.toFixed(2),
+                        panY: +panY.toFixed(2),
+                        avgVisErrX: avg(errX) != null ? +avg(errX).toFixed(4) : null,
+                        avgVisErrY: avg(errY) != null ? +avg(errY).toFixed(4) : null,
+                        outsideTop,
+                        outsideBottom,
+                        outsideLeft,
+                        outsideRight,
+                        edgeSlackX: relXs.length
+                            ? `${Math.min(...relXs).toFixed(3)}/${(1 - Math.max(...relXs)).toFixed(3)}`
+                            : null,
+                        edgeSlackY: relYs.length
+                            ? `${Math.min(...relYs).toFixed(3)}/${(1 - Math.max(...relYs)).toFixed(3)}`
+                            : null,
+                        relXRange: relXs.length
+                            ? `${Math.min(...relXs).toFixed(3)}..${Math.max(...relXs).toFixed(3)}`
+                            : null,
+                        relYRange: relYs.length
+                            ? `${Math.min(...relYs).toFixed(3)}..${Math.max(...relYs).toFixed(3)}`
+                            : null,
+                        screenDots: screenCount,
+                        dotsInMarker: inMarker,
+                        dotCoverage: screenCount ? +(inMarker / screenCount).toFixed(3) : null,
+                        panBoundsMinX: Math.round(this._baseTransform.panBounds?.minX ?? 0),
+                        scrollPanMinX: scrollPan ? Math.round(scrollPan.minX) : null,
+                        drawPanMinX: drawPan ? Math.round(drawPan.minX) : null
+                    },
+                    timestamp: Date.now()
+                })
+            }).catch(() => {});
+        } catch (_) { /* ignore */ }
+    },
+    // #endregion
+
     computeContainScale(worldW, worldH, innerW, innerH) {
         return Math.min(
             innerW / Math.max(1, worldW),
@@ -9519,9 +9861,6 @@ const NavigationMap = {
     },
 
     getMapPanBounds() {
-        if (this._activeLevel === 1) {
-            return this.getMapDrawBounds() || SpatialNavigation.getScrollAlignedMapBounds(1);
-        }
         return SpatialNavigation.getScrollAlignedMapBounds(this._activeLevel);
     },
 
@@ -9538,7 +9877,13 @@ const NavigationMap = {
             return this._cachedReferenceBounds;
         }
 
-        const bounds = this.getMapFrameBounds();
+        let bounds;
+        if (this._activeLevel === 1) {
+            bounds = SpatialNavigation.getMapReferenceBounds() || SpatialNavigation.getAppBounds();
+        } else {
+            bounds = this.getMapFrameBounds();
+        }
+
         if (bounds) {
             this._cachedReferenceBounds = bounds;
             this._referenceBoundsDirty = false;
@@ -10181,6 +10526,9 @@ const NavigationMap = {
         this.applyCanvasPan();
         this.updateViewportMarker(base, vp);
         this.syncLastTransform(this._activeLevel, base.contentBounds, vp);
+        // #region agent log
+        this._debugMapAlignment(force ? 'pan-force' : 'pan', 'G');
+        // #endregion
         const blockActive = typeof ActionWarehouse !== 'undefined' &&
             ActionWarehouse.getActiveBlockCount?.() > 0;
         if (this._activeLevel === 1 && blockActive && this.ctx && base) {
@@ -10431,27 +10779,28 @@ const NavigationMap = {
                 return;
             }
 
-            const frameBounds = this.getMapFrameBounds();
-            const panBounds = this.getMapPanBounds();
-            if (!frameBounds || !panBounds) return;
+            const contentBounds = this.getMapContentBounds();
+            if (!contentBounds) return;
 
             const vp = this.getMapViewportMarkerRect();
 
-            this._cachedContentBounds = frameBounds;
+            this._cachedContentBounds = contentBounds;
             this._baseTransform = this.computeTransform(
-                frameBounds,
+                contentBounds,
                 vp,
                 frameW,
                 frameH,
-                { contentOnly: true, panBounds }
+                { contentOnly: true }
             );
-            this._baseTransform.contentBounds = frameBounds;
-            this._baseTransform.panBounds = panBounds;
+            this._baseTransform.contentBounds = contentBounds;
             this.syncCanvasToDrawExtents(this._baseTransform);
             this.drawMapContent(this.ctx, this._baseTransform, level);
             this._contentDirty = false;
 
             this.updatePanFromViewport();
+            // #region agent log
+            this._debugMapAlignment('render', 'H');
+            // #endregion
         } catch (err) {
             console.warn('NavigationMap.render failed:', err);
         }
@@ -11417,6 +11766,7 @@ const ArtifactInspector = {
     flyer: null,
     mode: null, // 'popup'
     _openAnimTimer: null,
+    _openSyntheticCard: false,
 
     init() {
         this.backdrop = document.createElement('div');
@@ -11467,19 +11817,53 @@ const ArtifactInspector = {
         this.openPopup(noteWrapperNode);
     },
 
+    openMacroNoteAt(clientX, clientY) {
+        if (!this._isMacroLevel()) return false;
+        if (typeof PhysicsEngine === 'undefined' || !PhysicsEngine.bodiesData?.length) return false;
+        if (typeof DepthV2 !== 'undefined' && !DepthV2.isActive()) return false;
+        if (typeof DepthTransitionOrchestrator !== 'undefined' &&
+            DepthTransitionOrchestrator.isRunning()) {
+            return false;
+        }
+        if (typeof SpatialNavigation !== 'undefined' &&
+            (SpatialNavigation.pan.active || SpatialNavigation.spaceHeld)) {
+            return false;
+        }
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(clientX, clientY)) {
+            return false;
+        }
+
+        const noteIndex = PhysicsEngine.hitTestMolecule(clientX, clientY);
+        if (noteIndex < 0) return false;
+
+        const wrappers = document.querySelectorAll('.note-wrapper');
+        const wrapper = wrappers[noteIndex];
+        if (!this.isOpenableWrapper(wrapper)) return false;
+
+        if (this.isActive) {
+            this.close();
+        } else {
+            this.open(wrapper);
+        }
+        return true;
+    },
+
     openPopup(noteWrapperNode) {
         const item = typeof MicroMock !== 'undefined'
             ? MicroMock.resolveItem(noteWrapperNode)
             : null;
         if (!item) return;
 
-        const { card: sourceCard } = this._getSourceFocusElements(noteWrapperNode);
-        const firstCard = sourceCard?.getBoundingClientRect();
-        if (!sourceCard || !firstCard || firstCard.width <= 0) return;
+        const source = this._resolveOpenSource(noteWrapperNode, item);
+        if (!source) return;
+
+        const { card: sourceCard, firstRect: firstCard, synthetic } = source;
 
         this.isActive = true;
         this.mode = 'popup';
         this.activeElement = noteWrapperNode;
+        this._openSyntheticCard = synthetic;
         this._openFirstCard = firstCard;
         this._openFocusVisualWidth = firstCard.width * (8 / 6);
 
@@ -11536,6 +11920,98 @@ const ArtifactInspector = {
         return { note, card, tags };
     },
 
+    _isMacroLevel() {
+        return typeof DepthController !== 'undefined' && DepthController.currentLevel === 1;
+    },
+
+    _resolveOpenSource(wrapper, item) {
+        const { card } = this._getSourceFocusElements(wrapper);
+        const firstRect = card?.getBoundingClientRect();
+        if (card && firstRect && firstRect.width > 0) {
+            return { card, firstRect, synthetic: false };
+        }
+
+        if (!this._isMacroLevel() || typeof MicroMock === 'undefined') return null;
+
+        const cardSize = this._measureL3CardSize(item);
+        const sourceRect = this._resolveMacroSourceRect(wrapper, cardSize);
+        if (!sourceRect) return null;
+
+        const syntheticCard = this._buildSyntheticFocusCard(item);
+        if (!syntheticCard) return null;
+
+        return { card: syntheticCard, firstRect: sourceRect, synthetic: true };
+    },
+
+    _buildSyntheticFocusCard(item) {
+        const html = MicroMock.buildCardOnlyHTML(item, { focusScale: true });
+        const mount = document.createElement('div');
+        mount.innerHTML = html;
+        return mount.firstElementChild;
+    },
+
+    _measureL3CardSize(item) {
+        if (!this._cardMeasureProbe) {
+            this._cardMeasureProbe = document.createElement('div');
+            this._cardMeasureProbe.className = 'artifact-inspector-card-measure-probe';
+            this._cardMeasureProbe.setAttribute('aria-hidden', 'true');
+            document.body.appendChild(this._cardMeasureProbe);
+        }
+
+        this._cardMeasureProbe.innerHTML = MicroMock.buildCardOnlyHTML(item, { focusScale: true });
+        const card = this._cardMeasureProbe.querySelector('.micro-mock__card.note-card');
+        const rect = card?.getBoundingClientRect();
+        const rootStyle = getComputedStyle(document.documentElement);
+        const fallbackW = parseFloat(rootStyle.getPropertyValue('--site-micro-col-width')) || 0;
+        const fallbackH = parseFloat(rootStyle.getPropertyValue('--site-micro-note-min-height')) || 0;
+
+        return {
+            width: rect?.width > 0 ? rect.width : fallbackW,
+            height: rect?.height > 0 ? rect.height : fallbackH
+        };
+    },
+
+    _resolveMacroSourceRect(wrapper, cardSize) {
+        const wrappers = document.querySelectorAll('.note-wrapper');
+        const noteIndex = [...wrappers].indexOf(wrapper);
+        let bounds = null;
+
+        if (noteIndex >= 0 && typeof PhysicsEngine !== 'undefined') {
+            bounds = PhysicsEngine.moleculeViewportBounds(noteIndex);
+        }
+
+        if (!bounds) {
+            const dots = wrapper.querySelectorAll('.layer-dot');
+            dots.forEach((dot) => {
+                const r = dot.getBoundingClientRect();
+                if (r.width <= 0) return;
+                bounds = bounds || { minX: r.left, minY: r.top, maxX: r.right, maxY: r.bottom };
+                bounds.minX = Math.min(bounds.minX, r.left);
+                bounds.minY = Math.min(bounds.minY, r.top);
+                bounds.maxX = Math.max(bounds.maxX, r.right);
+                bounds.maxY = Math.max(bounds.maxY, r.bottom);
+            });
+        }
+
+        if (!bounds || cardSize.width <= 0) return null;
+
+        const cx = (bounds.minX + bounds.maxX) * 0.5;
+        const cy = (bounds.minY + bounds.maxY) * 0.5;
+        const left = cx - cardSize.width * 0.5;
+        const top = cy - cardSize.height * 0.5;
+
+        return {
+            left,
+            top,
+            width: cardSize.width,
+            height: cardSize.height,
+            right: left + cardSize.width,
+            bottom: top + cardSize.height,
+            x: left,
+            y: top
+        };
+    },
+
     _mountFlyingCard(sourceCard) {
         const flyerScaler = this.flyer?.querySelector('.artifact-inspector-focus__card-scaler');
         if (!sourceCard || !flyerScaler || !this._openFirstCard) return;
@@ -11567,6 +12043,25 @@ const ArtifactInspector = {
         return this._inspectorRegionProbe.getBoundingClientRect();
     },
 
+    _measureSiteGridSpanWidthPx(colSpan) {
+        if (!this._siteGridSpanProbe) {
+            this._siteGridSpanProbe = document.createElement('div');
+            this._siteGridSpanProbe.setAttribute('aria-hidden', 'true');
+            this._siteGridSpanProbe.style.cssText = [
+                'position:fixed',
+                'visibility:hidden',
+                'pointer-events:none',
+                'top:0',
+                'left:0'
+            ].join(';');
+            document.body.appendChild(this._siteGridSpanProbe);
+        }
+        const gapCount = Math.max(0, colSpan - 1);
+        this._siteGridSpanProbe.style.width =
+            `calc(${colSpan} * var(--site-grid-cell-w) + ${gapCount} * var(--site-grid-gap))`;
+        return this._siteGridSpanProbe.getBoundingClientRect().width;
+    },
+
     _getFocusLandingRect() {
         const targetVisualW = this._openFocusVisualWidth
             || (this._openFirstCard ? this._openFirstCard.width * (8 / 6) : 0);
@@ -11588,11 +12083,14 @@ const ArtifactInspector = {
     },
 
     _applyFocusLandingLayout() {
-        const slot = this._getFocusLandingRect();
-        if (!slot || !this.panel) return null;
-        this.panel.style.width = `${slot.width}px`;
-        this.panel.style.left = `${slot.centerX}px`;
-        return slot;
+        const cardSlot = this._getFocusLandingRect();
+        if (!cardSlot || !this.panel) return null;
+        const inspector = this._measureInspectorRegionRect();
+        const panelWidth = this._measureSiteGridSpanWidthPx(10);
+        const centerX = inspector.left + inspector.width / 2;
+        this.panel.style.width = `${panelWidth}px`;
+        this.panel.style.left = `${centerX}px`;
+        return cardSlot;
     },
 
     _alignFlyerToLandingSlot(flyerNote) {
@@ -11775,7 +12273,10 @@ const ArtifactInspector = {
         const tags = (item.tags || []).map(t => t.name).join('، ');
         return `
             <section class="artifact-inspector-metadata">
-                <h2 class="artifact-inspector-metadata__id general-h">${this.escapeHtml(item.id || '')}</h2>
+                <div class="artifact-inspector-metadata__header">
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h" aria-hidden="true">^</span>
+                    <h2 class="artifact-inspector-metadata__id general-h">${this.escapeHtml(item.id || '')}</h2>
+                </div>
                 <div class="artifact-inspector-metadata__grid">
                     <div class="artifact-inspector-metadata__tags">
                         <h3 class="general-t">תגיות</h3>
@@ -11869,6 +12370,11 @@ const ArtifactInspector = {
     },
 
     _restoreSourceCard(noteId) {
+        if (this._openSyntheticCard) {
+            this._openSyntheticCard = false;
+            return;
+        }
+
         const panelScaler = this.panel?.querySelector('.artifact-inspector-focus__card-scaler');
         const flyerScaler = this.flyer?.querySelector('.artifact-inspector-focus__card-scaler');
         const card = panelScaler?.querySelector('.micro-mock__card.note-card')
@@ -11924,6 +12430,7 @@ const ArtifactInspector = {
         this.activeElement?.classList.remove('is-inspector-source-hidden');
         this._openFirstCard = null;
         this._openFocusVisualWidth = null;
+        this._openSyntheticCard = false;
         this.isActive = false;
         this.activeElement = null;
         this.mode = null;
@@ -12061,6 +12568,11 @@ const PhysicsEngine = {
         });
 
         this.initMoleculePointer();
+
+        this.moleculeHoverTitle = document.createElement('div');
+        this.moleculeHoverTitle.className = 'molecule-hover-title note-h';
+        this.moleculeHoverTitle.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(this.moleculeHoverTitle);
 
         window.addEventListener('resize', () => {
             clearTimeout(this.resizeTimer);
@@ -13554,11 +14066,7 @@ const PhysicsEngine = {
 
             if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
                 if (typeof ArtifactInspector !== 'undefined') {
-                    if (ArtifactInspector.isActive) {
-                        ArtifactInspector.close();
-                    } else {
-                        ArtifactInspector.open(wrapper);
-                    }
+                    ArtifactInspector.openMacroNoteAt(e.clientX, e.clientY);
                 }
                 return;
             }
@@ -13573,23 +14081,77 @@ const PhysicsEngine = {
         document.addEventListener('pointercancel', this.onMoleculePointerUp);
     },
 
+    resolveMoleculeHoverTitle(wrapper) {
+        if (!wrapper) return '';
+        const titleEl = wrapper.querySelector('.layer-full .note-title');
+        const title = titleEl?.textContent?.trim();
+        if (title) {
+            const firstLine = title.split(/\r?\n/)[0].trim();
+            if (firstLine) return firstLine;
+        }
+        const bodyEl = wrapper.querySelector('.layer-full .note-body');
+        const body = bodyEl?.textContent?.trim();
+        if (body) return body.split(/\r?\n/)[0].trim();
+        return '';
+    },
+
     updateMoleculeHoverState() {
-        if (DepthController.currentLevel !== 1 || this.bodiesData.length === 0) {
+        const label = this.moleculeHoverTitle;
+
+        const hideHover = () => {
+            label?.classList.remove('is-visible');
             this.hoveredNoteIndex = -1;
             document.body.classList.remove('is-molecule-hover');
+        };
+
+        if (DepthController.currentLevel !== 1 || this.bodiesData.length === 0) {
+            hideHover();
+            return;
+        }
+
+        if (document.body.classList.contains('is-space-pan') ||
+            document.body.classList.contains('is-canvas-panning')) {
+            hideHover();
             return;
         }
 
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(this.mouseClientX, this.mouseClientY)) {
-            this.hoveredNoteIndex = -1;
-            document.body.classList.remove('is-molecule-hover');
+            hideHover();
             return;
         }
 
         const noteIndex = this.hitTestMolecule(this.mouseClientX, this.mouseClientY);
         this.hoveredNoteIndex = noteIndex;
         document.body.classList.toggle('is-molecule-hover', noteIndex >= 0);
+
+        if (!label) return;
+
+        if (noteIndex < 0) {
+            label.classList.remove('is-visible');
+            return;
+        }
+
+        const bounds = this.moleculeViewportBounds(noteIndex);
+        const wrapper = document.querySelectorAll('.note-wrapper')[noteIndex];
+        const hoverText = this.resolveMoleculeHoverTitle(wrapper);
+        if (!bounds || !hoverText) {
+            label.classList.remove('is-visible');
+            return;
+        }
+
+        const isLtr = wrapper?.classList.contains('is-note-ltr');
+        label.textContent = hoverText;
+        label.classList.toggle('is-note-ltr', isLtr);
+        label.classList.toggle('is-note-rtl', !isLtr);
+        if (isLtr) {
+            label.style.left = `${bounds.minX}px`;
+            label.style.top = `${bounds.minY}px`;
+        } else {
+            label.style.left = `${bounds.maxX}px`;
+            label.style.top = `${bounds.minY}px`;
+        }
+        label.classList.add('is-visible');
     }
 };
 
@@ -13623,6 +14185,9 @@ const ActionWarehouse = {
     _kinematicEntryTicks: 0,
     _prevKinematicActive: false,
     _depthDeployAnimating: null,
+    _macroIndicationAnimating: null,
+    _macroIndicationGhost: null,
+    _macroIndicationBlock: null,
     filteredNoteIndices: new Set(),
     filterExitByNote: new Map(),   // noteIndex → { phase: 'hollow'|'peel', phaseStart }
     _navigationMapBlockCount: 0,
@@ -13800,6 +14365,13 @@ const ActionWarehouse = {
         const { width, height } = this.blockMetrics(block);
         slot.style.width = `${Math.ceil(width)}px`;
         slot.style.height = `${Math.ceil(height)}px`;
+        let ghost = slot.querySelector('.block-slot__ghost');
+        if (!ghost) {
+            ghost = document.createElement('div');
+            ghost.className = 'block-slot__ghost general-t';
+            slot.appendChild(ghost);
+        }
+        ghost.innerHTML = this.buildSlotGhostInnerHTML(block);
         slot.classList.add('is-empty');
         this.restoreDockTrayOrder();
     },
@@ -13808,8 +14380,56 @@ const ActionWarehouse = {
         const slot = block?.slotElement;
         if (!slot) return;
         slot.classList.remove('is-empty');
+        slot.querySelector('.block-slot__ghost')?.remove();
         slot.style.removeProperty('width');
         slot.style.removeProperty('height');
+    },
+
+    buildSlotGhostInnerHTML(block) {
+        const label = this.getBlockGhostLabel(block);
+        const safeLabel = typeof escapeTypologyHtml === 'function'
+            ? escapeTypologyHtml(label)
+            : String(label || '').replace(/</g, '&lt;');
+        return `<span class="block-slot__glyph-ring" aria-hidden="true"></span>` +
+            `<span class="block-slot__ghost-label">${safeLabel}</span>`;
+    },
+
+    getBlockGhostLabel(block) {
+        if (block.type === 'author') return block.author || '';
+        if (block.type === 'typology') {
+            return typeof getTypologyLabel === 'function'
+                ? getTypologyLabel(block.typology)
+                : (block.typology || '');
+        }
+        return block.tag || '';
+    },
+
+    syncBlockRemovable(block) {
+        if (!block?.element || block.type === 'frame') return;
+        const deployed = block.element.classList.contains('is-deployed');
+        const selected = block.element.classList.contains('is-selected');
+        const depthUi = this.isDepthUiLevel();
+        const removable = deployed && !block.nestedIn && (!depthUi || selected);
+        block.element.classList.toggle('is-removable', removable);
+    },
+
+    syncAllBlockRemovables() {
+        this.blocks.forEach(block => this.syncBlockRemovable(block));
+    },
+
+    wireBlockRemoveMark(block) {
+        const removeMark = document.createElement('span');
+        removeMark.className = 'block-remove-mark';
+        removeMark.setAttribute('aria-hidden', 'true');
+        removeMark.textContent = '×';
+        removeMark.addEventListener('pointerdown', (e) => e.stopPropagation());
+        removeMark.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (this.dragState) return;
+            if (!block.element.classList.contains('is-removable')) return;
+            this.returnToDock(block);
+        });
+        block.element.insertBefore(removeMark, block.element.firstChild);
     },
 
     // Wheel over the tray scrolls vertically through all tag blocks
@@ -13826,6 +14446,7 @@ const ActionWarehouse = {
     resetAll() {
         if (this.dragState) return;
 
+        this.clearMacroIndicationGhost();
         this.ensurePhysicsMaps();
         this.stretchBindingByNote.clear();
         this.stretchGroupCounts.clear();
@@ -13987,6 +14608,7 @@ const ActionWarehouse = {
                 : 'regular';
         }
         el.dataset.type = def.type || 'tag';
+        if (def.color) el.style.setProperty('--block-tag-color', def.color);
 
         const label = isAuthor ? def.author : (isTypology ? null : def.tag);
         const glyphHTML = (isAuthor || isTypology)
@@ -14017,7 +14639,10 @@ const ActionWarehouse = {
             x: 0, y: 0
         };
 
+        this.wireBlockRemoveMark(block);
+
         el.addEventListener('pointerdown', (e) => {
+            if (e.target.closest('.block-remove-mark')) return;
             e.stopPropagation();
             this.startDrag(block, e);
         });
@@ -14331,6 +14956,7 @@ const ActionWarehouse = {
 
         this.depthBlockBarElement.appendChild(block.element);
         if (block.type === 'frame') this.refreshFrameLayout(block);
+        this.syncBlockRemovable(block);
 
         const deployedCount = this.blocks.filter(b =>
             b.state === 'active' &&
@@ -14372,29 +14998,27 @@ const ActionWarehouse = {
         return 1 - Math.pow(1 - t, 3);
     },
 
-    _runDepthDeployMotion(block, startRect, endRect, onDone) {
+    _runArcViewportMotion(el, startRect, endRect, options = {}, onDone) {
         const cfg = CONFIG.warehouse;
-        const duration = cfg.depthDeployDuration ?? 520;
-        const startScale = cfg.depthDeployStartScale ?? 0.94;
-        const arcLift = Math.min(
+        const duration = options.duration ?? cfg.depthDeployDuration ?? 520;
+        const startScale = options.startScale ?? cfg.depthDeployStartScale ?? 0.94;
+        const arcLift = options.arcLift ?? Math.min(
             cfg.depthDeployArcLift ?? scale(14),
             Math.abs(startRect.top - endRect.top) * 0.15 + scale(6)
         );
-        const el = block.element;
+        const state = options.state || {};
         const t0 = performance.now();
         let finished = false;
 
         const finish = () => {
             if (finished) return;
             finished = true;
-            if (block._depthDeployRaf) {
-                cancelAnimationFrame(block._depthDeployRaf);
-                block._depthDeployRaf = null;
+            if (state.raf) {
+                cancelAnimationFrame(state.raf);
+                state.raf = null;
             }
-            clearTimeout(block._depthDeployTimeout);
-            block._depthDeployTimeout = null;
-            el.style.transform = '';
-            el.classList.remove('is-deploying-to-bar');
+            clearTimeout(state.timeout);
+            state.timeout = null;
             onDone?.();
         };
 
@@ -14408,14 +15032,148 @@ const ActionWarehouse = {
             el.style.transform = `translate3d(${x}px, ${y}px, 0) scale(${s})`;
 
             if (raw < 1) {
-                block._depthDeployRaf = requestAnimationFrame(tick);
+                state.raf = requestAnimationFrame(tick);
             } else {
                 finish();
             }
         };
 
-        block._depthDeployTimeout = setTimeout(finish, duration + 32);
-        block._depthDeployRaf = requestAnimationFrame(tick);
+        state.timeout = setTimeout(finish, duration + 32);
+        state.raf = requestAnimationFrame(tick);
+        return state;
+    },
+
+    _runDepthDeployMotion(block, startRect, endRect, onDone) {
+        const el = block.element;
+        block._depthDeployState = block._depthDeployState || {};
+        this._runArcViewportMotion(el, startRect, endRect, {
+            state: block._depthDeployState
+        }, () => {
+            el.style.transform = '';
+            el.classList.remove('is-deploying-to-bar');
+            onDone?.();
+        });
+    },
+
+    getMacroIndicationTargetRect(block, startRect) {
+        const { width, height } = this.blockMetrics(block);
+        const visibleBottom = typeof getSiteL1VisibleViewportHeightPx === 'function'
+            ? getSiteL1VisibleViewportHeightPx()
+            : window.innerHeight * 0.72;
+        const centerY = visibleBottom * 0.5;
+        const fullTarget = {
+            left: window.innerWidth * 0.5 - width / 2,
+            top: centerY - height / 2,
+            width,
+            height
+        };
+        if (!startRect) return fullTarget;
+
+        const travel = CONFIG.warehouse.macroIndicationTravel ?? 0.38;
+        return {
+            left: startRect.left + (fullTarget.left - startRect.left) * travel,
+            top: startRect.top + (fullTarget.top - startRect.top) * travel,
+            width,
+            height
+        };
+    },
+
+    showMacroIndicationSlot(block) {
+        const slot = block?.slotElement;
+        if (!slot || block.nestedIn) return;
+        block._macroIndicationSlotSnapshot = {
+            parent: slot,
+            nextSibling: block.element.nextSibling
+        };
+        this.markSlotEmpty(block);
+        document.body.appendChild(block.element);
+        block.element.style.display = 'none';
+    },
+
+    clearMacroIndicationSlot(block) {
+        if (!block) return;
+        block.element.style.removeProperty('display');
+        this.clearSlotEmpty(block);
+        const snap = block._macroIndicationSlotSnapshot;
+        if (snap?.parent) {
+            if (snap.nextSibling && snap.nextSibling.parentNode === snap.parent) {
+                snap.parent.insertBefore(block.element, snap.nextSibling);
+            } else {
+                snap.parent.appendChild(block.element);
+            }
+        } else if (block.slotElement) {
+            block.slotElement.appendChild(block.element);
+        }
+        delete block._macroIndicationSlotSnapshot;
+    },
+
+    createMacroIndicationGhost(block) {
+        const ghost = block.element.cloneNode(true);
+        ghost.classList.remove(
+            'is-dragging', 'is-deployed', 'is-selected', 'is-removable',
+            'is-returning', 'is-nested', 'is-depth-ui-mounted', 'is-deploying-to-bar'
+        );
+        ghost.classList.add('is-macro-indication');
+        ghost.removeAttribute('id');
+        ghost.setAttribute('aria-hidden', 'true');
+        return ghost;
+    },
+
+    clearMacroIndicationGhost() {
+        const ghost = this._macroIndicationGhost;
+        if (ghost) {
+            if (ghost._macroIndicationState?.raf) {
+                cancelAnimationFrame(ghost._macroIndicationState.raf);
+            }
+            clearTimeout(ghost._macroIndicationState?.timeout);
+            ghost.remove();
+            this._macroIndicationGhost = null;
+        }
+        if (this._macroIndicationBlock) {
+            this.clearMacroIndicationSlot(this._macroIndicationBlock);
+            this._macroIndicationBlock = null;
+        }
+        this._macroIndicationAnimating?.clear();
+    },
+
+    animateMacroDeployIndication(block) {
+        if (DepthController.currentLevel !== 1 || block.state !== 'docked' || block.nestedIn) return;
+        if (!this._macroIndicationAnimating) this._macroIndicationAnimating = new Set();
+        if (this._macroIndicationAnimating.has(block)) return;
+
+        this.clearMacroIndicationGhost();
+
+        const startRect = block.element.getBoundingClientRect();
+        const endRect = this.getMacroIndicationTargetRect(block, startRect);
+        if (!startRect.width || !endRect.width) return;
+
+        this.showMacroIndicationSlot(block);
+        this._macroIndicationBlock = block;
+
+        const ghost = this.createMacroIndicationGhost(block);
+        const cfg = CONFIG.warehouse;
+        const startScale = cfg.depthDeployStartScale ?? 0.94;
+
+        document.body.appendChild(ghost);
+        this._macroIndicationGhost = ghost;
+        this._macroIndicationAnimating.add(block);
+        ghost._macroIndicationState = {};
+        ghost.style.transform =
+            `translate3d(${startRect.left}px, ${startRect.top}px, 0) scale(${startScale})`;
+
+        this._runArcViewportMotion(ghost, startRect, endRect, {
+            duration: cfg.macroIndicationDuration ?? cfg.depthDeployDuration ?? 720,
+            state: ghost._macroIndicationState
+        }, () => {
+            this._macroIndicationAnimating.delete(block);
+            this.clearMacroIndicationSlot(block);
+            this._macroIndicationBlock = null;
+            ghost.classList.add('is-fading');
+            setTimeout(() => {
+                if (ghost.parentNode) ghost.remove();
+                if (this._macroIndicationGhost === ghost) this._macroIndicationGhost = null;
+            }, cfg.macroIndicationFadeMs ?? 320);
+        });
     },
 
     animateDeployToDepthBar(block) {
@@ -14636,6 +15394,46 @@ const ActionWarehouse = {
             return;
         }
 
+        if (!depthUi &&
+            DepthController.currentLevel === 1 &&
+            block.state === 'docked' &&
+            !block.nestedIn) {
+            this.dragState = {
+                block: block,
+                clickPending: true,
+                macroClickIndicate: true,
+                depthUi: false,
+                startClientX: e.clientX,
+                startClientY: e.clientY,
+                pointerX: e.clientX,
+                pointerY: e.clientY
+            };
+            this.boundMove = (ev) => this.onPointerMove(ev);
+            this.boundUp = (ev) => this.endDrag(ev);
+            document.addEventListener('pointermove', this.boundMove);
+            document.addEventListener('pointerup', this.boundUp);
+            return;
+        }
+
+        if (depthUi && block.element.classList.contains('is-removable') &&
+            block.element.classList.contains('is-depth-ui-mounted')) {
+            this.dragState = {
+                block: block,
+                clickPending: true,
+                depthUiReturn: true,
+                depthUi: true,
+                startClientX: e.clientX,
+                startClientY: e.clientY,
+                pointerX: e.clientX,
+                pointerY: e.clientY
+            };
+            this.boundMove = (ev) => this.onPointerMove(ev);
+            this.boundUp = (ev) => this.endDrag(ev);
+            document.addEventListener('pointermove', this.boundMove);
+            document.addEventListener('pointerup', this.boundUp);
+            return;
+        }
+
         if (depthUi && block.state === 'docked' && !block.nestedIn &&
             !this._depthDeployAnimating?.has(block)) {
             this.dragState = {
@@ -14655,6 +15453,7 @@ const ActionWarehouse = {
             return;
         }
 
+        this.clearMacroIndicationGhost();
         this.beginDragLift(block, e, { depthUi });
         this.boundMove = (ev) => this.onPointerMove(ev);
         this.boundUp = (ev) => this.endDrag(ev);
@@ -14679,9 +15478,10 @@ const ActionWarehouse = {
                 document.removeEventListener('pointermove', this.boundMove);
                 document.removeEventListener('pointerup', this.boundUp);
                 this.dragState = null;
+                this.clearMacroIndicationGhost();
                 this.beginDragLift(block, e, {
                     depthUi: !!drag.depthUiClickDeploy,
-                    liftFromSurface: !drag.depthUiClickDeploy,
+                    liftFromSurface: !drag.depthUiClickDeploy && !drag.macroClickIndicate,
                     startClientX: drag.startClientX,
                     startClientY: drag.startClientY,
                     restoreX,
@@ -14771,6 +15571,11 @@ const ActionWarehouse = {
             if (moved < clickThreshold) {
                 if (drag.depthUiClickDeploy) {
                     this.animateDeployToDepthBar(block);
+                } else if (drag.macroClickIndicate) {
+                    this.animateMacroDeployIndication(block);
+                } else if (drag.depthUiReturn ||
+                    block.element.classList.contains('is-removable')) {
+                    this.returnToDock(block);
                 } else if (typeof DepthTransitionOrchestrator !== 'undefined') {
                     DepthTransitionOrchestrator.runBlockClick(block);
                 }
@@ -14803,8 +15608,13 @@ const ActionWarehouse = {
             block.element.classList.remove('is-dragging');
             block.element.classList.add('is-deployed');
             this.applyTransform(block, 0);
+            this.syncBlockRemovable(block);
             if (block.body) {
                 Matter.Body.setPosition(block.body, { x: block.bodyX, y: block.bodyY });
+            }
+            if (block.element.classList.contains('is-removable')) {
+                this.returnToDock(block);
+                return;
             }
             DepthTransitionOrchestrator.runBlockClick(block);
             return;
@@ -14882,6 +15692,7 @@ const ActionWarehouse = {
         this.applyTransform(block, 0);
         this.syncFrameBodyOwnership(block);
         if (block.type === 'frame') this.refreshFrameLayout(block);
+        this.syncBlockRemovable(block);
         this.updateWorkspaceState();
         if (typeof NavigationMap !== 'undefined') {
             NavigationMap.flushPendingBlockLayoutRender();
@@ -14916,7 +15727,7 @@ const ActionWarehouse = {
         }
 
         setTimeout(() => {
-            block.element.classList.remove('is-dragging', 'is-deployed', 'is-returning', 'is-nested', 'is-depth-ui-mounted', 'is-selected');
+            block.element.classList.remove('is-dragging', 'is-deployed', 'is-returning', 'is-nested', 'is-depth-ui-mounted', 'is-selected', 'is-removable');
             block.element.style.transform = '';
             this.clearSlotEmpty(block);
             block.slotElement.appendChild(block.element);
@@ -15153,6 +15964,8 @@ const ActionWarehouse = {
         if (blockCountChanged && typeof NavigationMap !== 'undefined') {
             NavigationMap.onBlockLayoutChanged();
         }
+
+        this.syncAllBlockRemovables();
     },
 
     getLiveStatistics() {
@@ -15467,6 +16280,8 @@ const ActionWarehouse = {
         if (typeof NavigationMap !== 'undefined' && level >= 2) {
             NavigationMap.notifyMapRefreshTick(false);
         }
+
+        this.syncAllBlockRemovables();
     }
 };
 Object.assign(ActionWarehouse, {

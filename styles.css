@@ -27,6 +27,8 @@
     --card-bg: var(--color-1);
     --note-text: var(--color-4);
     --block-hover-bg: var(--color-6);
+    --block-shell-border-width: var(--outline-weight);
+    --block-hover-border-width: calc(var(--outline-weight) + 1pt);
     --accent-olive: var(--color-3);
 
     --base-space: 1rem;
@@ -627,6 +629,36 @@ body.view-level-1 .note-wrapper {
 
 body.view-level-1.is-molecule-hover:not(.is-space-pan):not(.is-canvas-panning) {
     cursor: pointer;
+}
+
+/* L1 macro — first title line on molecule hover (viewport-fixed, follows hull) */
+.molecule-hover-title {
+    position: fixed;
+    z-index: 45;
+    display: none;
+    pointer-events: none;
+    max-width: min(42vw, 28rem);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    color: var(--color-4);
+    line-height: 1.1;
+}
+
+body.view-level-1 .molecule-hover-title.is-visible {
+    display: block;
+}
+
+.molecule-hover-title.is-note-rtl {
+    direction: rtl;
+    text-align: right;
+    transform: translate(calc(-100% - var(--space-10)), calc(-100% - var(--space-10)));
+}
+
+.molecule-hover-title.is-note-ltr {
+    direction: ltr;
+    text-align: left;
+    transform: translate(var(--space-10), calc(-100% - var(--space-10)));
 }
 
 #app.is-ready {
@@ -1337,7 +1369,8 @@ body.is-depth-v2.view-level-3 .note-wrapper.is-note-ltr .micro-mock__card .note-
 body.is-artifact-inspector-open .note-wrapper.is-inspector-source-hidden,
 body.is-artifact-inspector-open .note-wrapper.is-inspector-source-hidden .note-stage,
 body.is-artifact-inspector-open .note-wrapper.is-inspector-source-hidden .depth-v2-glyph--micro,
-body.is-artifact-inspector-open .note-wrapper.is-inspector-source-hidden .micro-mock__note {
+body.is-artifact-inspector-open .note-wrapper.is-inspector-source-hidden .micro-mock__note,
+body.is-artifact-inspector-open .note-wrapper.is-inspector-source-hidden .layer-dot {
     visibility: hidden !important;
     opacity: 0 !important;
     pointer-events: none !important;
@@ -1406,6 +1439,14 @@ body.is-artifact-inspector-open .note-wrapper.is-inspector-source-hidden .micro-
 
 .artifact-inspector-focus {
     width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.artifact-inspector-panel .artifact-inspector-focus__note {
+    width: 100%;
+    max-width: calc(8 * var(--site-grid-cell-w) + 7 * var(--site-grid-gap));
 }
 
 .artifact-inspector-panel.is-open.is-opening {
@@ -1460,10 +1501,14 @@ body.site-grid .artifact-inspector-panel {
         var(--site-grid-padding) +
         var(--site-grid-cell-h) + var(--site-grid-gap)
     );
+    --inspector-panel-cols: 10;
     left: 50%;
     top: 0;
     bottom: auto;
-    width: calc(8 / 6 * var(--site-micro-col-width, var(--site-layer-inspector-width)));
+    width: calc(
+        var(--inspector-panel-cols) * var(--site-grid-cell-w) +
+        (var(--inspector-panel-cols) - 1) * var(--site-grid-gap)
+    );
     max-width: min(92vw, calc(11 * var(--site-grid-cell-w) + 10 * var(--site-grid-gap)));
     height: 100vh;
     max-height: 100vh;
@@ -1481,27 +1526,68 @@ body.site-grid .artifact-inspector-panel.is-open {
 }
 
 .artifact-inspector-metadata {
+    --inspector-metadata-cols: 10;
+    --inspector-metadata-tags-cols: 5;
+    --inspector-metadata-details-cols: 4;
+    width: 100%;
+    margin-inline: auto;
     margin-top: 2.5rem;
-    padding: var(--layer-nav-box-pad, 0.3125rem) var(--divider-inset, 1.25rem);
+    padding:
+        calc(var(--site-grid-gap) * 1.5)
+        calc(var(--site-grid-gap) * 2);
     background: var(--color-3);
     color: var(--color-1);
     border-radius: var(--warehouse-radius, 0.3125rem);
+    box-sizing: border-box;
+}
+
+.artifact-inspector-metadata__header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: var(--space-10);
+    margin-bottom: calc(var(--site-grid-gap) * 1.25);
+    text-align: center;
+}
+
+.artifact-inspector-metadata__scroll-glyph {
+    display: block;
+    color: var(--color-1);
+    font-size: var(--type-display-size, 1.5rem);
+    line-height: 1;
+    transform: rotate(180deg);
+    transform-origin: center center;
+    user-select: none;
 }
 
 .artifact-inspector-metadata__id {
     color: var(--color-1);
-    margin-bottom: 1rem;
+    margin: 0;
+    width: 100%;
 }
 
 .artifact-inspector-metadata__grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 1.25rem;
+    grid-template-columns: repeat(var(--inspector-metadata-cols), minmax(0, 1fr));
+    column-gap: var(--site-grid-gap);
+    direction: ltr;
+}
+
+.artifact-inspector-metadata__tags {
+    grid-column: 1 / span var(--inspector-metadata-tags-cols);
+    direction: rtl;
 }
 
 .artifact-inspector-metadata__details {
+    grid-column: calc(var(--inspector-metadata-tags-cols) + 2) / span var(--inspector-metadata-details-cols);
+    direction: rtl;
     display: grid;
     gap: 0.5rem;
+    margin: 0;
+}
+
+.artifact-inspector-metadata__tags h3 {
+    margin-bottom: 0.5rem;
 }
 
 .artifact-inspector-metadata__details div {
@@ -1555,7 +1641,8 @@ body.site-grid .artifact-inspector-panel.is-open {
 }
 
 .artifact-inspector-panel .micro-mock__card.note-card,
-.artifact-inspector-flyer .micro-mock__card.note-card {
+.artifact-inspector-flyer .micro-mock__card.note-card,
+.artifact-inspector-card-measure-probe .micro-mock__card.note-card {
     display: flex !important;
     flex-direction: column;
     width: 100%;
@@ -1571,6 +1658,15 @@ body.site-grid .artifact-inspector-panel.is-open {
         var(--note-id-lane);
     border: none;
     border-radius: var(--space-5);
+}
+
+.artifact-inspector-card-measure-probe {
+    position: fixed;
+    left: -10000px;
+    top: 0;
+    visibility: hidden;
+    pointer-events: none;
+    width: var(--site-micro-col-width);
 }
 
 .artifact-inspector-flyer .micro-mock__card.note-card {
@@ -2398,7 +2494,7 @@ body.view-level-3 .depth-block-bar .action-block.is-depth-ui-mounted {
     cursor: grab;
     z-index: 1;
     flex-shrink: 0;
-    box-shadow: 0 1px 0 rgba(16, 16, 16, 0.08);
+    box-shadow: none;
 }
 
 body.view-level-2 .depth-block-bar .action-block.is-depth-ui-mounted.is-selected,
@@ -2572,20 +2668,46 @@ body.view-level-3 .action-block--frame.is-drop-target {
     display: inline-flex;
     width: max-content;
     height: var(--block-height, 26px);
-    border: var(--outline-weight) dashed transparent;
+    border: var(--block-shell-border-width) solid transparent;
     border-radius: calc(var(--block-height, 26px) / 2);
-    transition: border-color var(--transition-fast);
+    transition: border-color var(--transition-fast), background-color var(--transition-fast);
 }
 
 .block-slot.is-empty {
     min-width: 0;
     flex-shrink: 0;
-    border-color: #c4c4c4;
+    box-sizing: border-box;
+    align-items: center;
+    justify-content: center;
+    padding: 0 var(--space-10);
+    background-color: var(--color-6);
+    border-color: var(--color-2);
+}
+
+.block-slot__ghost {
+    display: inline-flex;
+    flex-direction: row;
+    direction: rtl;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-10);
+    color: var(--color-2);
+    pointer-events: none;
+    white-space: nowrap;
+}
+
+.block-slot__glyph-ring {
+    flex-shrink: 0;
+    width: var(--block-glyph-size, 12px);
+    height: var(--block-glyph-size, 12px);
+    border: var(--block-shell-border-width) solid var(--color-2);
+    border-radius: 50%;
+    background: transparent;
     box-sizing: border-box;
 }
 
 .block-slot--frame.is-empty {
-    border-color: #707070;
+    border-color: var(--color-2);
 }
 
 .action-block {
@@ -2593,7 +2715,7 @@ body.view-level-3 .action-block--frame.is-drop-target {
     height: var(--block-height, 26px);
     padding: 0 var(--space-10);
     background-color: var(--color-3);
-    border: none;
+    border: var(--block-hover-border-width) solid transparent;
     border-radius: calc(var(--block-height, 26px) / 2);
     display: inline-flex;
     flex-direction: row;
@@ -2604,54 +2726,92 @@ body.view-level-3 .action-block--frame.is-drop-target {
     cursor: grab;
     touch-action: none;
     color: var(--color-1);
+    box-sizing: border-box;
     text-shadow: none;
     -webkit-text-stroke: 0 transparent;
     paint-order: normal;
     font-synthesis: none;
-    transition: background-color var(--transition-fast), opacity 0.4s ease;
+    transition:
+        background-color var(--transition-fast),
+        color var(--transition-fast),
+        border-color var(--transition-fast);
 }
 
-.action-block:hover {
-    background-color: color-mix(in srgb, var(--color-3) 85%, var(--color-1));
+/* Default hover — tag blocks only: 2px border in sheet tag color */
+.action-block[data-type="tag"]:not(.action-block--attached):not(.is-removable):hover {
+    border-color: var(--block-tag-color, transparent);
 }
 
-.warehouse-tray-section--blocks {
-    column-gap: var(--space-10);
-    row-gap: 0.625rem;
+/* Attached to note — static light pill, no hover */
+.action-block--attached,
+.action-block.action-block--attached:hover {
+    background-color: var(--color-1);
+    color: var(--color-4);
+    border-color: transparent;
+    cursor: default;
 }
 
-/* Workspace capture limit — docked tag/author pills muted (max 5 on surface) */
-.action-warehouse.is-capture-full .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block {
-    opacity: 0.52;
+/* Selected deployed — hover shows remove (×) */
+.action-block.is-removable:hover:not(.is-dragging):not(.is-deploying-to-bar) {
+    background-color: var(--color-3);
+    color: var(--color-1);
+    border-color: transparent;
+    cursor: pointer;
 }
 
-.action-warehouse.is-capture-full .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block:hover {
-    background-color: var(--card-bg);
+.action-block.is-removable:hover:not(.is-dragging):not(.is-deploying-to-bar)[data-type="tag"] .block-glyph {
+    display: none;
 }
 
-.action-warehouse.is-capture-full .warehouse-tray-section--blocks .block-slot:not(.is-empty) .block-glyph {
-    background-color: var(--block-hover-bg) !important;
+.action-block.is-removable:hover:not(.is-dragging):not(.is-deploying-to-bar) .block-remove-mark {
+    display: inline-flex;
 }
 
-.action-warehouse.is-capture-full .warehouse-tray-section--blocks .block-slot:not(.is-empty) .block-label {
-    color: #a8a8a8;
+.action-block.is-removable:hover:not(.is-dragging):not(.is-deploying-to-bar)[data-type="tag"] .block-remove-mark {
+    color: var(--block-tag-color, var(--color-1));
 }
 
-/* L2/L3 focus — mute docked blocks that never co-occur with active filter blocks in any note */
+.action-block.is-removable:hover:not(.is-dragging):not(.is-deploying-to-bar):not([data-type="tag"]) .block-remove-mark {
+    color: var(--color-1);
+}
+
+.block-remove-mark {
+    display: none;
+    flex-shrink: 0;
+    width: var(--block-glyph-size, 12px);
+    height: var(--block-glyph-size, 12px);
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    font-size: 1.05em;
+    pointer-events: auto;
+    cursor: pointer;
+    order: -1;
+}
+
+/* Muted dock pills — irrelevant variant */
+.action-warehouse.is-capture-full .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block,
 .action-warehouse.is-cooccurrence-filter .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block.is-dock-irrelevant {
-    opacity: 0.52;
+    background-color: var(--color-2);
+    color: var(--color-5);
+    border-color: transparent;
 }
 
+.action-warehouse.is-capture-full .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block[data-type="tag"] .block-glyph,
+.action-warehouse.is-cooccurrence-filter .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block.is-dock-irrelevant[data-type="tag"] .block-glyph {
+    background-color: var(--color-5) !important;
+}
+
+.action-warehouse.is-capture-full .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block:hover,
 .action-warehouse.is-cooccurrence-filter .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block.is-dock-irrelevant:hover {
-    background-color: var(--card-bg);
+    background-color: var(--color-2);
+    color: var(--color-5);
+    border-color: transparent;
 }
 
-.action-warehouse.is-cooccurrence-filter .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block.is-dock-irrelevant .block-glyph {
-    background-color: var(--block-hover-bg) !important;
-}
-
-.action-warehouse.is-cooccurrence-filter .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block.is-dock-irrelevant .block-label {
-    color: #a8a8a8;
+.action-warehouse.is-capture-full .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block[data-type="tag"]:hover,
+.action-warehouse.is-cooccurrence-filter .warehouse-tray-section--blocks .block-slot:not(.is-empty) .action-block.is-dock-irrelevant[data-type="tag"]:hover {
+    border-color: transparent;
 }
 
 .action-block--author .block-label {
@@ -2748,7 +2908,7 @@ body.is-depth-v2.view-level-3 .micro-mock__typology-block .block-typology-mark,
     cursor: grabbing;
     z-index: 950;
     transition: opacity 0.4s ease;
-    box-shadow: 0 6px 0 rgba(16, 16, 16, 0.12);
+    box-shadow: none;
 }
 
 /* Deployed: anchored to the canvas (page space), scrolls with the world */
@@ -2759,11 +2919,40 @@ body.is-depth-v2.view-level-3 .micro-mock__typology-block .block-typology-mark,
     margin: 0;
     z-index: 100;
     transition: opacity 0.4s ease;
-    box-shadow: 0 2px 0 rgba(16, 16, 16, 0.1);
+    box-shadow: none;
 }
 
 body.view-level-1 .action-block.is-deployed {
     cursor: pointer;
+}
+
+/* L1 dock click — muted ghost swings to canvas center (indication only) */
+.action-block.is-macro-indication {
+    position: fixed;
+    top: 0;
+    left: 0;
+    margin: 0;
+    z-index: 955;
+    pointer-events: none;
+    visibility: visible;
+    box-shadow: none;
+    will-change: transform, opacity;
+    background-color: var(--color-2);
+    color: var(--color-5);
+    border-color: transparent;
+}
+
+.action-block.is-macro-indication[data-type="tag"] .block-glyph {
+    background-color: var(--color-5) !important;
+}
+
+.action-block.is-macro-indication .block-typology-mark {
+    color: var(--color-5);
+}
+
+.action-block.is-macro-indication.is-fading {
+    opacity: 0;
+    transition: opacity 0.28s ease;
 }
 
 /* Snap-back animation toward the dock slot */
@@ -2780,8 +2969,7 @@ body.view-level-1 .action-block.is-deployed {
     z-index: 960;
     pointer-events: none;
     visibility: visible;
-    box-shadow: 0 8px 28px rgba(16, 16, 16, 0.14);
-    transition: box-shadow 0.35s cubic-bezier(0.22, 1, 0.36, 1);
+    box-shadow: none;
     will-change: transform;
 }
 
@@ -2790,6 +2978,7 @@ body.view-level-1 .action-block.is-deployed {
     width: var(--block-glyph-size, 12px);
     height: var(--block-glyph-size, 12px);
     border-radius: 50%;
+    order: -1;
 }
 
 .block-label {
@@ -3950,14 +4139,19 @@ body.is-depth-v2.view-level-3 .micro-mock__author-block,
 body.is-depth-v2.view-level-3 .micro-mock__typology-block,
 .artifact-inspector-panel .micro-mock__tag-pill,
 .artifact-inspector-panel .micro-mock__author-block,
-.artifact-inspector-panel .micro-mock__typology-block {
+.artifact-inspector-panel .micro-mock__typology-block,
+body.is-depth-v2.view-level-3 .micro-mock__tag-pill.action-block--attached,
+body.is-depth-v2.view-level-3 .micro-mock__author-block.action-block--attached,
+body.is-depth-v2.view-level-3 .micro-mock__typology-block.action-block--attached,
+.artifact-inspector-panel .micro-mock__tag-pill.action-block--attached,
+.artifact-inspector-panel .micro-mock__author-block.action-block--attached,
+.artifact-inspector-panel .micro-mock__typology-block.action-block--attached {
     background-color: var(--color-1);
-    border: none;
+    border-color: transparent;
     color: var(--color-4);
     cursor: default !important;
     outline: none;
-    pointer-events: auto !important;
-    transition: background-color var(--transition-fast), color var(--transition-fast);
+    pointer-events: none !important;
 }
 
 .artifact-inspector-panel .micro-mock__author-block.action-block,
@@ -3969,15 +4163,6 @@ body.is-depth-v2.view-level-3 .micro-mock__typology-block,
     outline: none;
 }
 
-body.is-depth-v2.view-level-3 .micro-mock__tag-pill:hover,
-body.is-depth-v2.view-level-3 .micro-mock__author-block:hover,
-body.is-depth-v2.view-level-3 .micro-mock__typology-block:hover,
-.artifact-inspector-panel .micro-mock__tag-pill:hover,
-.artifact-inspector-panel .micro-mock__author-block:hover,
-.artifact-inspector-panel .micro-mock__typology-block:hover {
-    background-color: var(--color-3);
-    color: var(--color-1);
-}
 
 body.is-depth-v2.view-level-3.is-block-focus .note-wrapper.is-molecule-muted .depth-v2-glyph--micro {
     opacity: 0.34;
@@ -4087,52 +4272,4 @@ body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper:has(.micro
 
 body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-grid-column:has(.micro-mock__card.note-card:hover) {
     overflow: visible;
-}
-
-/* ==========================================================================
-   09. EXPERIMENTAL — pill chrome on interactive text only
-   Toggle: CONFIG.experimental.interactivePillChrome (false = revert)
-   Draggable text: .action-block labels (base capsule frame in §07).
-   Clickable text: depth layer labels (מאקרו / מזו / מיקרו).
-   ========================================================================== */
-body.is-interactive-pill-chrome {
-    --pill-chrome-bg: var(--card-bg);
-    --pill-chrome-border: var(--outline-weight) solid var(--main-text);
-    --pill-chrome-radius: var(--capsule-radius);
-    --pill-chrome-hover-bg: var(--block-hover-bg);
-    --pill-chrome-pad-y: 0.22rem;
-    --pill-chrome-pad-x: var(--space-10);
-}
-
-/* Depth nav — clickable layer labels */
-body.is-interactive-pill-chrome .site-navigation-layers__label {
-    background-color: var(--color-6);
-    border: none;
-    border-radius: var(--layer-nav-box-radius, var(--space-5));
-    padding: var(--layer-nav-box-pad-y-top) var(--layer-nav-box-pad-x) var(--layer-nav-box-pad-y-bottom);
-    box-sizing: border-box;
-    transition:
-        transform var(--layer-nav-slot-duration, 0.34s) var(--layer-nav-slot-easing, cubic-bezier(0.9, 0, 0.02, 1)),
-        opacity 0.12s ease,
-        font-weight 0.12s ease,
-        background-color var(--transition-fast);
-}
-
-body.is-interactive-pill-chrome .site-navigation-layers__title.is-inactive:not(:disabled):hover .site-navigation-layers__label {
-    background-color: var(--color-6);
-    transform: translateX(var(--layer-nav-hover-shift, -0.3125rem));
-}
-
-body.is-interactive-pill-chrome .site-navigation-layers__title.is-active .site-navigation-layers__label {
-    color: var(--color-6);
-    background-color: var(--color-3);
-}
-
-/* Draggable block pills — extra inset (capsule frame already on .action-block) */
-body.is-interactive-pill-chrome .action-block:not(.action-block--frame) {
-    padding: var(--pill-chrome-pad-y) var(--pill-chrome-pad-x);
-}
-
-body.is-interactive-pill-chrome .warehouse-reset {
-    padding: var(--pill-chrome-pad-y) var(--pill-chrome-pad-x);
 }

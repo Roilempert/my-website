@@ -25,11 +25,6 @@ const CONFIG = {
 
     typography: TYPE_SCALE,
 
-    /* --- Experimental UI — pill frames on draggable/clickable text only; false = revert --- */
-    experimental: {
-        interactivePillChrome: true
-    },
-
     /* --- Site shell grid (viewport reference — separate from #app canvas grids) --- */
     siteGrid: {
         columns: 24,
@@ -323,7 +318,9 @@ const CONFIG = {
                 mesoCellHeight: 100,
                 microCellWidth: 120,
                 microCellHeight: 140,
-                orbitRadius: 72
+                orbitRadius: 72,
+                /* L3 study band: relevant notes round-robin into first N columns when blocks active */
+                microClusterCols: 4
             },
             hive: {
                 cellWidth: 92,
@@ -747,6 +744,9 @@ const CONFIG = {
         depthDeployDuration: 520,
         depthDeployStartScale: 0.94,
         depthDeployArcLift: scale(14),
+        macroIndicationDuration: 720,
+        macroIndicationFadeMs: 320,
+        macroIndicationTravel: 1,
 
         frame: {
             filter: {
@@ -1427,16 +1427,7 @@ function applySiteGridTokens(root = document.documentElement, level = null) {
     if (document.body) {
         document.body.classList.add('site-grid');
         document.body.classList.toggle('is-site-grid-debug', !!g.debug);
-        applyExperimentalChrome();
     }
-}
-
-function applyExperimentalChrome() {
-    if (!document.body) return;
-    document.body.classList.toggle(
-        'is-interactive-pill-chrome',
-        !!CONFIG.experimental?.interactivePillChrome
-    );
 }
 
 function applyTypographyTokens() {
@@ -1452,7 +1443,6 @@ function applyTypographyTokens() {
 
 function applyVisualScaleTokens() {
     applyTypographyTokens();
-    applyExperimentalChrome();
     const root = document.documentElement;
     const mesoTags = CONFIG.meso.tagMarkers;
     const { meso, micro } = getDepthUnitScales();

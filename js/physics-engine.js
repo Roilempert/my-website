@@ -130,6 +130,11 @@ const PhysicsEngine = {
 
         this.initMoleculePointer();
 
+        this.moleculeHoverTitle = document.createElement('div');
+        this.moleculeHoverTitle.className = 'molecule-hover-title note-h';
+        this.moleculeHoverTitle.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(this.moleculeHoverTitle);
+
         window.addEventListener('resize', () => {
             clearTimeout(this.resizeTimer);
             this.resizeTimer = setTimeout(() => {
@@ -1622,11 +1627,7 @@ const PhysicsEngine = {
 
             if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
                 if (typeof ArtifactInspector !== 'undefined') {
-                    if (ArtifactInspector.isActive) {
-                        ArtifactInspector.close();
-                    } else {
-                        ArtifactInspector.open(wrapper);
-                    }
+                    ArtifactInspector.openMacroNoteAt(e.clientX, e.clientY);
                 }
                 return;
             }
@@ -1641,23 +1642,77 @@ const PhysicsEngine = {
         document.addEventListener('pointercancel', this.onMoleculePointerUp);
     },
 
+    resolveMoleculeHoverTitle(wrapper) {
+        if (!wrapper) return '';
+        const titleEl = wrapper.querySelector('.layer-full .note-title');
+        const title = titleEl?.textContent?.trim();
+        if (title) {
+            const firstLine = title.split(/\r?\n/)[0].trim();
+            if (firstLine) return firstLine;
+        }
+        const bodyEl = wrapper.querySelector('.layer-full .note-body');
+        const body = bodyEl?.textContent?.trim();
+        if (body) return body.split(/\r?\n/)[0].trim();
+        return '';
+    },
+
     updateMoleculeHoverState() {
-        if (DepthController.currentLevel !== 1 || this.bodiesData.length === 0) {
+        const label = this.moleculeHoverTitle;
+
+        const hideHover = () => {
+            label?.classList.remove('is-visible');
             this.hoveredNoteIndex = -1;
             document.body.classList.remove('is-molecule-hover');
+        };
+
+        if (DepthController.currentLevel !== 1 || this.bodiesData.length === 0) {
+            hideHover();
+            return;
+        }
+
+        if (document.body.classList.contains('is-space-pan') ||
+            document.body.classList.contains('is-canvas-panning')) {
+            hideHover();
             return;
         }
 
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(this.mouseClientX, this.mouseClientY)) {
-            this.hoveredNoteIndex = -1;
-            document.body.classList.remove('is-molecule-hover');
+            hideHover();
             return;
         }
 
         const noteIndex = this.hitTestMolecule(this.mouseClientX, this.mouseClientY);
         this.hoveredNoteIndex = noteIndex;
         document.body.classList.toggle('is-molecule-hover', noteIndex >= 0);
+
+        if (!label) return;
+
+        if (noteIndex < 0) {
+            label.classList.remove('is-visible');
+            return;
+        }
+
+        const bounds = this.moleculeViewportBounds(noteIndex);
+        const wrapper = document.querySelectorAll('.note-wrapper')[noteIndex];
+        const hoverText = this.resolveMoleculeHoverTitle(wrapper);
+        if (!bounds || !hoverText) {
+            label.classList.remove('is-visible');
+            return;
+        }
+
+        const isLtr = wrapper?.classList.contains('is-note-ltr');
+        label.textContent = hoverText;
+        label.classList.toggle('is-note-ltr', isLtr);
+        label.classList.toggle('is-note-rtl', !isLtr);
+        if (isLtr) {
+            label.style.left = `${bounds.minX}px`;
+            label.style.top = `${bounds.minY}px`;
+        } else {
+            label.style.left = `${bounds.maxX}px`;
+            label.style.top = `${bounds.minY}px`;
+        }
+        label.classList.add('is-visible');
     }
 };
 

@@ -9,6 +9,7 @@ const ArtifactInspector = {
     flyer: null,
     mode: null, // 'popup'
     _openAnimTimer: null,
+    _openSyntheticCard: false,
 
     init() {
         this.backdrop = document.createElement('div');
@@ -59,19 +60,53 @@ const ArtifactInspector = {
         this.openPopup(noteWrapperNode);
     },
 
+    openMacroNoteAt(clientX, clientY) {
+        if (!this._isMacroLevel()) return false;
+        if (typeof PhysicsEngine === 'undefined' || !PhysicsEngine.bodiesData?.length) return false;
+        if (typeof DepthV2 !== 'undefined' && !DepthV2.isActive()) return false;
+        if (typeof DepthTransitionOrchestrator !== 'undefined' &&
+            DepthTransitionOrchestrator.isRunning()) {
+            return false;
+        }
+        if (typeof SpatialNavigation !== 'undefined' &&
+            (SpatialNavigation.pan.active || SpatialNavigation.spaceHeld)) {
+            return false;
+        }
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(clientX, clientY)) {
+            return false;
+        }
+
+        const noteIndex = PhysicsEngine.hitTestMolecule(clientX, clientY);
+        if (noteIndex < 0) return false;
+
+        const wrappers = document.querySelectorAll('.note-wrapper');
+        const wrapper = wrappers[noteIndex];
+        if (!this.isOpenableWrapper(wrapper)) return false;
+
+        if (this.isActive) {
+            this.close();
+        } else {
+            this.open(wrapper);
+        }
+        return true;
+    },
+
     openPopup(noteWrapperNode) {
         const item = typeof MicroMock !== 'undefined'
             ? MicroMock.resolveItem(noteWrapperNode)
             : null;
         if (!item) return;
 
-        const { card: sourceCard } = this._getSourceFocusElements(noteWrapperNode);
-        const firstCard = sourceCard?.getBoundingClientRect();
-        if (!sourceCard || !firstCard || firstCard.width <= 0) return;
+        const source = this._resolveOpenSource(noteWrapperNode, item);
+        if (!source) return;
+
+        const { card: sourceCard, firstRect: firstCard, synthetic } = source;
 
         this.isActive = true;
         this.mode = 'popup';
         this.activeElement = noteWrapperNode;
+        this._openSyntheticCard = synthetic;
         this._openFirstCard = firstCard;
         this._openFocusVisualWidth = firstCard.width * (8 / 6);
 
@@ -128,6 +163,98 @@ const ArtifactInspector = {
         return { note, card, tags };
     },
 
+    _isMacroLevel() {
+        return typeof DepthController !== 'undefined' && DepthController.currentLevel === 1;
+    },
+
+    _resolveOpenSource(wrapper, item) {
+        const { card } = this._getSourceFocusElements(wrapper);
+        const firstRect = card?.getBoundingClientRect();
+        if (card && firstRect && firstRect.width > 0) {
+            return { card, firstRect, synthetic: false };
+        }
+
+        if (!this._isMacroLevel() || typeof MicroMock === 'undefined') return null;
+
+        const cardSize = this._measureL3CardSize(item);
+        const sourceRect = this._resolveMacroSourceRect(wrapper, cardSize);
+        if (!sourceRect) return null;
+
+        const syntheticCard = this._buildSyntheticFocusCard(item);
+        if (!syntheticCard) return null;
+
+        return { card: syntheticCard, firstRect: sourceRect, synthetic: true };
+    },
+
+    _buildSyntheticFocusCard(item) {
+        const html = MicroMock.buildCardOnlyHTML(item, { focusScale: true });
+        const mount = document.createElement('div');
+        mount.innerHTML = html;
+        return mount.firstElementChild;
+    },
+
+    _measureL3CardSize(item) {
+        if (!this._cardMeasureProbe) {
+            this._cardMeasureProbe = document.createElement('div');
+            this._cardMeasureProbe.className = 'artifact-inspector-card-measure-probe';
+            this._cardMeasureProbe.setAttribute('aria-hidden', 'true');
+            document.body.appendChild(this._cardMeasureProbe);
+        }
+
+        this._cardMeasureProbe.innerHTML = MicroMock.buildCardOnlyHTML(item, { focusScale: true });
+        const card = this._cardMeasureProbe.querySelector('.micro-mock__card.note-card');
+        const rect = card?.getBoundingClientRect();
+        const rootStyle = getComputedStyle(document.documentElement);
+        const fallbackW = parseFloat(rootStyle.getPropertyValue('--site-micro-col-width')) || 0;
+        const fallbackH = parseFloat(rootStyle.getPropertyValue('--site-micro-note-min-height')) || 0;
+
+        return {
+            width: rect?.width > 0 ? rect.width : fallbackW,
+            height: rect?.height > 0 ? rect.height : fallbackH
+        };
+    },
+
+    _resolveMacroSourceRect(wrapper, cardSize) {
+        const wrappers = document.querySelectorAll('.note-wrapper');
+        const noteIndex = [...wrappers].indexOf(wrapper);
+        let bounds = null;
+
+        if (noteIndex >= 0 && typeof PhysicsEngine !== 'undefined') {
+            bounds = PhysicsEngine.moleculeViewportBounds(noteIndex);
+        }
+
+        if (!bounds) {
+            const dots = wrapper.querySelectorAll('.layer-dot');
+            dots.forEach((dot) => {
+                const r = dot.getBoundingClientRect();
+                if (r.width <= 0) return;
+                bounds = bounds || { minX: r.left, minY: r.top, maxX: r.right, maxY: r.bottom };
+                bounds.minX = Math.min(bounds.minX, r.left);
+                bounds.minY = Math.min(bounds.minY, r.top);
+                bounds.maxX = Math.max(bounds.maxX, r.right);
+                bounds.maxY = Math.max(bounds.maxY, r.bottom);
+            });
+        }
+
+        if (!bounds || cardSize.width <= 0) return null;
+
+        const cx = (bounds.minX + bounds.maxX) * 0.5;
+        const cy = (bounds.minY + bounds.maxY) * 0.5;
+        const left = cx - cardSize.width * 0.5;
+        const top = cy - cardSize.height * 0.5;
+
+        return {
+            left,
+            top,
+            width: cardSize.width,
+            height: cardSize.height,
+            right: left + cardSize.width,
+            bottom: top + cardSize.height,
+            x: left,
+            y: top
+        };
+    },
+
     _mountFlyingCard(sourceCard) {
         const flyerScaler = this.flyer?.querySelector('.artifact-inspector-focus__card-scaler');
         if (!sourceCard || !flyerScaler || !this._openFirstCard) return;
@@ -159,6 +286,25 @@ const ArtifactInspector = {
         return this._inspectorRegionProbe.getBoundingClientRect();
     },
 
+    _measureSiteGridSpanWidthPx(colSpan) {
+        if (!this._siteGridSpanProbe) {
+            this._siteGridSpanProbe = document.createElement('div');
+            this._siteGridSpanProbe.setAttribute('aria-hidden', 'true');
+            this._siteGridSpanProbe.style.cssText = [
+                'position:fixed',
+                'visibility:hidden',
+                'pointer-events:none',
+                'top:0',
+                'left:0'
+            ].join(';');
+            document.body.appendChild(this._siteGridSpanProbe);
+        }
+        const gapCount = Math.max(0, colSpan - 1);
+        this._siteGridSpanProbe.style.width =
+            `calc(${colSpan} * var(--site-grid-cell-w) + ${gapCount} * var(--site-grid-gap))`;
+        return this._siteGridSpanProbe.getBoundingClientRect().width;
+    },
+
     _getFocusLandingRect() {
         const targetVisualW = this._openFocusVisualWidth
             || (this._openFirstCard ? this._openFirstCard.width * (8 / 6) : 0);
@@ -180,11 +326,14 @@ const ArtifactInspector = {
     },
 
     _applyFocusLandingLayout() {
-        const slot = this._getFocusLandingRect();
-        if (!slot || !this.panel) return null;
-        this.panel.style.width = `${slot.width}px`;
-        this.panel.style.left = `${slot.centerX}px`;
-        return slot;
+        const cardSlot = this._getFocusLandingRect();
+        if (!cardSlot || !this.panel) return null;
+        const inspector = this._measureInspectorRegionRect();
+        const panelWidth = this._measureSiteGridSpanWidthPx(10);
+        const centerX = inspector.left + inspector.width / 2;
+        this.panel.style.width = `${panelWidth}px`;
+        this.panel.style.left = `${centerX}px`;
+        return cardSlot;
     },
 
     _alignFlyerToLandingSlot(flyerNote) {
@@ -367,7 +516,10 @@ const ArtifactInspector = {
         const tags = (item.tags || []).map(t => t.name).join('، ');
         return `
             <section class="artifact-inspector-metadata">
-                <h2 class="artifact-inspector-metadata__id general-h">${this.escapeHtml(item.id || '')}</h2>
+                <div class="artifact-inspector-metadata__header">
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h" aria-hidden="true">^</span>
+                    <h2 class="artifact-inspector-metadata__id general-h">${this.escapeHtml(item.id || '')}</h2>
+                </div>
                 <div class="artifact-inspector-metadata__grid">
                     <div class="artifact-inspector-metadata__tags">
                         <h3 class="general-t">תגיות</h3>
@@ -461,6 +613,11 @@ const ArtifactInspector = {
     },
 
     _restoreSourceCard(noteId) {
+        if (this._openSyntheticCard) {
+            this._openSyntheticCard = false;
+            return;
+        }
+
         const panelScaler = this.panel?.querySelector('.artifact-inspector-focus__card-scaler');
         const flyerScaler = this.flyer?.querySelector('.artifact-inspector-focus__card-scaler');
         const card = panelScaler?.querySelector('.micro-mock__card.note-card')
@@ -516,6 +673,7 @@ const ArtifactInspector = {
         this.activeElement?.classList.remove('is-inspector-source-hidden');
         this._openFirstCard = null;
         this._openFocusVisualWidth = null;
+        this._openSyntheticCard = false;
         this.isActive = false;
         this.activeElement = null;
         this.mode = null;

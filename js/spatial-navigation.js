@@ -376,6 +376,16 @@ const SpatialNavigation = {
             try { captureEl.releasePointerCapture(e.pointerId); } catch (_) { /* ignore */ }
         }
 
+        if (wasTap && DepthController.currentLevel === 1 &&
+            typeof ArtifactInspector !== 'undefined' &&
+            ArtifactInspector.openMacroNoteAt(tapX, tapY)) {
+            this.updateDepthPanCursor(e.clientX, e.clientY);
+            if (typeof NavigationMap !== 'undefined') {
+                NavigationMap.schedulePanUpdate();
+            }
+            return;
+        }
+
         if (wasTap && this.isDepthCanvasLevel()) {
             this.dispatchDepthNoteTap(tapX, tapY);
         }
@@ -493,17 +503,16 @@ const SpatialNavigation = {
         return this.getCatalogViewportPageRect(forLevel);
     },
 
-    // Minimap viewport — L1 clips to visible canvas above warehouse; other levels use full browser viewport.
+    // Minimap viewport — L1 matches visible canvas band above warehouse; L2/L3 use raw browser viewport.
     getNavigationMapViewportPageRect(forLevel = DepthController.currentLevel) {
         const scrollX = window.pageXOffset;
         const scrollY = window.pageYOffset;
-        const width = window.innerWidth;
 
         if (forLevel === 1 && typeof getSiteL1VisibleViewportHeightPx === 'function') {
             return {
                 left: scrollX,
                 top: scrollY,
-                width,
+                width: window.innerWidth,
                 height: Math.round(getSiteL1VisibleViewportHeightPx())
             };
         }
@@ -511,7 +520,7 @@ const SpatialNavigation = {
         return {
             left: scrollX,
             top: scrollY,
-            width,
+            width: window.innerWidth,
             height: window.innerHeight
         };
     },

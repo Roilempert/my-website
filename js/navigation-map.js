@@ -837,6 +837,123 @@ const NavigationMap = {
         });
     },
 
+    // #region agent log
+    _debugMapAlignment(source, hypothesisId = 'ALL') {
+        if (this._activeLevel !== 1 || !this._baseTransform) return;
+        const now = performance.now();
+        if (source === 'pan' && now - (this._debugAlignLogAt || 0) < 400) return;
+        this._debugAlignLogAt = now;
+        try {
+            const vp = this.getMapViewportMarkerRect();
+            const vpClientTop = vp.top - window.pageYOffset;
+            const vpClientBottom = vpClientTop + vp.height;
+            const vpClientLeft = vp.left - window.pageXOffset;
+            const vpClientRight = vpClientLeft + vp.width;
+            const bandBottom = Math.min(whTop, window.innerHeight);
+            const eff = this.getEffectiveTransform();
+            const marker = document.querySelector('.site-navigation-maps__viewport-marker');
+            const wrap = document.querySelector('.site-navigation-maps__map-wrap');
+            if (!eff || !marker || !wrap || !this.canvas) return;
+            const markerR = marker.getBoundingClientRect();
+            const wrapR = wrap.getBoundingClientRect();
+            const panX = this._panDisplayX;
+            const panY = this._panDisplayY;
+            const cssH = this.canvas.clientHeight;
+            const cssW = this.canvas.clientWidth;
+            const wrapCx = wrapR.left + wrapR.width / 2;
+            const wrapCy = wrapR.top + wrapR.height / 2;
+            const errX = [];
+            const errY = [];
+            const relXs = [];
+            const relYs = [];
+            let screenCount = 0;
+            let inMarker = 0;
+            let outsideTop = 0;
+            let outsideBottom = 0;
+            let outsideLeft = 0;
+            let outsideRight = 0;
+            document.querySelectorAll('#app .layer-dot').forEach((dot) => {
+                const dr = dot.getBoundingClientRect();
+                if (dr.width < 1 ||
+                    dr.top < 0 || dr.bottom > bandBottom ||
+                    dr.left < vpClientLeft || dr.right > vpClientRight) return;
+                screenCount++;
+                const pageX = dr.left + dr.width / 2 + window.pageXOffset;
+                const pageY = dr.top + dr.height / 2 + window.pageYOffset;
+                const mp = eff.toMap(pageX, pageY);
+                const visX = wrapCx + panX + (mp.x - cssW / 2);
+                const visY = wrapCy + panY + (mp.y - cssH / 2);
+                const relX = (visX - markerR.left) / markerR.width;
+                const relY = (visY - markerR.top) / markerR.height;
+                errX.push(relX - (pageX - vp.left) / vp.width);
+                errY.push(relY - (pageY - vp.top) / vp.height);
+                relXs.push(relX);
+                relYs.push(relY);
+                if (relX >= 0 && relX <= 1 && relY >= 0 && relY <= 1) {
+                    inMarker++;
+                } else {
+                    if (relY < 0) outsideTop++;
+                    else if (relY > 1) outsideBottom++;
+                    if (relX < 0) outsideLeft++;
+                    else if (relX > 1) outsideRight++;
+                }
+            });
+            const avg = (arr) => arr.length ? arr.reduce((a, v) => a + v, 0) / arr.length : null;
+            const scrollPan = SpatialNavigation.getScrollAlignedMapBounds(1);
+            const drawPan = this.getMapDrawBounds();
+            fetch('http://127.0.0.1:7699/ingest/ba1e7923-43c5-435b-9e85-9bf447e897b8', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e84f18' },
+                body: JSON.stringify({
+                    sessionId: 'e84f18',
+                    runId: 'post-fix-v12',
+                    hypothesisId,
+                    location: 'navigation-map.js:_debugMapAlignment',
+                    message: source,
+                    data: {
+                        source,
+                        scrollY: Math.round(window.pageYOffset),
+                        scrollX: Math.round(window.pageXOffset),
+                        vpH: Math.round(vp.height),
+                        vpW: Math.round(vp.width),
+                        vpTopClient: Math.round(vpClientTop),
+                        innerH: window.innerHeight,
+                        whTop: Math.round(whTop),
+                        scale: this._baseTransform.scale,
+                        panX: +panX.toFixed(2),
+                        panY: +panY.toFixed(2),
+                        avgVisErrX: avg(errX) != null ? +avg(errX).toFixed(4) : null,
+                        avgVisErrY: avg(errY) != null ? +avg(errY).toFixed(4) : null,
+                        outsideTop,
+                        outsideBottom,
+                        outsideLeft,
+                        outsideRight,
+                        edgeSlackX: relXs.length
+                            ? `${Math.min(...relXs).toFixed(3)}/${(1 - Math.max(...relXs)).toFixed(3)}`
+                            : null,
+                        edgeSlackY: relYs.length
+                            ? `${Math.min(...relYs).toFixed(3)}/${(1 - Math.max(...relYs)).toFixed(3)}`
+                            : null,
+                        relXRange: relXs.length
+                            ? `${Math.min(...relXs).toFixed(3)}..${Math.max(...relXs).toFixed(3)}`
+                            : null,
+                        relYRange: relYs.length
+                            ? `${Math.min(...relYs).toFixed(3)}..${Math.max(...relYs).toFixed(3)}`
+                            : null,
+                        screenDots: screenCount,
+                        dotsInMarker: inMarker,
+                        dotCoverage: screenCount ? +(inMarker / screenCount).toFixed(3) : null,
+                        panBoundsMinX: Math.round(this._baseTransform.panBounds?.minX ?? 0),
+                        scrollPanMinX: scrollPan ? Math.round(scrollPan.minX) : null,
+                        drawPanMinX: drawPan ? Math.round(drawPan.minX) : null
+                    },
+                    timestamp: Date.now()
+                })
+            }).catch(() => {});
+        } catch (_) { /* ignore */ }
+    },
+    // #endregion
+
     computeContainScale(worldW, worldH, innerW, innerH) {
         return Math.min(
             innerW / Math.max(1, worldW),
@@ -941,9 +1058,6 @@ const NavigationMap = {
     },
 
     getMapPanBounds() {
-        if (this._activeLevel === 1) {
-            return this.getMapDrawBounds() || SpatialNavigation.getScrollAlignedMapBounds(1);
-        }
         return SpatialNavigation.getScrollAlignedMapBounds(this._activeLevel);
     },
 
@@ -960,7 +1074,13 @@ const NavigationMap = {
             return this._cachedReferenceBounds;
         }
 
-        const bounds = this.getMapFrameBounds();
+        let bounds;
+        if (this._activeLevel === 1) {
+            bounds = SpatialNavigation.getMapReferenceBounds() || SpatialNavigation.getAppBounds();
+        } else {
+            bounds = this.getMapFrameBounds();
+        }
+
         if (bounds) {
             this._cachedReferenceBounds = bounds;
             this._referenceBoundsDirty = false;
@@ -1603,6 +1723,9 @@ const NavigationMap = {
         this.applyCanvasPan();
         this.updateViewportMarker(base, vp);
         this.syncLastTransform(this._activeLevel, base.contentBounds, vp);
+        // #region agent log
+        this._debugMapAlignment(force ? 'pan-force' : 'pan', 'G');
+        // #endregion
         const blockActive = typeof ActionWarehouse !== 'undefined' &&
             ActionWarehouse.getActiveBlockCount?.() > 0;
         if (this._activeLevel === 1 && blockActive && this.ctx && base) {
@@ -1853,27 +1976,28 @@ const NavigationMap = {
                 return;
             }
 
-            const frameBounds = this.getMapFrameBounds();
-            const panBounds = this.getMapPanBounds();
-            if (!frameBounds || !panBounds) return;
+            const contentBounds = this.getMapContentBounds();
+            if (!contentBounds) return;
 
             const vp = this.getMapViewportMarkerRect();
 
-            this._cachedContentBounds = frameBounds;
+            this._cachedContentBounds = contentBounds;
             this._baseTransform = this.computeTransform(
-                frameBounds,
+                contentBounds,
                 vp,
                 frameW,
                 frameH,
-                { contentOnly: true, panBounds }
+                { contentOnly: true }
             );
-            this._baseTransform.contentBounds = frameBounds;
-            this._baseTransform.panBounds = panBounds;
+            this._baseTransform.contentBounds = contentBounds;
             this.syncCanvasToDrawExtents(this._baseTransform);
             this.drawMapContent(this.ctx, this._baseTransform, level);
             this._contentDirty = false;
 
             this.updatePanFromViewport();
+            // #region agent log
+            this._debugMapAlignment('render', 'H');
+            // #endregion
         } catch (err) {
             console.warn('NavigationMap.render failed:', err);
         }

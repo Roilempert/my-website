@@ -248,6 +248,142 @@ const DepthV2 = {
         return buckets.map((bucket) => bucket.wrappers);
     },
 
+    /** Column band centered on the micro canvas (not the viewport). */
+    getMicroClusterBandIndices(colCount, bandCols) {
+        const centerCol = Math.floor(colCount / 2);
+        const bandStart = Math.max(0, Math.min(colCount - bandCols, centerCol - Math.floor(bandCols / 2)));
+        return Array.from({ length: bandCols }, (_, i) => bandStart + i);
+    },
+
+    /** Role priority for L3 block-study clustering (lower = earlier in cluster). */
+    _microFocusRoleRank(role) {
+        if (role === 'stretched') return 0;
+        if (role === 'captured') return 1;
+        if (role === 'emphasized') return 2;
+        return 3;
+    },
+
+    /** When blocks are active, pull matching notes to the front of the L3 layout stream. */
+    sortWrappersForMicroLayout(wrappers) {
+        const hasFocus = typeof CatalogState !== 'undefined' && CatalogState.hasFocus;
+        if (!hasFocus) {
+            return typeof MesoSpatialLayout !== 'undefined'
+                ? MesoSpatialLayout.sortWrappersByRank(wrappers)
+                : wrappers;
+        }
+
+        const relevant = [];
+        const neutral = [];
+        const getIndex = typeof MesoSpatialLayout !== 'undefined'
+            ? (w) => MesoSpatialLayout.getNoteIndex(w)
+            : (w) => [...document.querySelectorAll('.note-wrapper')].indexOf(w);
+
+        wrappers.forEach(wrapper => {
+            const noteIndex = getIndex(wrapper);
+            const role = CatalogState.noteRoles?.get(noteIndex);
+            if (role === 'stretched' || role === 'captured' || role === 'emphasized') {
+                relevant.push({ wrapper, noteIndex, role });
+            } else {
+                neutral.push(wrapper);
+            }
+        });
+
+        const ranks = typeof MesoSpatialLayout !== 'undefined'
+            ? MesoSpatialLayout.getLayoutRanks()
+            : CatalogState?.macroRank;
+
+        relevant.sort((a, b) => {
+            const ra = this._microFocusRoleRank(a.role);
+            const rb = this._microFocusRoleRank(b.role);
+            if (ra !== rb) return ra - rb;
+            return (ranks?.get(a.noteIndex) ?? a.noteIndex) - (ranks?.get(b.noteIndex) ?? b.noteIndex);
+        });
+
+        const sortNeutral = typeof MesoSpatialLayout !== 'undefined'
+            ? (list) => MesoSpatialLayout.sortWrappersByRank(list, ranks)
+            : (list) => list;
+
+        return [
+            ...relevant.map(entry => entry.wrapper),
+            ...sortNeutral(neutral)
+        ];
+    },
+
+    /**
+     * L3 with active blocks: pack relevant notes into a canvas-centered column band,
+     * balance the rest with LPT across remaining columns.
+     */
+    partitionWrappersForMicroFocus(wrappers, colCount, level = 3) {
+        const hasFocus = typeof CatalogState !== 'undefined' && CatalogState.hasFocus;
+        if (!hasFocus) {
+            return this.partitionWrappersIntoColumns(wrappers, colCount, level);
+        }
+
+        const buckets = Array.from({ length: colCount }, () => ({
+            weight: 0,
+            wrappers: []
+        }));
+
+        const getIndex = typeof MesoSpatialLayout !== 'undefined'
+            ? (w) => MesoSpatialLayout.getNoteIndex(w)
+            : (w) => [...document.querySelectorAll('.note-wrapper')].indexOf(w);
+
+        const relevant = [];
+        const neutral = [];
+
+        wrappers.forEach(wrapper => {
+            const noteIndex = getIndex(wrapper);
+            const role = CatalogState.noteRoles?.get(noteIndex);
+            if (role === 'stretched' || role === 'captured' || role === 'emphasized') {
+                relevant.push(wrapper);
+            } else {
+                neutral.push(wrapper);
+            }
+        });
+
+        const lensCfg = CONFIG.depth.v2?.workspaceLens || {};
+        const bandCols = Math.min(
+            colCount,
+            Math.max(2, lensCfg.microClusterCols ?? 4)
+        );
+        const bandIndices = this.getMicroClusterBandIndices(colCount, bandCols);
+        const bandSet = new Set(bandIndices);
+
+        relevant.forEach((wrapper, i) => {
+            const col = bandIndices[i % bandCols];
+            const weight = this.estimateWrapperLayoutWeight(wrapper, level);
+            buckets[col].wrappers.push(wrapper);
+            buckets[col].weight += weight;
+        });
+
+        const neutralCols = [];
+        for (let col = 0; col < colCount; col++) {
+            if (!bandSet.has(col)) neutralCols.push(col);
+        }
+
+        if (neutralCols.length) {
+            const rankedNeutral = neutral.map(wrapper => ({
+                wrapper,
+                weight: this.estimateWrapperLayoutWeight(wrapper, level)
+            })).sort((a, b) => b.weight - a.weight);
+
+            rankedNeutral.forEach(({ wrapper, weight }) => {
+                let target = neutralCols[0];
+                for (let i = 1; i < neutralCols.length; i++) {
+                    const col = neutralCols[i];
+                    if (buckets[col].weight < buckets[target].weight) target = col;
+                }
+                buckets[target].wrappers.push(wrapper);
+                buckets[target].weight += weight;
+            });
+        }
+
+        return {
+            groups: buckets.map(bucket => bucket.wrappers),
+            bandIndices
+        };
+    },
+
     stashHiddenWrappers(app, hidden) {
         hidden.forEach(wrapper => {
             wrapper.classList.add('is-layout-excluded');
@@ -508,12 +644,14 @@ const DepthV2 = {
             CatalogState.rebuildFromWarehouse();
         }
 
+        const colCount = grid.colCount || 12;
+
         this.restoreMesoColumnLayout();
         this.clearFringeZone();
 
-        const colCount = grid.colCount || 12;
         const allWrappers = this.collectAllNoteWrappers(app);
         const { layout, hidden } = this.partitionWrappersForLayout(allWrappers);
+        const sortedLayout = this.sortWrappersForMicroLayout(layout);
 
         const columns = Array.from({ length: colCount }, () => {
             const col = document.createElement('div');
@@ -521,8 +659,14 @@ const DepthV2 = {
             return col;
         });
 
-        const columnGroups = this.partitionWrappersIntoColumns(layout, colCount, 3);
+        const focusPartition = this.partitionWrappersForMicroFocus(sortedLayout, colCount, 3);
+        const columnGroups = Array.isArray(focusPartition)
+            ? focusPartition
+            : focusPartition.groups;
+
         columnGroups.forEach((group, colIndex) => {
+            columns[colIndex].style.paddingTop = '';
+            columns[colIndex].style.transform = '';
             group.forEach((wrapper) => {
                 wrapper.classList.remove('is-layout-excluded', 'is-catalog-anchored', 'is-meso-anchored', 'is-centered');
                 wrapper.style.removeProperty('--meso-mock-row-span');
@@ -573,6 +717,9 @@ const DepthV2 = {
         } else if (level === 3) {
             this.layoutMicroGrid(options);
             if (typeof MicroMock !== 'undefined') MicroMock.applyAll();
+            if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
+                AppState.centerMicroFocusCluster({ smooth: options.smooth !== false });
+            }
         }
         this._notifyMapLayoutReady();
     },
@@ -865,7 +1012,9 @@ const DepthV2 = {
             if (typeof MicroMock !== 'undefined') {
                 MicroMock.applyAll();
             }
-            if (typeof AppState !== 'undefined') {
+            if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
+                AppState.centerMicroFocusCluster({ smooth: true });
+            } else if (typeof AppState !== 'undefined') {
                 requestAnimationFrame(() => {
                     AppState.centerCanvasOnLayerEnter();
                 });

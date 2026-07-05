@@ -111,17 +111,24 @@ Four classes replace legacy `--type-*` / ratzif22 / NarkissTam body.
 
 ### Action blocks (dock panel)
 
-All block/tag pills use the same dimensions everywhere on the site; only color roles change by context.
+All block/tag pills share dimensions site-wide; chrome varies by **context/state** (Figma Block Variations). Tag dot color always from sheet data. No shadows on pills.
+
+| Variant | Context | Fill | Text | Border | Dot / right mark |
+|---------|---------|------|------|--------|------------------|
+| **Default** | Dock, deployed, depth bar | color 3 | color 1 | none | sheet tag color (tags only) |
+| **Default hover** | Dock tag pills | color 3 | color 1 | **2px** sheet tag color | sheet tag color |
+| **Remove hover** | Selected/deployed removable blocks | color 3 | color 1 | none | **×** — tag color (tags) or color 1 (author/typology); click returns to dock |
+| **Attached to note** | L3 / inspector pills below cards | color 1 | color 4 | none | sheet tag color — not clickable |
+| **Irrelevant / muted** | Capture-full + co-occurrence dock mute | color 2 | color 5 | none | color 5 filled circle (tags only) |
+| **Empty slot** | Reserved dock ghost after deploy | color 6 | color 2 | **2px** color 2 | hollow ring color 2 |
 
 | Property | Value |
 |----------|--------|
 | Horizontal gap | 10px → `var(--space-10)` |
 | Vertical gap | 10px → `0.625rem` |
 | Horizontal padding | 10px → `var(--space-10)` |
-| Border | none |
-| Fill | color 3 |
-| Text | color 1, `.general-t` |
-| Tag dot | 10px, color from sheet |
+| Hover border width | `calc(var(--outline-weight) + 1pt)` → `var(--block-hover-border-width)`; empty slot stays `var(--outline-weight)` |
+| Tag dot | 10px, color from sheet; CSS var `--block-tag-color` on tag blocks |
 | Dot/text gap | 10px → `var(--space-10)` |
 
 **Typology block** — same pill dimensions as tag/author; no tag dot. Visible label: Hebrew from `CONFIG.data.typologyLabels` (בלוק, רשימה, מקטע, מחרוזת). Dock order: Block → List → Fragment → Stanza (`typologyOrder`). Pattern underline on `.block-typology-mark` (`data-typology-pattern`), text color, 1px thick (wavy 3px box), 1px below label:
@@ -140,6 +147,15 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 - **20px** above dock top, **10px** inset from dock right edge
 - Clear: **`נקה לוח`**, fill color 6 (= RESET)
 - Block counter appears inside the live statistics panel
+
+### L1 dock block click (macro)
+
+- Tap a docked block (no drag): **muted ghost** clone (`is-macro-indication` — irrelevant/muted variant: fill color 2, text color 5, tag dot color 5) arcs from tray to the visible L1 canvas center; dock slot shows **empty-slot ghost** (color 6 fill, color 2 hollow ring + label) for the animation duration only; real block stays in tray until dragged
+- Same arc easing as L2/L3 click-deploy (`macroIndicationDuration` 720ms / shared arc lift)
+
+### L1 molecule hover
+
+- Hull outline thickens on hover; **first text row** (`.note-h` title, or first body line if title empty) appears in a fixed label anchored above the hull — RTL notes anchor top-right, LTR top-left
 
 ### Layer navigation (right)
 
@@ -184,14 +200,14 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 | Line rects | anchored right | anchored left |
 | SVG clip rects | `x = viewW − width` | `x = 0` |
 
-**Tags / typology / authors (below card):** same sizing as action dock blocks: 26px pill height, 10px horizontal padding, 10px dot (tags only), 10px dot/text gap, 10px between blocks; note-related tag, typology, and author pills rest with fill color 1, text color 4, no border/outline, and hover to the block-panel dark treatment (fill color 3, text color 1). Typology pills reuse dock pattern underlines (regular/dotted/striped/wavy) via `data-typology`; underline follows pill text color. L3 grid block rows sit 10px (`var(--space-10)`) below their own card with no extra top padding; note groups are separated by 20px (`var(--space-20)`). Focus-card note rows use the same block styling.
+**Tags / typology / authors (below card):** attached variant — fill color 1, text color 4, no border, not clickable. Same sizing as dock blocks. Typology underline follows text color.
 
 ### Focus popup (inspector, all levels)
 
 - Backdrop: color 3 @ 20% opacity
 - Note scales **6 cols → 8 cols** proportionally via `--focus-card-scale` (`8/6`); inspector width is measured from the clicked card (`sourceWidth × 8/6`), not the site token alone; card interior keeps L3 proportions; tag/author/typology blocks stay grid pill size
 - **Panel scaler:** `transform: scale(var(--focus-card-scale))` with measured `margin-bottom` lift — same scale path as the flyer; reserves height for tags/metadata
-- **Open motion:** the clicked L3 card DOM moves into a fixed `.artifact-inspector-flyer` shell (no HTML rebuild); top-left FLIP on the scaler from source rect → shell row 2; one element, one proportional scale path; shadow only after landing; source `.note-wrapper` hidden (`visibility: hidden` on wrapper + descendants)
+- **Open motion:** the clicked L3 card DOM moves into a fixed `.artifact-inspector-flyer` shell (no HTML rebuild); top-left FLIP on the scaler from source rect → shell row 2; one element, one proportional scale path; shadow only after landing; source `.note-wrapper` hidden (`visibility: hidden` on wrapper + descendants). **L1 macro:** molecule click builds a synthetic L3 card (no visible grid card at macro); FLIP starts from molecule hull center at L3 width; tap on hull or dot via `openMacroNoteAt` (physics hit test + nav-surface tap)
 - Popup scrollport spans the full viewport height; focused/related content can scroll to the top and bottom viewport edges
 - Focused note starts at the beginning of shell row 2 when the popup opens
 - Metadata panel below (40px gap): bg color 3, text color 4, radius 5px
@@ -218,6 +234,12 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-05 | L1 molecule hover: first title line (`.note-h`) above hull; restored full macro deploy arc to canvas center |
+| 2026-07-05 | L1 dock click indication: slower (720ms), full travel to canvas center; tray slot shows empty-slot ghost during animation only |
+| 2026-07-05 | L1 focus tap: hull/dot click opens inspector via `openMacroNoteAt`; nav-surface tap uses physics hit test; `index.html` cache-busts `app.js` on build |
+| 2026-07-05 | L1 dock block click: muted ghost (`is-macro-indication`) arcs to visible canvas center as deploy hint; real block stays in tray until drag |
+| 2026-07-05 | Focus open from L1 macro: molecule click opens inspector (synthetic L3 card + FLIP from hull center); macro dots hidden while source slot empty |
+| 2026-07-05 | Block Variations (Figma): default/muted/empty/attached/remove states; tag hover 2px sheet-color border; remove × on deployed hover; no pill shadows; removed `interactivePillChrome` experiment |
 | 2026-07-05 | Layer navigation: removed corner decorations from label boxes |
 | 2026-07-05 | L1 minimap viewport clipped to visible canvas (`warehouse-top`); pan/marker aligned with scroll clamp |
 | 2026-07-05 | Focus open FLIP: single L3 card DOM through flyer → panel (no rebuild); unified `transform: scale(8/6)` end-to-end; pixel-slot alignment; shadow only after landing; card restored to grid on close |
