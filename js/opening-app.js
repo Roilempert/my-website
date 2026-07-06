@@ -1,4 +1,4 @@
-/* opening build 20260706151133 */
+/* opening build 20260706170703 */
 /* ==========================================================================
    Opening Background — L1-style molecules with fold-mirror symmetry
    Tag colors from the data sheet; dots + sibling links + subtle hull outline.
@@ -1223,9 +1223,12 @@ const OpeningBackground = {
             let cy;
 
             if (useMirror) {
-                const inset = spread * 0.04;
-                cx = centerX + inset + rand() * Math.max(inset, spread - inset);
-                cy = centerY - inset - rand() * Math.max(inset, spread - inset);
+                const insetRatio = cfg.scatterMirrorInset ?? 0.04;
+                const reach = cfg.scatterMirrorReach ?? 1;
+                const inset = spread * insetRatio;
+                const range = Math.max(inset, (spread - inset) * reach);
+                cx = centerX + inset + rand() * range;
+                cy = centerY - inset - rand() * range;
             } else {
                 cx = centerX + (rand() - 0.5) * 2 * spread;
                 cy = centerY + (rand() - 0.5) * 2 * spread;
@@ -1260,9 +1263,12 @@ const OpeningBackground = {
             let cy;
 
             if (useMirror) {
-                const inset = spread * 0.06;
-                cx = centerX + inset + rand() * Math.max(inset, spread * 0.92 - inset);
-                cy = centerY - inset - rand() * Math.max(inset, spread * 0.92 - inset);
+                const insetRatio = cfg.scatterMirrorInset ?? 0.06;
+                const reach = cfg.scatterMirrorReach ?? 0.92;
+                const inset = spread * insetRatio;
+                const range = Math.max(inset, (spread - inset) * reach);
+                cx = centerX + inset + rand() * range;
+                cy = centerY - inset - rand() * range;
             } else {
                 cx = centerX + (rand() - 0.5) * 2 * spread;
                 cy = centerY + (rand() - 0.5) * 2 * spread;

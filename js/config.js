@@ -223,8 +223,13 @@ const CONFIG = {
             linkAlpha: 0.48,
             dotCountMin: 2,
             dotCountMax: 5,
-            blobCount: 8,
+            blobCount: 20,
             pillCount: 4,
+            scatterSpread: 0.4,
+            scatterMirrorInset: 0.02,
+            spawnJitterRatio: 0.16,
+            radiusMin: 0.04,
+            radiusMax: 0.11,
             maxDpr: 1,
             repaintThrottleMs: 48,
             dotMotion: false,
@@ -1747,7 +1752,7 @@ function applyPresentationProfile() {
         openingBg.dotMotion = false;
         openingBg.maxDpr = 1;
         if (typeof openingBg.blobCount === 'number') {
-            openingBg.blobCount = Math.min(openingBg.blobCount, 8);
+            openingBg.blobCount = Math.min(openingBg.blobCount, 20);
         }
         if (typeof openingBg.pillCount === 'number') {
             openingBg.pillCount = Math.min(openingBg.pillCount, 4);
