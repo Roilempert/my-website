@@ -1,4 +1,4 @@
-/* opening build 20260706170703 */
+/* opening build 20260706190209 */
 /* ==========================================================================
    Opening Background — L1-style molecules with fold-mirror symmetry
    Tag colors from the data sheet; dots + sibling links + subtle hull outline.

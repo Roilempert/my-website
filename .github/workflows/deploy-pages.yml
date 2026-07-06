@@ -1,6 +1,9 @@
 name: Deploy to GitHub Pages
 
 on:
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
 permissions:
@@ -19,8 +22,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Build JS bundle
-        run: sh ./build-js.sh
+      - name: Build JS bundles
+        run: |
+          sh ./build-js.sh
+          sh ./build-opening.sh
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
