@@ -14,7 +14,8 @@ cd "$ROOT/js"
 } > opening-app.js
 echo "Built js/opening-app.js ($(wc -l < opening-app.js | tr -d ' ') lines)"
 if [ -f "$ROOT/opening.html" ]; then
-  sed -i '' "s|src=\"js/opening-app.js[^\"]*\"|src=\"js/opening-app.js?v=$BUILD_ID\"|" "$ROOT/opening.html"
-  sed -i '' "s|href=\"styles.css[^\"]*\"|href=\"styles.css?v=$BUILD_ID\"|" "$ROOT/opening.html"
+  tmp="$(mktemp)"
+  sed "s|src=\"js/opening-app.js[^\"]*\"|src=\"js/opening-app.js?v=$BUILD_ID\"|; s|href=\"styles.css[^\"]*\"|href=\"styles.css?v=$BUILD_ID\"|" "$ROOT/opening.html" > "$tmp"
+  mv "$tmp" "$ROOT/opening.html"
   echo "Updated opening.html cache bust → ?v=$BUILD_ID"
 fi

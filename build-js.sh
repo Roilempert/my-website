@@ -42,6 +42,8 @@ cd "$ROOT/js"
 } > app.js
 echo "Built js/app.js ($(wc -l < app.js | tr -d ' ') lines)"
 if [ -f "$ROOT/experience.html" ]; then
-  sed -i '' "s|src=\"js/app.js[^\"]*\"|src=\"js/app.js?v=$BUILD_ID\"|" "$ROOT/experience.html"
+  tmp="$(mktemp)"
+  sed "s|src=\"js/app.js[^\"]*\"|src=\"js/app.js?v=$BUILD_ID\"|" "$ROOT/experience.html" > "$tmp"
+  mv "$tmp" "$ROOT/experience.html"
   echo "Updated experience.html cache bust → ?v=$BUILD_ID"
 fi
