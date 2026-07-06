@@ -4,29 +4,26 @@
 const AppState = {
     items: [],
     tagColorsMap: new Map(),
+    _bootPending: false,
+    _bootPrepared: false,
+    _bootPrepareScheduled: false,
 
-    async init() {
-        this.appContainer = document.getElementById('app');
-        try {
-            await this.buildDataPipeline();
-            this.render();
-        } catch (error) {
-            console.error('Data pipeline error:', error);
-        }
-    },
+    prepareBoot() {
+        if (this._bootPrepared || this._bootPrepareScheduled) return;
+        this._bootPrepareScheduled = true;
 
-    finishBoot() {
-        try {
-            if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.populate) {
-                ActionWarehouse.populate();
+        const run = () => {
+            if (this._bootPrepared) return;
+            this._bootPrepared = true;
+
+            try {
+                if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.populate) {
+                    ActionWarehouse.populate();
+                }
+            } catch (err) {
+                console.error('Warehouse populate failed', err);
             }
-        } catch (err) {
-            console.error('Warehouse populate failed', err);
-        }
 
-        this.revealApp();
-
-        setTimeout(() => {
             try {
                 if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.buildWorld) {
                     PhysicsEngine.buildWorld();
@@ -46,7 +43,7 @@ const AppState = {
                     });
                 });
             } catch (err) {
-                console.error('Boot physics failed', err);
+                console.error('Boot prepare failed', err);
                 try {
                     if (typeof NavigationMap !== 'undefined') {
                         NavigationMap.onBootComplete();
@@ -55,7 +52,30 @@ const AppState = {
                     console.warn('NavigationMap.onBootComplete failed:', mapErr);
                 }
             }
-        }, CONFIG.boot.physicsBuildDelay);
+        };
+
+        const delay = CONFIG.boot.physicsBuildDelay ?? 350;
+        if (delay > 0) {
+            setTimeout(run, delay);
+        } else {
+            requestAnimationFrame(() => requestAnimationFrame(run));
+        }
+    },
+
+    async init() {
+        this.appContainer = document.getElementById('app');
+        try {
+            await this.buildDataPipeline();
+            this.render();
+        } catch (error) {
+            console.error('Data pipeline error:', error);
+        }
+    },
+
+    finishBoot() {
+        this.prepareBoot();
+        this._bootPending = false;
+        this.revealApp();
     },
 
     revealApp() {
@@ -65,6 +85,12 @@ const AppState = {
             this.appContainer.classList.add('is-ready');
             this.appContainer.style.opacity = '1';
         });
+    },
+
+    flushPendingBoot() {
+        if (!this._bootPrepared) this.prepareBoot();
+        this._bootPending = false;
+        this.revealApp();
     },
 
     async fetchText(url) {
@@ -237,6 +263,25 @@ const AppState = {
         document.querySelectorAll('.note-wrapper').forEach(wrapper => {
             const item = itemsById.get(wrapper.dataset.noteId);
             if (!item) return;
+
+            if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+                if (item.typology) {
+                    wrapper.dataset.typology = item.typology;
+                } else {
+                    delete wrapper.dataset.typology;
+                }
+                if (typeof TextDirection !== 'undefined') {
+                    TextDirection.applyToWrapper(wrapper, item.textDirection);
+                }
+                if (typeof SilhouetteEngine !== 'undefined') {
+                    const entry = SilhouetteEngine.entries.get(String(item.id));
+                    if (entry) entry.item = item;
+                }
+                if (typeof MicroMock !== 'undefined') {
+                    MicroMock.applyToWrapper(wrapper, item);
+                }
+                return;
+            }
 
             const titleEl = wrapper.querySelector('.note-title');
             const bodyEl = wrapper.querySelector('.note-body');

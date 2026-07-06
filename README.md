@@ -1,6 +1,6 @@
 # עקבות
 
-Spatial study platform for personal phone notes — Bezalel graduation project, year 4.
+A laboratory for exploring human mobile notes — ceremonial, curious, built for exhibition.
 
 ## Start here
 

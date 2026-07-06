@@ -708,13 +708,7 @@ const DepthV2 = {
     relayoutForFilterChange(options = {}) {
         if (!this.isActive()) return;
         const level = DepthController.currentLevel;
-        if (level === 2) {
-            this.applyMesoLayoutForState(options);
-            if (typeof MesoMock !== 'undefined') {
-                MesoMock.invalidateColumnGradientLayout();
-                MesoMock.buildColumnGradientLayout();
-            }
-        } else if (level === 3) {
+        if (level === 3) {
             this.layoutMicroGrid(options);
             if (typeof MicroMock !== 'undefined') MicroMock.applyAll();
             if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
@@ -1032,6 +1026,11 @@ const DepthV2 = {
     onLevelChange(level) {
         if (!this.isActive()) return;
         this.ensureShell();
+
+        if (typeof NoteCensor !== 'undefined') {
+            NoteCensor.onLevelChange(level);
+        }
+
         if (level === 1) {
             this._prepareMesoToken++;
             if (typeof MesoMock !== 'undefined') MesoMock.unbindShaderLiveHover();
@@ -1060,41 +1059,17 @@ const DepthV2 = {
             return;
         }
 
+        if (level === 2) return;
+
         app?.classList.remove('is-micro-grid-layout');
-        const hasMesoLayout = app?.classList.contains('is-meso-column-layout') ||
-            app?.classList.contains('is-meso-hive-layout');
-        if (level === 2 && (this._prepareMesoPromise || (hasMesoLayout && this._lastMesoPreparedLevel === 2))) {
-            if (hasMesoLayout && !this._mesoLayoutReadyPromise) {
-                this._mesoLayoutReadyPromise = Promise.resolve();
-            }
-            this.relayoutForFilterChange({ force: true });
-            if (typeof MesoMock !== 'undefined') MesoMock.bindShaderLiveHover();
-            return;
-        }
-        this._lastMesoPreparedLevel = 2;
-        this.prepareMesoGrid();
-        if (typeof MesoMock !== 'undefined') MesoMock.bindShaderLiveHover();
     },
 
     afterNotesRender() {
         if (!this.isActive()) return;
         const level = DepthController.currentLevel;
-        if (level < 2) return;
+        if (level !== 3) return;
         this.ensureShell();
-        if (level === 3) {
-            this.applyGridTokens(3);
-            this.prepareMicroGrid();
-            return;
-        }
-        const app = document.getElementById('app');
-        const hasMesoLayout = app?.classList.contains('is-meso-column-layout') ||
-            app?.classList.contains('is-meso-hive-layout');
-        if (level === 2 && (this._prepareMesoPromise || hasMesoLayout)) {
-            this.applyGridTokens(level);
-            return;
-        }
-        this.prepareMesoGrid();
-        this.applyGridTokens(level);
-        if (typeof MesoMock !== 'undefined') MesoMock.bindShaderLiveHover();
+        this.applyGridTokens(3);
+        this.prepareMicroGrid();
     }
 };

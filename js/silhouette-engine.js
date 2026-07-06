@@ -356,7 +356,7 @@ const SilhouetteEngine = {
         if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) return;
         if (DepthController.isMicroTransitionActive()) return;
         if (DepthController.isMacroMesoTransitionActive()) return;
-        if (level === 2 || level === 3) this.scheduleBuildAll();
+        if (level === 1 || level === 3) this.scheduleBuildAll();
     }
 };
 

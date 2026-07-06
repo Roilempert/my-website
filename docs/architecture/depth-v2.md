@@ -1,4 +1,6 @@
-# Depth V2 — L2/L3 (active)
+# Depth V2 — L3 micro (active)
+
+Two **navigable** depth levels: **L1 macro** (physics dots) and **L3 micro** (full notes grid). **L2 meso** (silhouettes / MesoMock) removed from navigation (2026-07-05); `SilhouetteEngine` kept for opening-screen art only.
 
 ## Current state
 
@@ -29,7 +31,7 @@ Do not change canvas column counts when adjusting the 24×12 shell.
 |-----|--------|--------|
 | 1 | **active** | Separate L2/L3 canvas grids + **interim** L2 placeholder (`MesoMock` gradients) |
 | 2 | pending | Layer transitions (scroll → FX → reveal) |
-| 3 | **target** | **Typographic silhouettes** at L2 via `SilhouetteEngine` (project goal in `AGENTS.md`) |
+| 3 | **target** | **Typographic silhouettes** at L2 via `SilhouetteEngine` (project goal in `AGENTS.md`); same path geometry also feeds **opening-screen silhouette art** — see [`experience-model.md`](experience-model.md) |
 
 MesoMock is a **stand-in**, not the intended exhibition look. Phase 3 replaces gradient mocks with measured title/body silhouettes.
 

@@ -42,11 +42,35 @@ gh workflow run deploy-pages.yml
 
 ## Project brief
 
-**[`AGENTS.md`](../AGENTS.md)** — project goal (study platform), discovery + study modes, design direction, glossary, working guidelines.
+**[`AGENTS.md`](../AGENTS.md)** — project goal (mobile-notes laboratory), experience architecture (opening → Experience 1/2), design direction, glossary, working guidelines.
+
+**External agents (outside Cursor):** [`external-agent-brief.md`](external-agent-brief.md) — essence, history, current state, technical pitfalls.
+
+**Experience model:** [`architecture/experience-model.md`](architecture/experience-model.md) — opening screen, silhouette art, Experience 1 inventory, Experience 2 placeholder.
 
 **Site shell grid (24×12):** [`architecture/site-grid.md`](architecture/site-grid.md) — viewport reference; separate from scrollable canvas grids inside `#app`.
 
 **Exhibition visual language:** [`visual-language.md`](visual-language.md) — colors, type classes, spacing, SVG chrome (update with any UI token change).
+
+---
+
+## Product architecture
+
+| Doc | Purpose |
+|-----|---------|
+| [`architecture/experience-model.md`](architecture/experience-model.md) | Opening screen, Experience 1/2, silhouette art intent |
+
+---
+
+## Saved versions
+
+| Backup | Location | Restore |
+|--------|----------|---------|
+| **Git branch** | `archive/2026-07-05-pre-redesign` on GitHub | `git fetch origin && git checkout archive/2026-07-05-pre-redesign` |
+| **Local folder** | `../my-website-old` (sibling to repo in `פגמר/`) | Open that folder directly |
+| **Docs** | [`archive/2026-07-05-pre-redesign/README.md`](archive/2026-07-05-pre-redesign/README.md) | Commit `35a7bc2` — exhibition baseline before major redesign (2026-07-05) |
+
+Active work continues on **`main`**. The archive branch stays frozen unless you deliberately re-save.
 
 ---
 
@@ -113,4 +137,4 @@ In chat: *"Create a work session for [topic] from session-template."*
 
 ## Maintenance audit
 
-**[`cleanup-report.md`](cleanup-report.md)** (2026-07-02) — read-only audit of unused assets and safe deletion candidates.
+**[`cleanup-report.md`](../cleanup-report.md)** · **[`cleanup-list.md`](../cleanup-list.md)** (2026-07-06) — audit and checklist for unused assets / performance cleanup.

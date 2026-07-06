@@ -252,6 +252,10 @@ const SpatialNavigation = {
         const wrapper = this.hitTestDepthNote(clientX, clientY);
         if (!wrapper) return false;
 
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            if (!NoteCensor.isNoteStudyUnlocked(wrapper)) return false;
+        }
+
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(clientX, clientY)) {
             return false;
@@ -275,6 +279,21 @@ const SpatialNavigation = {
             return;
         }
         if (this.pan.active || this.spaceHeld) return;
+
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            const overWord = NoteCensor.hitWordAt(clientX, clientY);
+            if (overWord) {
+                this.navSurface.style.cursor = 'default';
+                return;
+            }
+            const wrapper = this.hitTestDepthNote(clientX, clientY);
+            if (wrapper && NoteCensor.isNoteStudyUnlocked(wrapper)) {
+                this.navSurface.style.cursor = 'pointer';
+                return;
+            }
+            this.navSurface.style.cursor = 'grab';
+            return;
+        }
 
         const overNote = !!this.hitTestDepthNote(clientX, clientY);
         this.navSurface.style.cursor = overNote ? 'pointer' : 'grab';

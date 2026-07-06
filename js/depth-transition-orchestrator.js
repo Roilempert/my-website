@@ -72,15 +72,15 @@ const DepthTransitionOrchestrator = {
                 block
             );
 
-        const enterMesoFilterView = () => {
-            DepthController.changeLevel(2);
+        const enterMicroFilterView = () => {
+            DepthController.changeLevel(3);
             requestAnimationFrame(() => {
                 if (typeof ActionWarehouse !== 'undefined') {
                     ActionWarehouse.syncDeployedBlocksForDepth?.();
                     ActionWarehouse.updateDotFocusFilter();
                 }
-                if (typeof MesoMock !== 'undefined') {
-                    MesoMock.refreshFocusLensTextures?.();
+                if (typeof MicroMock !== 'undefined') {
+                    MicroMock.applyAll?.();
                 }
                 if (typeof AppState !== 'undefined') {
                     AppState.centerCanvasOnLayerEnter();
@@ -91,10 +91,10 @@ const DepthTransitionOrchestrator = {
         this.run({
             type: 'block-click',
             fromLevel: 1,
-            toLevel: 2,
+            toLevel: 3,
             block,
             scrollTarget
-        }, enterMesoFilterView);
+        }, enterMicroFilterView);
     },
 
     runWheelZoom() {
@@ -111,8 +111,7 @@ const DepthTransitionOrchestrator = {
             CatalogState.catalogLayout
         );
 
-        const notePath = CONFIG.depth.noteClickPath || 'direct-l3';
-        const toLevel = notePath === 'l2-preview-then-l3' ? 2 : 3;
+        const toLevel = 3;
 
         this.run({
             type: 'note-click',
@@ -122,27 +121,15 @@ const DepthTransitionOrchestrator = {
             wrapper,
             scrollTarget
         }, () => {
-            if (toLevel === 3) {
-                DepthController.changeLevel(2);
-                const waitForMacro = () => {
-                    if (MacroMesoBridge.isAnimating() || DepthController.currentLevel !== 2) {
-                        requestAnimationFrame(waitForMacro);
-                        return;
-                    }
-                    DepthController.changeLevel(3);
-                    if (wrapper && typeof ArtifactInspector !== 'undefined') {
-                        requestAnimationFrame(() => {
-                            if (DepthController.currentLevel === 3) {
-                                ArtifactInspector.open(wrapper);
-                            }
-                        });
-                    }
-                };
-                requestAnimationFrame(waitForMacro);
-                return;
-            }
-
             DepthController.changeLevel(toLevel);
+            if (wrapper && typeof ArtifactInspector !== 'undefined' &&
+                !(typeof NoteCensor !== 'undefined' && NoteCensor.blocksNoteFocus())) {
+                requestAnimationFrame(() => {
+                    if (DepthController.currentLevel === 3) {
+                        ArtifactInspector.open(wrapper);
+                    }
+                });
+            }
         });
     },
 

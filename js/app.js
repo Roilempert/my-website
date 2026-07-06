@@ -1,4 +1,4 @@
-/* app build 20260705200519 */
+/* app build 20260706152143 */
 /* ==========================================================================
    01. SYSTEM BOOTSTRAP
    ========================================================================== */
@@ -83,29 +83,26 @@ const TextDirection = {
 const AppState = {
     items: [],
     tagColorsMap: new Map(),
+    _bootPending: false,
+    _bootPrepared: false,
+    _bootPrepareScheduled: false,
 
-    async init() {
-        this.appContainer = document.getElementById('app');
-        try {
-            await this.buildDataPipeline();
-            this.render();
-        } catch (error) {
-            console.error('Data pipeline error:', error);
-        }
-    },
+    prepareBoot() {
+        if (this._bootPrepared || this._bootPrepareScheduled) return;
+        this._bootPrepareScheduled = true;
 
-    finishBoot() {
-        try {
-            if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.populate) {
-                ActionWarehouse.populate();
+        const run = () => {
+            if (this._bootPrepared) return;
+            this._bootPrepared = true;
+
+            try {
+                if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.populate) {
+                    ActionWarehouse.populate();
+                }
+            } catch (err) {
+                console.error('Warehouse populate failed', err);
             }
-        } catch (err) {
-            console.error('Warehouse populate failed', err);
-        }
 
-        this.revealApp();
-
-        setTimeout(() => {
             try {
                 if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.buildWorld) {
                     PhysicsEngine.buildWorld();
@@ -125,7 +122,7 @@ const AppState = {
                     });
                 });
             } catch (err) {
-                console.error('Boot physics failed', err);
+                console.error('Boot prepare failed', err);
                 try {
                     if (typeof NavigationMap !== 'undefined') {
                         NavigationMap.onBootComplete();
@@ -134,7 +131,30 @@ const AppState = {
                     console.warn('NavigationMap.onBootComplete failed:', mapErr);
                 }
             }
-        }, CONFIG.boot.physicsBuildDelay);
+        };
+
+        const delay = CONFIG.boot.physicsBuildDelay ?? 350;
+        if (delay > 0) {
+            setTimeout(run, delay);
+        } else {
+            requestAnimationFrame(() => requestAnimationFrame(run));
+        }
+    },
+
+    async init() {
+        this.appContainer = document.getElementById('app');
+        try {
+            await this.buildDataPipeline();
+            this.render();
+        } catch (error) {
+            console.error('Data pipeline error:', error);
+        }
+    },
+
+    finishBoot() {
+        this.prepareBoot();
+        this._bootPending = false;
+        this.revealApp();
     },
 
     revealApp() {
@@ -144,6 +164,12 @@ const AppState = {
             this.appContainer.classList.add('is-ready');
             this.appContainer.style.opacity = '1';
         });
+    },
+
+    flushPendingBoot() {
+        if (!this._bootPrepared) this.prepareBoot();
+        this._bootPending = false;
+        this.revealApp();
     },
 
     async fetchText(url) {
@@ -316,6 +342,25 @@ const AppState = {
         document.querySelectorAll('.note-wrapper').forEach(wrapper => {
             const item = itemsById.get(wrapper.dataset.noteId);
             if (!item) return;
+
+            if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+                if (item.typology) {
+                    wrapper.dataset.typology = item.typology;
+                } else {
+                    delete wrapper.dataset.typology;
+                }
+                if (typeof TextDirection !== 'undefined') {
+                    TextDirection.applyToWrapper(wrapper, item.textDirection);
+                }
+                if (typeof SilhouetteEngine !== 'undefined') {
+                    const entry = SilhouetteEngine.entries.get(String(item.id));
+                    if (entry) entry.item = item;
+                }
+                if (typeof MicroMock !== 'undefined') {
+                    MicroMock.applyToWrapper(wrapper, item);
+                }
+                return;
+            }
 
             const titleEl = wrapper.querySelector('.note-title');
             const bodyEl = wrapper.querySelector('.note-body');
@@ -659,7 +704,7 @@ const AppState = {
 
 /* ==========================================================================
    MESO GRADIENT VISUAL BASELINE — tri-blob preset (fallback stub)
-   Full shader baseline lives in docs; p5 mode uses MesoGradientP5 primarily.
+   Full shader baseline lives in docs; p5 mode uses MesoGradientP5 organic blob field.
    ========================================================================== */
 const MesoGradientVisualPreset = {
     id: 'smooth-tri-blob-v1',
@@ -1265,461 +1310,303 @@ const MesoGradientEngine = {
     }
 };
 /* ==========================================================================
-   MESO GRADIENT P5 — Mandala morph shader (p5 sketch port)
-   generateMandala layout; hub = right-edge center; tag colors per ring.
-   Baseline: p5-mandala-v1 (docs/architecture/meso-gradient-p5-baseline.md)
+   MESO GRADIENT P5 — Multiply-blended organic blob field (Canvas 2D)
+   Port of p5 sketch: full-canvas blobs, blur, grain overlay.
+   Tag colors from the data sheet drive core/edge palette pairs.
    ========================================================================== */
 const MesoGradientP5 = {
-    MAX_CIRCLES: 25,
-    MAX_SEAMS: 8,
-
     _canvas: null,
-    _gl: null,
-    _program: null,
-    _buffer: null,
+    _ctx: null,
     _ready: false,
-    _shaderRev: 5,
-
-    VERT_SRC: `
-        attribute vec2 a_position;
-        void main() {
-            gl_Position = vec4(a_position, 0.0, 1.0);
-        }
-    `,
-
-    FRAG_SRC: `
-        precision mediump float;
-
-        uniform vec2 u_resolution;
-        uniform int u_count;
-        uniform vec2 u_positions[25];
-        uniform vec3 u_colors[25];
-        uniform float u_radii[25];
-        uniform vec2 u_stretch[25];
-        uniform float u_blendFactor;
-        uniform float u_falloff;
-        uniform int u_sharpCircle;
-        uniform float u_sharpFalloff;
-        uniform float u_sharpBlendK;
-        uniform vec3 u_bgColor;
-        uniform float u_maskSoft;
-        uniform int u_seamCount;
-        uniform vec3 u_seamColors[8];
-        uniform vec2 u_seamPosA[8];
-        uniform vec2 u_seamPosB[8];
-        uniform float u_seamStrength;
-        uniform float u_colorEdgeSoft;
-        uniform float u_colorEdgeCore;
-        uniform float u_colorSharpness;
-        uniform float u_boundaryGlow;
-        uniform float u_colorSatBoost;
-
-        float smin(float a, float b, float k) {
-            float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-            return mix(b, a, h) - k * h * (1.0 - h);
-        }
-
-        void main() {
-            /* hub = right-edge vertical center (RTL) */
-            vec2 pixel = gl_FragCoord.xy - vec2(u_resolution.x, u_resolution.y * 0.5);
-            vec2 uv = pixel / min(u_resolution.x, u_resolution.y);
-
-            float d = 100.0;
-            vec3 colorAcc = vec3(0.0);
-            float weightAcc = 0.0;
-            float bestInside = -999.0;
-            float secondInside = -999.0;
-
-            for (int i = 0; i < 25; i++) {
-                if (i >= u_count) break;
-
-                vec2 delta = uv - u_positions[i];
-                vec2 stretch = max(u_stretch[i], vec2(0.65));
-                vec2 scaled = delta / stretch;
-                float dist = length(scaled) * min(stretch.x, stretch.y);
-                float inside = u_radii[i] - dist;
-                float k = (i == u_sharpCircle) ? u_sharpBlendK : u_blendFactor;
-                float f = (i == u_sharpCircle) ? u_sharpFalloff : u_falloff;
-                d = smin(d, dist - u_radii[i], k);
-
-                if (inside > bestInside) {
-                    secondInside = bestInside;
-                    bestInside = inside;
-                } else if (inside > secondInside) {
-                    secondInside = inside;
-                }
-
-                float w = 1.0 / (pow(dist, f) + 0.0001);
-                float insideBoost = smoothstep(-u_colorEdgeSoft, u_colorEdgeCore, inside);
-                w *= 1.0 + insideBoost * u_colorSatBoost;
-                colorAcc += u_colors[i] * w;
-                weightAcc += w;
-            }
-
-            for (int s = 0; s < 8; s++) {
-                if (s >= u_seamCount) break;
-
-                float da = length(uv - u_seamPosA[s]);
-                float db = length(uv - u_seamPosB[s]);
-                float gap = abs(da - db);
-                float seamW = exp(-gap * 14.0) * exp(-min(da, db) * 2.0);
-                seamW *= smoothstep(0.12, 0.015, gap);
-                colorAcc += u_seamColors[s] * seamW * u_seamStrength;
-                weightAcc += seamW * u_seamStrength;
-            }
-
-            vec3 finalColor = weightAcc > 0.001
-                ? colorAcc / weightAcc
-                : u_bgColor;
-
-            float contactGap = abs(bestInside - secondInside);
-            float contact = exp(-contactGap * 60.0) * smoothstep(0.0, 0.05, min(bestInside, secondInside));
-            vec3 edgeGlow = min(finalColor * 1.4 + vec3(0.1), vec3(1.0));
-            finalColor = mix(finalColor, edgeGlow, contact * u_boundaryGlow);
-
-            float mask = smoothstep(u_maskSoft, -0.15, d);
-
-            gl_FragColor = vec4(mix(u_bgColor, finalColor, mask), 1.0);
-        }
-    `,
-
-    parseColorVec3(color) {
-        if (typeof MesoGradientEngine !== 'undefined') {
-            return MesoGradientEngine.parseColorVec3(color);
-        }
-        return [0.5, 0.5, 0.5];
-    },
-
-    buildMandalaFromTags(tagColors, seed, opts) {
-        const MAX = this.MAX_CIRCLES;
-        const MAX_SEAMS = this.MAX_SEAMS;
-        const TWO_PI = Math.PI * 2;
-        const rand = opts.rand || ((s, i) => ((s ^ i) % 1000) / 1000);
-        const geomScale = (opts.scale ?? 1) * (opts.mandalaFit ?? 1);
-        const seamChance = opts.seamChance ?? 0.32;
-        const positionsFlat = [];
-        const colorsFlat = [];
-        const radiiFlat = [];
-        const stretchFlat = [];
-        const circlePositions = [];
-        let activeCircleCount = 0;
-
-        const shapeBreak = opts.shapeBreak ?? 0.35;
-        const symmetricLayout = (opts.symmetricLayout ?? 1) > 0;
-        const symmetryCount = opts.symmetryCount ?? 8;
-        const distJitter = symmetricLayout ? 0 : (opts.ringDistJitter ?? 0.04) * shapeBreak;
-        const angleJitter = symmetricLayout ? 0 : (opts.ringAngleJitter ?? 0.02) * shapeBreak;
-        const circleSquash = (opts.circleSquash ?? 0.12) * shapeBreak;
-
-        const ringCountFor = (slot) => {
-            if (symmetricLayout && symmetryCount > 0) return symmetryCount;
-            return Math.floor(4 + rand(seed, slot) * 5);
-        };
-
-        const squashPair = (slot) => {
-            const sx = 1 + (rand(seed, slot) - 0.5) * 2 * circleSquash;
-            const sy = 1 + (rand(seed, slot + 1) - 0.5) * 2 * circleSquash;
-            return [sx, sy];
-        };
-
-        const palette = tagColors.length ? tagColors : ['#888888'];
-        const n = palette.length;
-
-        const circleColors = [];
-        const seamColorStrs = [];
-        for (let i = 0; i < n; i++) {
-            if (i === 0) {
-                circleColors.push(palette[i]);
-            } else if (rand(seed, 600 + i) < seamChance) {
-                seamColorStrs.push(palette[i]);
-            } else {
-                circleColors.push(palette[i]);
-            }
-        }
-        if (circleColors.length === 0) {
-            circleColors.push(palette[0]);
-        }
-
-        const cn = circleColors.length;
-        const tagFit = opts.tagFit ?? 3.2;
-        const layoutScale = cn <= 1 ? 1 : Math.min(1, tagFit / (cn + 0.8));
-        const ringStepScale = cn <= 3 ? 1 : 3 / cn;
-        const totalScale = geomScale * layoutScale;
-
-        const rgbCircle = (idx) => this.parseColorVec3(circleColors[Math.min(idx, cn - 1)]);
-
-        const tagForLayer = (layer) => {
-            if (cn === 1) return 0;
-            if (cn === 2) return layer === 0 ? 0 : 1;
-            return Math.min(layer, cn - 1);
-        };
-
-        const push = (x, y, rgb, r, sx = 1, sy = 1) => {
-            if (activeCircleCount >= MAX) return;
-            const scx = x * totalScale;
-            const scy = y * totalScale;
-            positionsFlat.push(scx, scy);
-            colorsFlat.push(rgb[0], rgb[1], rgb[2]);
-            radiiFlat.push(r * totalScale);
-            stretchFlat.push(sx, sy);
-            circlePositions.push(scx, scy);
-            activeCircleCount++;
-        };
-
-        const pushOnRing = (baseDist, angle, rgb, r, slot) => {
-            const a = angle + (rand(seed, slot) - 0.5) * angleJitter;
-            const d = baseDist * (1 + (rand(seed, slot + 1) - 0.5) * 2 * distJitter);
-            const [sx, sy] = squashPair(slot + 2);
-            push(Math.cos(a) * d, Math.sin(a) * d, rgb, r, sx, sy);
-        };
-
-        const [hubSx, hubSy] = symmetricLayout ? [1, 1] : squashPair(5);
-        push(0, 0, rgbCircle(tagForLayer(0)), 0.11 + rand(seed, 0) * 0.09, hubSx, hubSy);
-
-        const innerCount = ringCountFor(1);
-        const innerDist = 0.2 + rand(seed, 2) * 0.15;
-        const innerRadius = 0.08 + rand(seed, 3) * 0.07;
-        const innerOffset = symmetricLayout ? 0 : rand(seed, 4) * TWO_PI;
-        const colorInner = rgbCircle(tagForLayer(1));
-
-        for (let i = 0; i < innerCount; i++) {
-            const angle = innerOffset + i * (TWO_PI / innerCount);
-            pushOnRing(innerDist, angle, colorInner, innerRadius, 30 + i);
-        }
-
-        const outerCount = ringCountFor(5);
-        let outerDist = innerDist + (0.15 + rand(seed, 6) * 0.15) * ringStepScale;
-        const outerRadius = 0.05 + rand(seed, 7) * 0.07;
-        const outerOffset = symmetricLayout ? 0 : rand(seed, 8) * TWO_PI;
-        const colorOuter = rgbCircle(tagForLayer(2));
-
-        for (let i = 0; i < outerCount; i++) {
-            if (activeCircleCount >= MAX) break;
-            const angle = outerOffset + i * (TWO_PI / outerCount);
-            pushOnRing(outerDist, angle, colorOuter, outerRadius, 50 + i);
-        }
-
-        for (let tagIdx = 3; tagIdx < cn && activeCircleCount < MAX; tagIdx++) {
-            const ringCount = ringCountFor(10 + tagIdx * 4);
-            outerDist += (0.15 + rand(seed, 11 + tagIdx * 4) * 0.15) * ringStepScale;
-            const ringRadius = 0.05 + rand(seed, 12 + tagIdx * 4) * 0.07;
-            const ringOffset = symmetricLayout ? 0 : rand(seed, 13 + tagIdx * 4) * TWO_PI;
-            const ringColor = rgbCircle(tagIdx);
-
-            for (let i = 0; i < ringCount; i++) {
-                if (activeCircleCount >= MAX) break;
-                const angle = ringOffset + i * (TWO_PI / ringCount);
-                pushOnRing(outerDist, angle, ringColor, ringRadius, 70 + tagIdx * 10 + i);
-            }
-        }
-
-        while (positionsFlat.length / 2 < MAX) {
-            positionsFlat.push(0, 0);
-            colorsFlat.push(0, 0, 0);
-            radiiFlat.push(0);
-            stretchFlat.push(1, 1);
-        }
-
-        const seamColorsFlat = [];
-        const seamPosAFlat = [];
-        const seamPosBFlat = [];
-        let seamCount = 0;
-        const circleN = circlePositions.length / 2;
-
-        const pickCirclePair = (si) => {
-            if (circleN < 2) return null;
-            let a = Math.floor(rand(seed, 700 + si * 3) * circleN);
-            let b = Math.floor(rand(seed, 701 + si * 3) * (circleN - 1));
-            if (b >= a) b++;
-            return {
-                ax: circlePositions[a * 2],
-                ay: circlePositions[a * 2 + 1],
-                bx: circlePositions[b * 2],
-                by: circlePositions[b * 2 + 1]
-            };
-        };
-
-        for (let si = 0; si < seamColorStrs.length && seamCount < MAX_SEAMS; si++) {
-            const pair = pickCirclePair(si);
-            if (!pair) break;
-            const rgb = this.parseColorVec3(seamColorStrs[si]);
-            seamColorsFlat.push(rgb[0], rgb[1], rgb[2]);
-            seamPosAFlat.push(pair.ax, pair.ay);
-            seamPosBFlat.push(pair.bx, pair.by);
-            seamCount++;
-        }
-
-        while (seamColorsFlat.length / 3 < MAX_SEAMS) {
-            seamColorsFlat.push(0, 0, 0);
-            seamPosAFlat.push(0, 0);
-            seamPosBFlat.push(0, 0);
-        }
-
-        let sharpCircleIndex = -1;
-        const sharpChance = opts.sharpChance ?? 0.25;
-        if (activeCircleCount > 1 && rand(seed, 99) < sharpChance) {
-            sharpCircleIndex = Math.floor(rand(seed, 98) * activeCircleCount);
-        }
-
-        return {
-            positionsFlat: new Float32Array(positionsFlat),
-            colorsFlat: new Float32Array(colorsFlat),
-            radiiFlat: new Float32Array(radiiFlat),
-            stretchFlat: new Float32Array(stretchFlat),
-            count: activeCircleCount,
-            sharpCircleIndex,
-            seamCount,
-            seamColorsFlat: new Float32Array(seamColorsFlat),
-            seamPosAFlat: new Float32Array(seamPosAFlat),
-            seamPosBFlat: new Float32Array(seamPosBFlat)
-        };
-    },
-
-    _compileShader(gl, type, source) {
-        const shader = gl.createShader(type);
-        gl.shaderSource(shader, source);
-        gl.compileShader(shader);
-        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-            console.warn('MesoGradientP5 shader:', gl.getShaderInfoLog(shader));
-            gl.deleteShader(shader);
-            return null;
-        }
-        return shader;
-    },
 
     init() {
-        if (this._ready && this._compiledRev === this._shaderRev) return true;
-        this._ready = false;
+        if (this._ready) return true;
         if (typeof document === 'undefined') return false;
 
         const canvas = this._canvas || document.createElement('canvas');
-        const gl = this._gl || canvas.getContext('webgl', {
-            alpha: false,
-            antialias: false,
-            depth: false,
-            stencil: false,
-            preserveDrawingBuffer: true
-        });
-
-        if (!gl) return false;
-
-        const vs = this._compileShader(gl, gl.VERTEX_SHADER, this.VERT_SRC);
-        const fs = this._compileShader(gl, gl.FRAGMENT_SHADER, this.FRAG_SRC);
-        if (!vs || !fs) return false;
-
-        const program = gl.createProgram();
-        gl.attachShader(program, vs);
-        gl.attachShader(program, fs);
-        gl.linkProgram(program);
-
-        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-            console.warn('MesoGradientP5: program link failed', gl.getProgramInfoLog(program));
-            return false;
-        }
-
-        if (!this._buffer) {
-            const buffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-                -1, -1, 1, -1, -1, 1,
-                -1, 1, 1, -1, 1, 1
-            ]), gl.STATIC_DRAW);
-            this._buffer = buffer;
-        }
+        const ctx = canvas.getContext('2d', { alpha: false });
+        if (!ctx) return false;
 
         this._canvas = canvas;
-        this._gl = gl;
-        this._program = program;
-        this._loc = {
-            a_position: gl.getAttribLocation(program, 'a_position'),
-            u_resolution: gl.getUniformLocation(program, 'u_resolution'),
-            u_count: gl.getUniformLocation(program, 'u_count'),
-            u_positions: gl.getUniformLocation(program, 'u_positions[0]'),
-            u_colors: gl.getUniformLocation(program, 'u_colors[0]'),
-            u_radii: gl.getUniformLocation(program, 'u_radii[0]'),
-            u_stretch: gl.getUniformLocation(program, 'u_stretch[0]'),
-            u_blendFactor: gl.getUniformLocation(program, 'u_blendFactor'),
-            u_falloff: gl.getUniformLocation(program, 'u_falloff'),
-            u_sharpCircle: gl.getUniformLocation(program, 'u_sharpCircle'),
-            u_sharpFalloff: gl.getUniformLocation(program, 'u_sharpFalloff'),
-            u_sharpBlendK: gl.getUniformLocation(program, 'u_sharpBlendK'),
-            u_bgColor: gl.getUniformLocation(program, 'u_bgColor'),
-            u_maskSoft: gl.getUniformLocation(program, 'u_maskSoft'),
-            u_seamCount: gl.getUniformLocation(program, 'u_seamCount'),
-            u_seamColors: gl.getUniformLocation(program, 'u_seamColors[0]'),
-            u_seamPosA: gl.getUniformLocation(program, 'u_seamPosA[0]'),
-            u_seamPosB: gl.getUniformLocation(program, 'u_seamPosB[0]'),
-            u_seamStrength: gl.getUniformLocation(program, 'u_seamStrength'),
-            u_colorEdgeSoft: gl.getUniformLocation(program, 'u_colorEdgeSoft'),
-            u_colorEdgeCore: gl.getUniformLocation(program, 'u_colorEdgeCore'),
-            u_colorSharpness: gl.getUniformLocation(program, 'u_colorSharpness'),
-            u_boundaryGlow: gl.getUniformLocation(program, 'u_boundaryGlow'),
-            u_colorSatBoost: gl.getUniformLocation(program, 'u_colorSatBoost')
-        };
-        this._compiledRev = this._shaderRev;
+        this._ctx = ctx;
         this._ready = true;
         return true;
+    },
+
+    _defaultRand(seed, i) {
+        const x = Math.sin((Number(seed) || 0) * 12.9898 + i * 78.233) * 43758.5453;
+        return x - Math.floor(x);
+    },
+
+    _randRange(rand, seed, i, min, max) {
+        return min + rand(seed, i) * (max - min);
+    },
+
+    _parseHex(color) {
+        if (!color || typeof color !== 'string') return { r: 136, g: 136, b: 136 };
+        let hex = color.trim();
+        if (hex.startsWith('rgb')) {
+            const m = hex.match(/[\d.]+/g);
+            if (m && m.length >= 3) {
+                return {
+                    r: Math.round(Number(m[0])),
+                    g: Math.round(Number(m[1])),
+                    b: Math.round(Number(m[2]))
+                };
+            }
+        }
+        if (!hex.startsWith('#')) hex = `#${hex}`;
+        if (hex.length === 4) {
+            hex = `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
+        }
+        const n = parseInt(hex.slice(1, 7), 16);
+        if (Number.isNaN(n)) return { r: 136, g: 136, b: 136 };
+        return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+    },
+
+    _toCssColor(color) {
+        if (!color) return '#888888';
+        if (typeof color === 'string' && color.startsWith('rgb')) return color;
+        const { r, g, b } = this._parseHex(color);
+        return `rgb(${r}, ${g}, ${b})`;
+    },
+
+    _darkenColor(color, amount = 0.35) {
+        const { r, g, b } = this._parseHex(color);
+        const f = 1 - Math.min(1, Math.max(0, amount));
+        return `rgb(${Math.round(r * f)}, ${Math.round(g * f)}, ${Math.round(b * f)})`;
+    },
+
+    _buildNoise(seed) {
+        const perm = new Uint8Array(512);
+        const src = new Uint8Array(256);
+        for (let i = 0; i < 256; i++) src[i] = i;
+
+        let s = (Number(seed) || 1) >>> 0;
+        for (let i = 255; i > 0; i--) {
+            s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+            const j = s % (i + 1);
+            const tmp = src[i];
+            src[i] = src[j];
+            src[j] = tmp;
+        }
+        for (let i = 0; i < 512; i++) perm[i] = src[i & 255];
+
+        const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10);
+        const lerp = (a, b, t) => a + t * (b - a);
+        const grad = (hash, x, y) => {
+            const h = hash & 3;
+            const u = h < 2 ? x : y;
+            const v = h < 2 ? y : x;
+            return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+        };
+
+        return (x, y) => {
+            const xi = Math.floor(x) & 255;
+            const yi = Math.floor(y) & 255;
+            const xf = x - Math.floor(x);
+            const yf = y - Math.floor(y);
+            const u = fade(xf);
+            const v = fade(yf);
+            const aa = perm[xi] + yi;
+            const ab = perm[xi + 1] + yi;
+            const x1 = lerp(grad(perm[aa], xf, yf), grad(perm[ab], xf - 1, yf), u);
+            const x2 = lerp(grad(perm[aa + 1], xf, yf - 1), grad(perm[ab + 1], xf - 1, yf - 1), u);
+            return (lerp(x1, x2, v) + 1) * 0.5;
+        };
+    },
+
+    buildPalettesFromTags(tagColors, edgeDarken = 0.35) {
+        const list = (tagColors || []).filter(Boolean);
+        const colors = list.length ? list : ['#888888'];
+        const palettes = [];
+        const seen = new Set();
+
+        const pushPair = (core, edge) => {
+            const key = `${core}|${edge}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            palettes.push({
+                core: this._toCssColor(core),
+                edge: this._toCssColor(edge)
+            });
+        };
+
+        for (let i = 0; i < colors.length; i++) {
+            const core = colors[i];
+            const edge = colors.length > 1
+                ? this._darkenColor(colors[(i + 1) % colors.length], edgeDarken * 0.65)
+                : this._darkenColor(core, edgeDarken);
+            pushPair(core, edge);
+        }
+
+        if (colors.length >= 2) {
+            for (let i = 0; i < colors.length && palettes.length < 12; i++) {
+                for (let j = i + 1; j < colors.length && palettes.length < 12; j++) {
+                    pushPair(colors[i], this._darkenColor(colors[j], edgeDarken * 0.45));
+                    pushPair(colors[j], this._darkenColor(colors[i], edgeDarken * 0.45));
+                }
+            }
+        }
+
+        return palettes.length ? palettes : [{ core: '#888888', edge: '#555555' }];
+    },
+
+    _fillTagWash(ctx, w, h, tagColors, strength = 0.72) {
+        const colors = (tagColors || []).filter(Boolean);
+        if (!colors.length) return;
+
+        const g = ctx.createLinearGradient(0, 0, w * 0.35, h);
+        const stops = colors.length === 1 ? [colors[0], colors[0]] : colors;
+        stops.forEach((color, i) => {
+            g.addColorStop(i / Math.max(1, stops.length - 1), this._toCssColor(color));
+        });
+
+        ctx.save();
+        ctx.globalAlpha = strength;
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+        ctx.restore();
+    },
+
+    _scaledBlobCount(w, h, refCount) {
+        const refArea = 1920 * 1080;
+        const area = Math.max(1, w * h);
+        const areaScale = area / refArea;
+        /* Silhouette bakes are tall+narrow — need far more blobs than full-viewport scale */
+        const tallBoost = h > w * 1.2 ? Math.sqrt(h / Math.max(w, 1)) : 1;
+        const scaled = Math.round(refCount * Math.max(areaScale, 0.08) * tallBoost * 4);
+        return Math.max(48, Math.min(refCount, scaled));
+    },
+
+    _buildBlobs(opts, w, h) {
+        const seed = opts.seed ?? 0;
+        const rand = opts.rand || ((s, i) => this._defaultRand(s, i));
+        const palettes = this.buildPalettesFromTags(opts.tagColors || [], opts.edgeDarken ?? 0.35);
+        const refCount = opts.blobCount ?? 200;
+        const count = this._scaledBlobCount(w, h, refCount);
+        const sizeRef = Math.sqrt(w * h);
+        const rMin = sizeRef * (opts.radiusMinScale ?? 0.04);
+        const rMax = sizeRef * (opts.radiusMaxScale ?? 0.32);
+        const vMin = opts.verticesMin ?? 15;
+        const vMax = opts.verticesMax ?? 60;
+        const dMin = opts.distortionMin ?? 0.2;
+        const dMax = opts.distortionMax ?? 2.0;
+        const stratified = Math.floor(count * 0.65);
+        const cols = Math.max(2, Math.round(Math.sqrt(count * (w / Math.max(h, 1)))));
+        const rows = Math.max(2, Math.ceil(stratified / cols));
+        const blobs = [];
+
+        for (let i = 0; i < count; i++) {
+            let x;
+            let y;
+            if (i < stratified) {
+                const col = i % cols;
+                const row = Math.floor(i / cols);
+                x = ((col + 0.5) / cols) * w + this._randRange(rand, seed, i * 7 + 1, -1, 1) * (w / cols) * 0.45;
+                y = ((row + 0.5) / rows) * h + this._randRange(rand, seed, i * 7 + 2, -1, 1) * (h / rows) * 0.45;
+            } else {
+                x = this._randRange(rand, seed, i * 5 + 1, 0, w);
+                y = this._randRange(rand, seed, i * 5 + 2, 0, h);
+            }
+
+            blobs.push({
+                x,
+                y,
+                r: this._randRange(rand, seed, i * 5 + 3, rMin, rMax),
+                colors: palettes[Math.floor(rand(seed, 400 + i) * palettes.length)],
+                seed: rand(seed, 500 + i) * 10000,
+                vertices: Math.floor(this._randRange(rand, seed, i * 5 + 4, vMin, vMax)),
+                distortion: this._randRange(rand, seed, i * 5 + 5, dMin, dMax)
+            });
+        }
+
+        return blobs;
+    },
+
+    _drawOrganicBlob(ctx, blob, blurScale = 0.12) {
+        const { x, y, r, colors, seed, vertices, distortion } = blob;
+        const noise = this._buildNoise(seed);
+        const edgeRgb = this._parseHex(colors.edge);
+
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+        grad.addColorStop(0, colors.core);
+        grad.addColorStop(0.7, colors.edge);
+        grad.addColorStop(1, `rgba(${edgeRgb.r}, ${edgeRgb.g}, ${edgeRgb.b}, 0)`);
+
+        ctx.fillStyle = grad;
+        ctx.filter = `blur(${r * blurScale}px)`;
+        ctx.beginPath();
+
+        const TWO_PI = Math.PI * 2;
+        const step = TWO_PI / Math.max(3, vertices);
+
+        for (let a = 0; a < TWO_PI; a += step) {
+            const xoff = ((Math.cos(a) + 1) * 0.5) * distortion;
+            const yoff = ((Math.sin(a) + 1) * 0.5) * distortion;
+            const n = noise(xoff, yoff);
+            const dynamicRadius = r * (0.3 + n * 1.4);
+            const px = x + Math.cos(a) * dynamicRadius;
+            const py = y + Math.sin(a) * dynamicRadius;
+            if (a === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        }
+
+        ctx.closePath();
+        ctx.fill();
+        ctx.filter = 'none';
+    },
+
+    _applyGrainOverlay(ctx, w, h, seed, alpha = 18) {
+        const imageData = ctx.createImageData(w, h);
+        const data = imageData.data;
+        let g = ((Number(seed) || 1) >>> 0) ^ 0x9e3779b9;
+
+        for (let i = 0; i < data.length; i += 4) {
+            g = (Math.imul(g, 1664525) + 1013904223) >>> 0;
+            const val = g & 255;
+            data[i] = val;
+            data[i + 1] = val;
+            data[i + 2] = val;
+            data[i + 3] = alpha;
+        }
+
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.putImageData(imageData, 0, 0);
     },
 
     renderFrame(opts) {
         if (!this.init()) return null;
 
-        const gl = this._gl;
         const canvas = this._canvas;
+        const ctx = this._ctx;
         const w = Math.max(1, Math.round(opts.width || 64));
         const h = Math.max(1, Math.round(opts.height || 64));
 
         canvas.width = w;
         canvas.height = h;
-        gl.viewport(0, 0, w, h);
 
-        const mandala = this.buildMandalaFromTags(opts.tagColors || [], opts.seed ?? 0, {
-            scale: opts.mandalaScale ?? opts.scale ?? 1,
-            mandalaFit: opts.mandalaFit ?? 1,
-            tagFit: opts.tagFit,
-            symmetricLayout: opts.symmetricLayout,
-            symmetryCount: opts.symmetryCount,
-            shapeBreak: opts.shapeBreak,
-            ringDistJitter: opts.ringDistJitter,
-            ringAngleJitter: opts.ringAngleJitter,
-            circleSquash: opts.circleSquash,
-            sharpChance: opts.sharpChance,
-            seamChance: opts.seamChance,
-            rand: opts.rand
-        });
+        ctx.globalCompositeOperation = 'source-over';
+        const compact = opts.compact || h <= 120;
+        if (compact) {
+            this._fillTagWash(ctx, w, h, opts.tagColors || [], 1);
+        } else {
+            ctx.fillStyle = opts.bgColor || '#f4f1ea';
+            ctx.fillRect(0, 0, w, h);
+            this._fillTagWash(ctx, w, h, opts.tagColors || [], 0.72);
+        }
 
-        gl.useProgram(this._program);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
-        gl.enableVertexAttribArray(this._loc.a_position);
-        gl.vertexAttribPointer(this._loc.a_position, 2, gl.FLOAT, false, 0, 0);
+        ctx.globalCompositeOperation = opts.blendMode || 'source-over';
+        const blobs = this._buildBlobs(opts, w, h);
+        const blurScale = compact ? Math.min(opts.blurScale ?? 0.12, 0.05) : (opts.blurScale ?? 0.12);
 
-        const bg = this.parseColorVec3(opts.bgColor || '#F3F3F3');
+        for (let i = 0; i < blobs.length; i++) {
+            this._drawOrganicBlob(ctx, blobs[i], blurScale);
+        }
 
-        gl.uniform2f(this._loc.u_resolution, w, h);
-        gl.uniform1i(this._loc.u_count, mandala.count);
-        gl.uniform2fv(this._loc.u_positions, mandala.positionsFlat);
-        gl.uniform3fv(this._loc.u_colors, mandala.colorsFlat);
-        gl.uniform1fv(this._loc.u_radii, mandala.radiiFlat);
-        gl.uniform2fv(this._loc.u_stretch, mandala.stretchFlat);
-        gl.uniform1f(this._loc.u_blendFactor, opts.blendFactor ?? 0.35);
-        gl.uniform1f(this._loc.u_falloff, opts.falloff ?? 4.0);
-        gl.uniform1i(this._loc.u_sharpCircle, mandala.sharpCircleIndex);
-        gl.uniform1f(this._loc.u_sharpFalloff, opts.sharpFalloff ?? 7.0);
-        gl.uniform1f(this._loc.u_sharpBlendK, opts.sharpBlendK ?? 0.20);
-        gl.uniform1f(this._loc.u_maskSoft, opts.maskSoft ?? 0.2);
-        gl.uniform1i(this._loc.u_seamCount, mandala.seamCount);
-        gl.uniform3fv(this._loc.u_seamColors, mandala.seamColorsFlat);
-        gl.uniform2fv(this._loc.u_seamPosA, mandala.seamPosAFlat);
-        gl.uniform2fv(this._loc.u_seamPosB, mandala.seamPosBFlat);
-        gl.uniform1f(this._loc.u_seamStrength, opts.seamStrength ?? 1.4);
-        gl.uniform1f(this._loc.u_colorEdgeSoft, opts.colorEdgeSoft ?? 0.006);
-        gl.uniform1f(this._loc.u_colorEdgeCore, opts.colorEdgeCore ?? 0.048);
-        gl.uniform1f(this._loc.u_colorSharpness, opts.colorSharpness ?? 2.0);
-        gl.uniform1f(this._loc.u_boundaryGlow, opts.boundaryGlow ?? 0.35);
-        gl.uniform1f(this._loc.u_colorSatBoost, opts.colorSatBoost ?? 1.8);
-        gl.uniform3f(this._loc.u_bgColor, bg[0], bg[1], bg[2]);
+        ctx.globalCompositeOperation = 'source-over';
+        this._applyGrainOverlay(ctx, w, h, opts.seed ?? 0, opts.grainAlpha ?? 18);
 
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
         return canvas;
     },
 
@@ -1872,11 +1759,1013 @@ const MesoSilhouetteCache = {
     }
 };
 /* ==========================================================================
+   Note censor — L3 redacted theme (same grid/cards as original, bars not text)
+   ========================================================================== */
+const NoteCensor = {
+    _boundRevealMove: null,
+    _wordIndex: null,
+    _linkSvg: null,
+    _linkAnimToken: 0,
+    _activeSourceWord: null,
+    _activeKey: null,
+    _activeRoutes: [],
+    _dwellTimer: null,
+    _dwellWord: null,
+    _committedKeys: null,
+    _persistedRoutes: null,
+    _persistedSources: null,
+    _retractingRoutes: null,
+    _wordNoteIndex: null,
+
+    _initPersistState() {
+        if (!this._committedKeys) {
+            this._committedKeys = new Set();
+            this._persistedRoutes = [];
+            this._persistedSources = new Map();
+        }
+    },
+
+    _dwellMs() {
+        return this.cfg().dwellMs ?? 1000;
+    },
+
+    _isCommitted(key) {
+        this._initPersistState();
+        return !!key && this._committedKeys.has(key);
+    },
+
+    _cancelDwell() {
+        if (this._dwellTimer) {
+            clearTimeout(this._dwellTimer);
+            this._dwellTimer = null;
+        }
+        this._dwellWord = null;
+    },
+
+    _startDwell(word) {
+        this._cancelDwell();
+        if (!word || this._isCommitted(this._wordKey(word))) return;
+        this._dwellWord = word;
+        this._dwellTimer = setTimeout(() => {
+            this._dwellTimer = null;
+            this._commitActiveHover();
+        }, this._dwellMs());
+    },
+
+    _commitActiveHover() {
+        if (!this._activeSourceWord || this._dwellWord !== this._activeSourceWord) return;
+
+        this._initPersistState();
+        const key = this._activeKey;
+        const sourceWord = this._activeSourceWord;
+        if (!key || !sourceWord) return;
+
+        this._committedKeys.add(key);
+        this._persistedSources.set(key, sourceWord);
+
+        const cfg = this._linkCfg();
+        this._linkAnimToken += 1;
+        const token = this._linkAnimToken;
+
+        const routes = this._activeRoutes.slice();
+        this._activeRoutes = [];
+
+        routes.forEach((route) => {
+            route.key = key;
+            route.sourceWord = sourceWord;
+            route.isPersisted = true;
+            this._persistedRoutes.push(route);
+            this._completeRouteStretch(route.trail, token, cfg);
+        });
+
+        this._cancelDwell();
+        this._activeSourceWord = null;
+        this._activeKey = null;
+        this._wordsForKey(key).forEach((word) => word.classList.add('is-word-committed'));
+
+        if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.addCommittedWord) {
+            ActionWarehouse.addCommittedWord(key);
+        }
+
+        this.refreshStudyUnlocks();
+    },
+
+    _removeRouteGroups(routes) {
+        (routes || []).forEach((route) => route.group?.remove?.());
+    },
+
+    _syncLinkOverlayActive() {
+        if (!this._linkSvg) return;
+        this._linkSvg.classList.toggle('is-active', !!this._linkSvg.firstChild);
+    },
+
+    _abortRetractInProgress() {
+        if (!this._retractingRoutes?.length) return;
+        this._removeRouteGroups(this._retractingRoutes);
+        this._retractingRoutes = [];
+        this._syncLinkOverlayActive();
+    },
+
+    _clearActiveRouteGroups() {
+        this._removeRouteGroups(this._activeRoutes);
+        this._activeRoutes = [];
+    },
+
+    _linkCfg() {
+        const cfg = this.cfg().wordLinks || {};
+        return {
+            duration: cfg.duration ?? 1650,
+            stagger: cfg.stagger ?? 175,
+            staggerSpreadMs: cfg.staggerSpreadMs ?? 900,
+            retractStaggerSpreadMs: cfg.retractStaggerSpreadMs ?? 0,
+            revertDuration: cfg.revertDuration ?? 920,
+            maxLinks: cfg.maxLinks ?? 48,
+            opacityMin: cfg.opacityMin ?? 0,
+            opacityMax: cfg.opacityMax ?? 0.82,
+            strokeWidthStart: cfg.strokeWidthStart ?? 0.9,
+            strokeWidthEnd: cfg.strokeWidthEnd ?? 2.5,
+            curveBend: cfg.curveBend ?? 0.24
+        };
+    },
+
+    _routeStaggerMs(count, spreadMs, cfg) {
+        if (count <= 1) return 0;
+        const spread = spreadMs ?? 0;
+        if (spread <= 0) return 0;
+        return Math.min(cfg.stagger ?? 175, spread / (count - 1));
+    },
+
+    _updateRouteGeometry(trail, from, to, routeIndex, cfg, snapFull = false) {
+        const prevLen = trail.getTotalLength();
+        const prevOffset = Number.parseFloat(trail.style.strokeDashoffset);
+        const prevOp = trail.style.opacity;
+        const prevSw = trail.getAttribute('stroke-width');
+
+        trail.setAttribute('d', this._buildRoutePath(from, to, routeIndex).d);
+        const nextLen = trail.getTotalLength();
+
+        if (snapFull || prevLen <= 0 || !Number.isFinite(prevOffset)) {
+            this._finishRoute(trail, cfg);
+            return;
+        }
+
+        const progress = Math.max(0, Math.min(1, (prevLen - prevOffset) / prevLen));
+        trail.style.strokeDasharray = `${nextLen}`;
+        trail.style.strokeDashoffset = `${nextLen * (1 - progress)}`;
+        if (prevOp) trail.style.opacity = prevOp;
+        if (prevSw) trail.setAttribute('stroke-width', prevSw);
+    },
+
+    isThemeEnabled() {
+        return (CONFIG.theme?.mode || 'default') === 'censored';
+    },
+
+    isActive() {
+        if (!this.isThemeEnabled()) return false;
+        return typeof DepthController !== 'undefined' && DepthController.currentLevel === 3;
+    },
+
+    init() {
+        const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+        this.onLevelChange(level);
+        if (!this._boundRevealMove) {
+            this._boundRevealMove = (e) => this._updateWordReveal(e.clientX, e.clientY);
+            this._boundRevealScroll = () => this._onRevealLayoutChange();
+            this._boundRevealResize = () => this._onRevealLayoutChange();
+            window.addEventListener('mousemove', this._boundRevealMove, { passive: true });
+            window.addEventListener('scroll', this._boundRevealScroll, { passive: true, capture: true });
+            window.addEventListener('resize', this._boundRevealResize, { passive: true });
+        }
+    },
+
+    onLevelChange(level) {
+        document.body.classList.toggle('is-theme-censored', this.isThemeEnabled() && level === 3);
+        if (!(this.isThemeEnabled() && level === 3)) {
+            this._releaseActiveHover(true);
+            this._invalidateWordHitCache();
+        } else {
+            this._initPersistState();
+            this._committedKeys.forEach((key) => {
+                this._uncoverMatches(key);
+                this._wordsForKey(key).forEach((word) => word.classList.add('is-word-committed'));
+            });
+            this._refreshPersistedRoutes();
+            this.refreshStudyUnlocks();
+        }
+        if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.syncWordPanelMode) {
+            ActionWarehouse.syncWordPanelMode(level);
+        }
+        if (this.isThemeEnabled() && level === 3 &&
+            typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
+            ArtifactInspector.close();
+        }
+    },
+
+    /** Topmost censored word under pointer — skips already-committed tokens. */
+    hitWordAt(clientX, clientY) {
+        if (!this.isActive()) return null;
+
+        let word = null;
+        if (typeof document.elementsFromPoint === 'function') {
+            const stack = document.elementsFromPoint(clientX, clientY);
+            for (const el of stack) {
+                word = el?.closest?.('.note-redact__word');
+                if (word) break;
+            }
+        } else {
+            word = this._hitWordByRect(clientX, clientY);
+        }
+
+        if (!word || this._isCommitted(this._wordKey(word))) return null;
+        return word;
+    },
+
+    _invalidateWordHitCache() {
+        this._wordHitCache = null;
+        this._wordIndex = null;
+        this._wordNoteIndex = null;
+    },
+
+    invalidateWordLayout() {
+        this._invalidateWordHitCache();
+        this._initPersistState();
+        this._committedKeys.forEach((key) => {
+            this._uncoverMatches(key);
+            this._wordsForKey(key).forEach((word) => word.classList.add('is-word-committed'));
+        });
+        if (this._activeKey) this._uncoverMatches(this._activeKey);
+        this._refreshPersistedRoutes();
+        this._refreshActiveRoutes();
+        this.refreshStudyUnlocks();
+    },
+
+    _wordKey(wordEl) {
+        return String(wordEl?.textContent || '');
+    },
+
+    _buildWordIndex() {
+        const index = new Map();
+        const noteIndex = new Map();
+        document.querySelectorAll('.note-redact__word').forEach((word) => {
+            const key = this._wordKey(word);
+            if (!key) return;
+            if (!index.has(key)) index.set(key, []);
+            index.get(key).push(word);
+
+            const noteId = word.closest?.('.micro-mock__card')?.dataset?.noteId
+                || word.closest?.('.note-wrapper')?.dataset?.noteId;
+            if (noteId) {
+                if (!noteIndex.has(key)) noteIndex.set(key, new Set());
+                noteIndex.get(key).add(String(noteId));
+            }
+        });
+        this._wordIndex = index;
+        this._wordNoteIndex = noteIndex;
+    },
+
+    _noteIdsForCommittedKeys() {
+        this._initPersistState();
+        const ids = new Set();
+        if (this._committedKeys.size && !this._wordNoteIndex) this._buildWordIndex();
+        this._committedKeys.forEach((key) => {
+            const noteIds = this._wordNoteIndex?.get(key);
+            if (noteIds) noteIds.forEach((id) => ids.add(id));
+        });
+        return ids;
+    },
+
+    refreshStudyUnlocks() {
+        if (!this.isActive()) {
+            document.querySelectorAll('.note-wrapper.is-study-unlocked').forEach((wrapper) => {
+                wrapper.classList.remove('is-study-unlocked');
+            });
+            return;
+        }
+
+        const unlockedIds = this._noteIdsForCommittedKeys();
+        document.querySelectorAll('.note-wrapper').forEach((wrapper) => {
+            const noteId = String(wrapper.dataset?.noteId || '');
+            wrapper.classList.toggle('is-study-unlocked', !!(noteId && unlockedIds.has(noteId)));
+        });
+    },
+
+    isNoteStudyUnlocked(wrapper) {
+        if (!this.isActive() || !wrapper) return false;
+        return wrapper.classList.contains('is-study-unlocked');
+    },
+
+    allowsStudyNoteOpen(wrapper) {
+        return this.isNoteStudyUnlocked(wrapper);
+    },
+
+    _wordsForKey(key) {
+        if (!key) return [];
+        if (!this._wordIndex) this._buildWordIndex();
+        return this._wordIndex.get(key) || [];
+    },
+
+    _uncoverMatches(key) {
+        this._wordsForKey(key).forEach((word) => word.classList.add('is-revealed'));
+    },
+
+    _coverMatches(key) {
+        if (!key || this._isCommitted(key)) return;
+        this._wordsForKey(key).forEach((word) => {
+            if (word.isConnected) word.classList.remove('is-revealed');
+        });
+    },
+
+    _clearAllHoverState() {
+        this._cancelDwell();
+        this._initPersistState();
+        this._committedKeys.forEach((key) => {
+            this._wordsForKey(key).forEach((word) => {
+                if (word.isConnected) {
+                    word.classList.remove('is-revealed', 'is-word-committed');
+                }
+            });
+        });
+        this._committedKeys.clear();
+        this._persistedSources.clear();
+        this._persistedRoutes = [];
+        this._activeSourceWord = null;
+        this._activeKey = null;
+        this._cancelLinkAnimations();
+        this._activeRoutes = [];
+        this._retractingRoutes = [];
+        this._clearWordLinks();
+        this.refreshStudyUnlocks();
+    },
+
+    _releaseActiveHover(immediate = false, onComplete) {
+        if (!this._activeSourceWord && !this._activeRoutes.length && !this._retractingRoutes?.length) {
+            this._cancelDwell();
+            onComplete?.();
+            return;
+        }
+
+        const key = this._activeKey;
+        const committed = this._isCommitted(key);
+        this._activeSourceWord = null;
+        this._activeKey = null;
+        this._cancelDwell();
+
+        if (!committed) {
+            this._coverMatches(key);
+            const routesToRetract = this._activeRoutes.slice();
+            this._activeRoutes = [];
+
+            if (!routesToRetract.length || immediate) {
+                this._cancelLinkAnimations();
+                this._removeRouteGroups(routesToRetract);
+                onComplete?.();
+                return;
+            }
+
+            this._stopStretchAndRetract(routesToRetract, onComplete);
+            return;
+        }
+
+        this._activeRoutes = [];
+        onComplete?.();
+    },
+
+    _resetHoverState(immediate = false, onComplete) {
+        this._releaseActiveHover(immediate, onComplete);
+    },
+
+    _activateHover(sourceWord) {
+        if (!sourceWord) return;
+
+        const key = this._wordKey(sourceWord);
+        if (this._isCommitted(key)) return;
+
+        this._activeSourceWord = sourceWord;
+        this._activeKey = key;
+        this._uncoverMatches(key);
+
+        this._cancelLinkAnimations();
+        this._clearActiveRouteGroups();
+
+        const matches = this._wordsForKey(key);
+        if (matches.length > 1) {
+            this._buildActiveRoutes(sourceWord, matches);
+        }
+
+        this._startDwell(sourceWord);
+    },
+
+    _switchActiveHover(sourceWord) {
+        if (!sourceWord) return;
+
+        const key = this._wordKey(sourceWord);
+        if (this._isCommitted(key)) {
+            this._releaseActiveHover(true);
+            return;
+        }
+
+        const oldKey = this._activeKey;
+        const sameKey = oldKey === key;
+
+        if (sameKey) {
+            this._activeSourceWord = sourceWord;
+            this._cancelDwell();
+            this._startDwell(sourceWord);
+            this._refreshActiveRoutes();
+            return;
+        }
+
+        this._releaseActiveHover(true);
+        this._activateHover(sourceWord);
+    },
+
+    _stopStretchAndRetract(routes, onComplete) {
+        this._abortRetractInProgress();
+        this._linkAnimToken += 1;
+        const token = this._linkAnimToken;
+        this._retractingRoutes = routes;
+
+        if (!routes.length) {
+            this._retractingRoutes = [];
+            onComplete?.();
+            return;
+        }
+
+        const cfg = this._linkCfg();
+        let remaining = routes.length;
+        const staggerStep = this._routeStaggerMs(routes.length, cfg.retractStaggerSpreadMs, cfg);
+
+        const onRouteDone = () => {
+            remaining -= 1;
+            if (remaining <= 0) {
+                this._retractingRoutes = [];
+                this._syncLinkOverlayActive();
+                onComplete?.();
+            }
+        };
+
+        routes.forEach((route, index) => {
+            this._retractRoute(route.trail, index * staggerStep, token, () => {
+                onRouteDone();
+            });
+        });
+    },
+
+    _onRevealLayoutChange() {
+        this._invalidateWordHitCache();
+        if (this._linkLayoutRaf) return;
+        this._linkLayoutRaf = requestAnimationFrame(() => {
+            this._linkLayoutRaf = null;
+            this._refreshPersistedRoutes();
+            this._refreshActiveRoutes();
+        });
+    },
+
+    _refreshPersistedRoutesForKey(key, sourceWord) {
+        if (!key || !sourceWord?.isConnected) return;
+        this._initPersistState();
+        this._persistedSources.set(key, sourceWord);
+        const cfg = this._linkCfg();
+        const from = this._wordAnchor(sourceWord);
+
+        this._persistedRoutes = this._persistedRoutes.filter((route) => {
+            if (route.key !== key) return true;
+            if (!route.targetWord?.isConnected) {
+                route.group?.remove?.();
+                return false;
+            }
+            const to = this._wordAnchor(route.targetWord);
+            const snapFull = this._routeStretchProgress(route.trail) >= 0.995;
+            this._updateRouteGeometry(route.trail, from, to, route.routeIndex, cfg, snapFull);
+            route.sourceWord = sourceWord;
+            return true;
+        });
+    },
+
+    _refreshPersistedRoutes() {
+        this._initPersistState();
+        this._persistedSources.forEach((sourceWord, key) => {
+            this._refreshPersistedRoutesForKey(key, sourceWord);
+        });
+    },
+
+    _refreshActiveRoutes() {
+        if (!this._activeSourceWord?.isConnected) return;
+        const cfg = this._linkCfg();
+        const from = this._wordAnchor(this._activeSourceWord);
+
+        this._activeRoutes = this._activeRoutes.filter((route) => {
+            if (!route.targetWord?.isConnected) {
+                route.group?.remove?.();
+                return false;
+            }
+            const to = this._wordAnchor(route.targetWord);
+            this._updateRouteGeometry(route.trail, from, to, route.routeIndex, cfg, false);
+            return true;
+        });
+    },
+
+    _wordInstanceId(wordEl) {
+        const noteId = wordEl?.closest?.('.micro-mock__card')?.dataset?.noteId || '';
+        return `${noteId}:${this._wordKey(wordEl)}`;
+    },
+
+    _ensureLinkOverlay() {
+        if (this._linkSvg) return;
+        const svg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+        svg.setAttribute('class', 'note-censor-word-links');
+        svg.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(svg);
+        this._linkSvg = svg;
+    },
+
+    _wordAnchor(wordEl) {
+        const rect = wordEl.getBoundingClientRect();
+        return {
+            x: rect.left + rect.width / 2,
+            y: rect.top + rect.height / 2
+        };
+    },
+
+    _easeStretch(t) {
+        if (t >= 1) return 1;
+        return 1 - Math.pow(1 - t, 5);
+    },
+
+    _easeFlight(t) {
+        if (t <= 0) return 0;
+        if (t >= 1) return 1;
+        return t < 0.5
+            ? 4 * t * t * t
+            : 1 - Math.pow(-2 * t + 2, 3) / 2;
+    },
+
+    _easeStroke(t) {
+        if (t >= 1) return 1;
+        return 1 - Math.pow(2, -8 * t);
+    },
+
+    _buildRoutePath(from, to, routeIndex) {
+        const mx = (from.x + to.x) / 2;
+        const my = (from.y + to.y) / 2;
+        const dx = to.x - from.x;
+        const dy = to.y - from.y;
+        const dist = Math.hypot(dx, dy) || 1;
+        const bendSign = routeIndex % 2 === 0 ? 1 : -1;
+        const bend = Math.min(140, dist * (this._linkCfg().curveBend ?? 0.24)) * bendSign;
+        const cx = mx + (-dy / dist) * bend;
+        const cy = my + (dx / dist) * bend;
+        return {
+            d: `M ${from.x} ${from.y} Q ${cx} ${cy} ${to.x} ${to.y}`
+        };
+    },
+
+    _createRouteLink(from, to, routeIndex) {
+        const { d } = this._buildRoutePath(from, to, routeIndex);
+        const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        group.setAttribute('class', 'note-censor-word-links__route');
+
+        const trail = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        trail.setAttribute('class', 'note-censor-word-links__trail');
+        trail.setAttribute('d', d);
+        trail.setAttribute('fill', 'none');
+
+        group.appendChild(trail);
+
+        return { group, trail };
+    },
+
+    _finishRoute(trail, cfg) {
+        const len = trail.getTotalLength();
+        trail.style.strokeDasharray = `${len}`;
+        trail.style.strokeDashoffset = '0';
+        trail.style.opacity = String(cfg.opacityMax);
+        trail.setAttribute('stroke-width', String(cfg.strokeWidthEnd));
+    },
+
+    _routeStretchProgress(trail) {
+        const len = trail.getTotalLength();
+        if (len <= 0) return 1;
+        const off = Number.parseFloat(trail.style.strokeDashoffset);
+        if (!Number.isFinite(off)) return 0;
+        return Math.max(0, Math.min(1, (len - off) / len));
+    },
+
+    _completeRouteStretch(trail, token, cfg) {
+        const progress = this._routeStretchProgress(trail);
+        if (progress >= 0.995) {
+            this._finishRoute(trail, cfg);
+            return;
+        }
+
+        const parsedOp = Number.parseFloat(trail.style.opacity);
+        const opacityStart = Number.isFinite(parsedOp) ? parsedOp : cfg.opacityMin;
+        const parsedSw = Number.parseFloat(trail.getAttribute('stroke-width'));
+        const swStart = Number.isFinite(parsedSw) ? parsedSw : cfg.strokeWidthStart;
+        const remainMs = Math.max(220, (1 - progress) * cfg.duration);
+        const startAt = performance.now();
+
+        const tick = (now) => {
+            if (token !== this._linkAnimToken || !trail.isConnected) return;
+
+            const curLen = trail.getTotalLength();
+            const t = Math.min(1, (now - startAt) / remainMs);
+            const flight = this._easeFlight(t);
+            const p = progress + (1 - progress) * flight;
+
+            trail.style.strokeDasharray = `${curLen}`;
+            trail.style.strokeDashoffset = `${curLen * (1 - p)}`;
+            trail.style.opacity = String(opacityStart + (cfg.opacityMax - opacityStart) * flight);
+            const sw = swStart + (cfg.strokeWidthEnd - swStart) * flight;
+            trail.setAttribute('stroke-width', String(sw));
+
+            if (t >= 1) {
+                this._finishRoute(trail, cfg);
+            } else {
+                requestAnimationFrame(tick);
+            }
+        };
+
+        requestAnimationFrame(tick);
+    },
+
+    _animateRoute(trail, delayMs, token) {
+        const cfg = this._linkCfg();
+        const startAt = performance.now() + delayMs;
+        const len = trail.getTotalLength();
+
+        trail.style.strokeDasharray = `${len}`;
+        trail.style.strokeDashoffset = `${len}`;
+        trail.style.opacity = String(cfg.opacityMin);
+        trail.setAttribute('stroke-width', String(cfg.strokeWidthStart));
+
+        const tick = (now) => {
+            if (token !== this._linkAnimToken || !trail.isConnected) return;
+
+            if (now < startAt) {
+                requestAnimationFrame(tick);
+                return;
+            }
+
+            const len = trail.getTotalLength();
+            const t = Math.min(1, (now - startAt) / cfg.duration);
+            const flight = this._easeFlight(t);
+            const strokeP = this._easeStroke(t);
+            const traveled = len * flight;
+
+            trail.style.strokeDashoffset = `${len - traveled}`;
+            trail.style.opacity = String(cfg.opacityMin + (cfg.opacityMax - cfg.opacityMin) * strokeP);
+            const sw = cfg.strokeWidthStart + (cfg.strokeWidthEnd - cfg.strokeWidthStart) * strokeP;
+            trail.setAttribute('stroke-width', String(sw));
+
+            if (t >= 1) {
+                this._finishRoute(trail, cfg);
+            } else {
+                requestAnimationFrame(tick);
+            }
+        };
+
+        requestAnimationFrame(tick);
+    },
+
+    _retractRoute(trail, delayMs, token, onComplete) {
+        const cfg = this._linkCfg();
+        const group = trail.parentNode;
+        const startAt = performance.now() + delayMs;
+        const len = trail.getTotalLength();
+
+        const removeGroup = () => {
+            if (group?.isConnected) group.remove();
+            else if (trail.isConnected && trail.parentNode) trail.parentNode.remove();
+        };
+
+        const finish = () => {
+            removeGroup();
+            onComplete?.();
+        };
+
+        if (len <= 0) {
+            finish();
+            return;
+        }
+
+        trail.style.strokeDasharray = `${len}`;
+        const startOffset = Number.parseFloat(trail.style.strokeDashoffset);
+        const visible = Number.isFinite(startOffset) ? Math.max(0, len - startOffset) : 0;
+
+        const tick = (now) => {
+            if (token !== this._linkAnimToken) {
+                finish();
+                return;
+            }
+            if (!trail.isConnected) {
+                onComplete?.();
+                return;
+            }
+
+            if (now < startAt) {
+                requestAnimationFrame(tick);
+                return;
+            }
+
+            const t = Math.min(1, (now - startAt) / cfg.revertDuration);
+            const flight = this._easeFlight(t);
+            const traveled = visible * (1 - flight);
+
+            trail.style.strokeDashoffset = `${len - traveled}`;
+            trail.style.opacity = String(cfg.opacityMax * (1 - flight * 0.9));
+            const sw = cfg.strokeWidthEnd - (cfg.strokeWidthEnd - cfg.strokeWidthStart) * flight;
+            trail.setAttribute('stroke-width', String(sw));
+
+            if (t >= 1) {
+                finish();
+            } else {
+                requestAnimationFrame(tick);
+            }
+        };
+
+        requestAnimationFrame(tick);
+    },
+
+    _cancelLinkAnimations() {
+        this._linkAnimToken += 1;
+        this._abortRetractInProgress();
+    },
+
+    _buildActiveRoutes(sourceWord, matches) {
+        if (!this.isActive() || !sourceWord || matches.length <= 1) return;
+
+        if (!this._linkSvg) this._ensureLinkOverlay();
+        const svg = this._linkSvg;
+        const cfg = this._linkCfg();
+        const from = this._wordAnchor(sourceWord);
+        const token = this._linkAnimToken;
+        const key = this._wordKey(sourceWord);
+
+        const targets = matches
+            .filter((word) => word !== sourceWord)
+            .map((word) => ({ word, anchor: this._wordAnchor(word) }))
+            .sort((a, b) => {
+                const da = Math.hypot(a.anchor.x - from.x, a.anchor.y - from.y);
+                const db = Math.hypot(b.anchor.x - from.x, b.anchor.y - from.y);
+                return da - db;
+            })
+            .slice(0, cfg.maxLinks);
+
+        const staggerStep = this._routeStaggerMs(targets.length, cfg.staggerSpreadMs, cfg);
+
+        targets.forEach(({ word, anchor: to }, index) => {
+            const routeIndex = index;
+            const { group, trail } = this._createRouteLink(from, to, routeIndex);
+            svg.appendChild(group);
+            this._animateRoute(trail, index * staggerStep, token);
+
+            this._activeRoutes.push({
+                key,
+                sourceWord,
+                targetWord: word,
+                group,
+                trail,
+                routeIndex
+            });
+        });
+
+        svg.classList.add('is-active');
+    },
+
+    _clearWordLinks() {
+        if (!this._linkSvg) return;
+        while (this._linkSvg.firstChild) this._linkSvg.removeChild(this._linkSvg.firstChild);
+        this._linkSvg.classList.remove('is-active');
+        this._initPersistState();
+        this._persistedRoutes = [];
+    },
+
+    _hitWordByRect(clientX, clientY) {
+        const now = performance.now();
+        if (!this._wordHitCache || now - this._wordHitCacheAt > 400) {
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            this._wordHitCache = [];
+            document.querySelectorAll('.note-redact__word').forEach((word) => {
+                const r = word.getBoundingClientRect();
+                if (r.width <= 0 || r.height <= 0) return;
+                if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) return;
+                this._wordHitCache.push({ word, r });
+            });
+            this._wordHitCacheAt = now;
+        }
+
+        let best = null;
+        let bestArea = Infinity;
+        for (const { word, r } of this._wordHitCache) {
+            if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) continue;
+            if (this._isCommitted(this._wordKey(word))) continue;
+            const area = r.width * r.height;
+            if (area < bestArea) {
+                bestArea = area;
+                best = word;
+            }
+        }
+        return best;
+    },
+
+    _updateWordReveal(clientX, clientY) {
+        if (!this.isActive()) {
+            this._clearAllHoverState();
+            return;
+        }
+        if (this._revealRaf) return;
+        this._revealPending = { x: clientX, y: clientY };
+        this._revealRaf = requestAnimationFrame(() => {
+            this._revealRaf = null;
+            const pending = this._revealPending;
+            if (!pending) return;
+
+            const word = this.hitWordAt(pending.x, pending.y);
+
+            if (word === this._activeSourceWord) return;
+
+            if (this._activeSourceWord) {
+                if (word) {
+                    this._switchActiveHover(word);
+                } else {
+                    this._resetHoverState(false);
+                }
+                return;
+            }
+
+            if (word) this._activateHover(word);
+        });
+    },
+
+    /** Censored theme — skip L1→L3 auto-open inspector; L3 study opens via allowsStudyNoteOpen. */
+    blocksNoteFocus() {
+        return this.isThemeEnabled();
+    },
+
+    cfg() {
+        return CONFIG.theme || {};
+    },
+
+    escapeHTML(text) {
+        return String(text || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
+    },
+
+    /** Tag colors for word covers — cycles when a note has multiple tags. */
+    _resolveTagColors(item) {
+        const tags = (item?.tags || []).filter((t) => t?.color);
+        if (tags.length) return tags.map((t) => t.color);
+        return [CONFIG.data?.fallbackTagColor || 'var(--color-4)'];
+    },
+
+    _sanitizeCoverColor(color) {
+        const c = String(color || '').trim();
+        if (/^#[0-9A-Fa-f]{3,8}$/.test(c)) return c;
+        if (/^var\(--[\w-]+\)$/.test(c)) return c;
+        if (/^rgba?\(/.test(c)) return c;
+        return CONFIG.data?.fallbackTagColor || 'var(--color-4)';
+    },
+
+    _wordCoverStyle(tagColors, wordIndex) {
+        const color = this._sanitizeCoverColor(tagColors[wordIndex % tagColors.length]);
+        return ` style="--word-cover-color:${color}"`;
+    },
+
+    /** Split visible text into hover-reveal word tokens (whitespace-separated). */
+    tokenizeWords(text) {
+        return String(text || '').split(/\s+/).filter(Boolean);
+    },
+
+    buildWordsBlock(text, extraClass = '', tagColors = null) {
+        const colors = tagColors || [CONFIG.data?.fallbackTagColor || 'var(--color-4)'];
+        const paragraphs = String(text || '').split(/\r?\n/);
+        const chunks = [];
+        let wordIndex = 0;
+
+        paragraphs.forEach((paragraph) => {
+            const trimmed = paragraph.trim();
+            if (!trimmed) return;
+
+            if (chunks.length) {
+                chunks.push('<span class="note-redact__break" aria-hidden="true"></span>');
+            }
+
+            this.tokenizeWords(trimmed).forEach((word, indexInLine) => {
+                if (indexInLine > 0) chunks.push(' ');
+                const coverStyle = this._wordCoverStyle(colors, wordIndex);
+                wordIndex += 1;
+                chunks.push(`<span class="note-redact__word"${coverStyle}>${this.escapeHTML(word)}</span>`);
+            });
+        });
+
+        if (!chunks.length) return '';
+        return `<span class="note-redact note-redact--words ${extraClass}">${chunks.join('')}</span>`;
+    },
+
+    _hashUnit(seed) {
+        const s = String(seed ?? '');
+        let h = 2166136261;
+        for (let i = 0; i < s.length; i++) {
+            h ^= s.charCodeAt(i);
+            h = Math.imul(h, 16777619);
+        }
+        return ((h >>> 0) % 10000) / 10000;
+    },
+
+    /** Match depth-v2 layout weight — visual lines after soft wrap. */
+    expandVisualLines(text, wrapAt) {
+        const lines = [];
+        String(text || '').split(/\r?\n/).forEach((paragraph) => {
+            const trimmed = paragraph.trim();
+            if (!trimmed) return;
+            const chars = Array.from(trimmed);
+            if (chars.length <= wrapAt) {
+                lines.push(trimmed);
+                return;
+            }
+            for (let i = 0; i < chars.length; i += wrapAt) {
+                lines.push(chars.slice(i, i + wrapAt).join(''));
+            }
+        });
+        return lines;
+    },
+
+    buildBars(text, seed, options = {}) {
+        const wrapAt = options.wrapAt ?? 38;
+        const minW = options.minWidth ?? 0.24;
+        const maxW = options.maxWidth ?? 0.96;
+        const lines = this.expandVisualLines(text, wrapAt);
+        if (!lines.length) return '';
+
+        return lines.map((line, i) => {
+            const chars = Array.from(line.replace(/\s+/g, ' ')).length || 4;
+            const lengthBias = Math.min(maxW, Math.max(minW, chars / wrapAt * 0.92));
+            const jitter = (this._hashUnit(`${seed}:${i}`) - 0.5) * 0.1;
+            const w = Math.min(maxW, Math.max(minW, lengthBias + jitter));
+            return `<span class="note-redact__bar" style="width:${Math.round(w * 100)}%"></span>`;
+        }).join('');
+    },
+
+    buildRedactBlock(text, seed, extraClass = '', options = {}) {
+        const bars = this.buildBars(text, seed, options);
+        if (!bars) return '';
+        return `<span class="note-redact ${extraClass}">${bars}</span>`;
+    },
+
+    buildTitleHTML(item) {
+        const title = String(item?.title || '').trim();
+        if (!title) return '';
+        const tagColors = this._resolveTagColors(item);
+        const inner = this.buildWordsBlock(title, 'note-redact--title', tagColors);
+        return `<h2 class="note-title note-h">${inner}</h2>`;
+    },
+
+    buildBodyHTML(item) {
+        const body = String(item?.body || '');
+        if (!String(body).trim()) return '';
+        const tagColors = this._resolveTagColors(item);
+        const inner = this.buildWordsBlock(body, 'note-redact--body', tagColors);
+        return `<div class="note-body note-t">${inner}</div>`;
+    },
+
+    buildIdHTML(item) {
+        const idText = String(item?.id || '').trim();
+        if (!idText) return '';
+        return `<div class="note-idcode general-t">${this.escapeHTML(idText)}</div>`;
+    },
+
+    buildCardOnlyHTML(item, options = {}) {
+        const esc = this.escapeHTML.bind(this);
+        const focusClass = options.focusScale ? ' micro-mock__card--focus' : '';
+        const dir = item.textDirection === 'ltr' ? 'ltr' : 'rtl';
+        return `<div class="micro-mock__card note-card${focusClass}" data-note-id="${esc(item.id)}" dir="${dir}">` +
+            this.buildIdHTML(item) +
+            this.buildTitleHTML(item) +
+            this.buildBodyHTML(item) +
+            `</div>`;
+    },
+
+    buildMetadataValueHTML(label, item) {
+        const seed = `${item?.id}:meta:${label}`;
+        return this.buildRedactBlock('████████', seed, 'note-redact--meta', {
+            wrapAt: 20,
+            minWidth: 0.28,
+            maxWidth: 0.72
+        });
+    }
+};
+/* ==========================================================================
    03a. MESO MOCK — הדמיית סילואטות קלה (V2 בלבד, בלי מדידה)
    ========================================================================== */
 const MesoMock = {
     _textureCache: new Map(),
-    _bakeVersion: 80,
+    _bakeVersion: 88,
+    _renderContext: null,
     _columnGradientLayout: null,
     _shaderLiveBound: false,
     _shaderLiveWrapper: null,
@@ -1955,22 +2844,10 @@ const MesoMock = {
         try {
             if (job.type === 'structure') {
                 this.applyToWrapper(job.wrapper, job.item, { skipBake: true });
+            } else if (job.context === 'opening') {
+                this._runOpeningTextureBakeJob(job);
             } else {
-                const glyph = job.wrapper.querySelector('.depth-v2-glyph--meso');
-                if (!glyph?.querySelector('.meso-mock__frame')) {
-                    this.applyToWrapper(job.wrapper, job.item, { skipBake: true });
-                }
-                this.syncGlyphLayout(job.wrapper, job.item);
-                const profile = this.buildProfile(job.item, job.wrapper);
-                let layoutCtx = job.layoutCtx;
-                if (!layoutCtx) {
-                    const g = job.wrapper.querySelector('.depth-v2-glyph--meso');
-                    const fontSizePx = this.measureGlyphFontSizePx(g);
-                    const widthPx = Math.round(this.getMaxLineWidthEm(profile) * fontSizePx);
-                    const bakeDims = this.resolveGradientBakeDimensions(profile, { fontSizePx, widthPx }, job.wrapper);
-                    layoutCtx = { fontSizePx, widthPx, bakeDims };
-                }
-                this.applyTextureBake(job.wrapper, job.item, profile, layoutCtx);
+                this._runWrapperTextureBakeJob(job);
             }
         } catch (err) {
             console.warn('MesoMock bake job failed', job.item?.id, err);
@@ -1990,21 +2867,11 @@ const MesoMock = {
         while (extra < batch.texture && this._bakeQueue[0]?.type === 'texture') {
             const next = this._bakeQueue.shift();
             try {
-                const glyph = next.wrapper.querySelector('.depth-v2-glyph--meso');
-                if (!glyph?.querySelector('.meso-mock__frame')) {
-                    this.applyToWrapper(next.wrapper, next.item, { skipBake: true });
+                if (next.context === 'opening') {
+                    this._runOpeningTextureBakeJob(next);
+                } else {
+                    this._runWrapperTextureBakeJob(next);
                 }
-                this.syncGlyphLayout(next.wrapper, next.item);
-                const profile = this.buildProfile(next.item, next.wrapper);
-                let layoutCtx = next.layoutCtx;
-                if (!layoutCtx) {
-                    const g = next.wrapper.querySelector('.depth-v2-glyph--meso');
-                    const fontSizePx = this.measureGlyphFontSizePx(g);
-                    const widthPx = Math.round(this.getMaxLineWidthEm(profile) * fontSizePx);
-                    const bakeDims = this.resolveGradientBakeDimensions(profile, { fontSizePx, widthPx }, next.wrapper);
-                    layoutCtx = { fontSizePx, widthPx, bakeDims };
-                }
-                this.applyTextureBake(next.wrapper, next.item, profile, layoutCtx);
             } catch (err) {
                 console.warn('MesoMock bake job failed', next.item?.id, err);
             }
@@ -2222,13 +3089,25 @@ const MesoMock = {
     resolveGradientBakeDimensions(profile, layoutPx, wrapper = null) {
         if (this.isTextureGradientMode()) {
             const uniform = this.getUniformGradientBakeDimensions();
+            let dims = { ...uniform };
+
             if (wrapper && this.usesColumnFillLayout()) {
                 const colW = this.getMesoColumnWidthPx();
                 if (colW) {
-                    return { ...uniform, widthPx: colW, contentW: colW };
+                    dims = { ...dims, widthPx: colW, contentW: colW };
                 }
             }
-            return uniform;
+
+            /* Per-note slice: bake must cover full silhouette height or line offsets miss the texture */
+            if (profile && this.isSliceGradientMode()) {
+                const metrics = this.getProfileMetrics(profile);
+                const contentH = Math.ceil(metrics.totalH);
+                if (contentH > dims.heightPx) {
+                    dims = { ...dims, heightPx: contentH, contentH };
+                }
+            }
+
+            return dims;
         }
         return this.getGradientBakeDimensions(profile, layoutPx);
     },
@@ -2409,29 +3288,18 @@ const MesoMock = {
                 height: h,
                 tagColors: tagPalette.tagColors,
                 seed,
-                mandalaScale: pCfg.mandalaScale,
-                mandalaFit: pCfg.mandalaFit,
-                tagFit: pCfg.tagFit,
-                symmetricLayout: pCfg.symmetricLayout,
-                symmetryCount: pCfg.symmetryCount,
-                shapeBreak: pCfg.shapeBreak,
-                ringDistJitter: pCfg.ringDistJitter,
-                ringAngleJitter: pCfg.ringAngleJitter,
-                circleSquash: pCfg.circleSquash,
-                blendFactor: pCfg.blendFactor,
-                falloff: pCfg.falloff,
-                colorEdgeSoft: pCfg.colorEdgeSoft,
-                colorEdgeCore: pCfg.colorEdgeCore,
-                colorSharpness: pCfg.colorSharpness,
-                boundaryGlow: pCfg.boundaryGlow,
-                colorSatBoost: pCfg.colorSatBoost,
-                maskSoft: pCfg.maskSoft,
-                sharpChance: pCfg.sharpChance,
-                sharpFalloff: pCfg.sharpFalloff,
-                sharpBlendK: pCfg.sharpBlendK,
-                seamChance: pCfg.seamChance,
-                seamStrength: pCfg.seamStrength,
                 bgColor: pCfg.bgColor,
+                blobCount: pCfg.blobCount,
+                radiusMinScale: pCfg.radiusMinScale,
+                radiusMaxScale: pCfg.radiusMaxScale,
+                verticesMin: pCfg.verticesMin,
+                verticesMax: pCfg.verticesMax,
+                distortionMin: pCfg.distortionMin,
+                distortionMax: pCfg.distortionMax,
+                blurScale: pCfg.blurScale,
+                grainAlpha: pCfg.grainAlpha,
+                edgeDarken: pCfg.edgeDarken,
+                blendMode: pCfg.blendMode,
                 rand: (s, i) => this.rand(s, i)
             });
 
@@ -2478,6 +3346,20 @@ const MesoMock = {
     },
 
     getMesoColumnWidthPx() {
+        if (typeof document !== 'undefined') {
+            const opening = document.getElementById('opening-screen');
+            if (opening && !opening.hidden && document.body.classList.contains('opening-active')) {
+                const raw = getComputedStyle(opening).getPropertyValue('--opening-meso-col-width').trim();
+                if (raw && typeof measureSiteGridTokenPx === 'function') {
+                    const root = document.documentElement;
+                    root.style.setProperty('--opening-meso-measure-w', raw);
+                    const px = measureSiteGridTokenPx('--opening-meso-measure-w', 'width');
+                    root.style.removeProperty('--opening-meso-measure-w');
+                    if (px > 8) return Math.round(px);
+                }
+            }
+        }
+
         const app = typeof document !== 'undefined' ? document.getElementById('app') : null;
         if (app?.classList.contains('is-meso-hive-layout')) {
             const raw = getComputedStyle(document.documentElement).getPropertyValue('--v2-hive-cell-width');
@@ -2580,6 +3462,9 @@ const MesoMock = {
     },
 
     getGradientMode() {
+        if (this._renderContext === 'opening') {
+            return CONFIG?.opening?.mesoGradientMode || 'bands';
+        }
         return CONFIG?.depth?.v2?.meso?.mockGradientMode ?? 'shader';
     },
 
@@ -2606,29 +3491,18 @@ const MesoMock = {
         const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
         return {
             scale: Math.min(dpr, meso.mockCanvasScale ?? 1.5),
-            bgColor: meso.mockShaderBgColor ?? '#F3F3F3',
-            mandalaScale: meso.mockP5Scale ?? 0.62,
-            mandalaFit: meso.mockP5MandalaFit ?? 1.0,
-            tagFit: meso.mockP5TagFit ?? 3.2,
-            symmetricLayout: meso.mockP5SymmetricLayout ?? 1,
-            symmetryCount: meso.mockP5SymmetryCount ?? 8,
-            shapeBreak: meso.mockP5ShapeBreak ?? 0.35,
-            ringDistJitter: meso.mockP5RingDistJitter ?? 0.04,
-            ringAngleJitter: meso.mockP5RingAngleJitter ?? 0.02,
-            circleSquash: meso.mockP5CircleSquash ?? 0.12,
-            blendFactor: meso.mockP5BlendFactor ?? 0.32,
-            falloff: meso.mockP5Falloff ?? 4.0,
-            colorEdgeSoft: meso.mockP5ColorEdgeSoft ?? 0.008,
-            colorEdgeCore: meso.mockP5ColorEdgeCore ?? 0.055,
-            colorSharpness: meso.mockP5ColorSharpness ?? 2.0,
-            boundaryGlow: meso.mockP5BoundaryGlow ?? 0.35,
-            colorSatBoost: meso.mockP5ColorSatBoost ?? 1.8,
-            maskSoft: meso.mockP5MaskSoft ?? 0.2,
-            sharpChance: meso.mockP5SharpChance ?? 0.25,
-            sharpFalloff: meso.mockP5SharpFalloff ?? 6.5,
-            sharpBlendK: meso.mockP5SharpBlendK ?? 0.24,
-            seamChance: meso.mockP5SeamChance ?? 0.22,
-            seamStrength: meso.mockP5SeamStrength ?? 1.4,
+            bgColor: meso.mockP5BgColor ?? meso.mockShaderBgColor ?? '#f4f1ea',
+            blobCount: meso.mockP5BlobCount ?? 200,
+            radiusMinScale: meso.mockP5RadiusMinScale ?? 0.04,
+            radiusMaxScale: meso.mockP5RadiusMaxScale ?? 0.32,
+            blendMode: meso.mockP5BlendMode ?? 'source-over',
+            verticesMin: meso.mockP5VerticesMin ?? 15,
+            verticesMax: meso.mockP5VerticesMax ?? 60,
+            distortionMin: meso.mockP5DistortionMin ?? 0.2,
+            distortionMax: meso.mockP5DistortionMax ?? 2.0,
+            blurScale: meso.mockP5BlurScale ?? 0.12,
+            grainAlpha: meso.mockP5GrainAlpha ?? 18,
+            edgeDarken: meso.mockP5EdgeDarken ?? 0.35,
             textureOverscale: meso.mockP5TextureOverscale ?? 1.35,
             grainOpacity: meso.mockP5GrainOpacity ?? 0,
             grainTile: meso.mockGrainTile ?? 64
@@ -3456,29 +4330,18 @@ const MesoMock = {
             height: h,
             tagColors: tagPalette.tagColors,
             seed: profile.seed,
-            mandalaScale: pCfg.mandalaScale,
-            mandalaFit: pCfg.mandalaFit,
-            tagFit: pCfg.tagFit,
-            symmetricLayout: pCfg.symmetricLayout,
-            symmetryCount: pCfg.symmetryCount,
-            shapeBreak: pCfg.shapeBreak,
-            ringDistJitter: pCfg.ringDistJitter,
-            ringAngleJitter: pCfg.ringAngleJitter,
-            circleSquash: pCfg.circleSquash,
-            blendFactor: pCfg.blendFactor,
-            falloff: pCfg.falloff,
-            colorEdgeSoft: pCfg.colorEdgeSoft,
-            colorEdgeCore: pCfg.colorEdgeCore,
-            colorSharpness: pCfg.colorSharpness,
-            boundaryGlow: pCfg.boundaryGlow,
-            colorSatBoost: pCfg.colorSatBoost,
-            maskSoft: pCfg.maskSoft,
-            sharpChance: pCfg.sharpChance,
-            sharpFalloff: pCfg.sharpFalloff,
-            sharpBlendK: pCfg.sharpBlendK,
-            seamChance: pCfg.seamChance,
-            seamStrength: pCfg.seamStrength,
             bgColor: pCfg.bgColor,
+            blobCount: pCfg.blobCount,
+            radiusMinScale: pCfg.radiusMinScale,
+            radiusMaxScale: pCfg.radiusMaxScale,
+            verticesMin: pCfg.verticesMin,
+            verticesMax: pCfg.verticesMax,
+            distortionMin: pCfg.distortionMin,
+            distortionMax: pCfg.distortionMax,
+            blurScale: pCfg.blurScale,
+            grainAlpha: pCfg.grainAlpha,
+            edgeDarken: pCfg.edgeDarken,
+            blendMode: pCfg.blendMode,
             rand: (s, i) => this.rand(s, i)
         });
 
@@ -4187,6 +5050,254 @@ const MesoMock = {
         wrapper.style.setProperty('--meso-mock-row-span', String(profile.rowSpan));
         wrapper.dataset.mockRowSpan = String(profile.rowSpan);
         wrapper.dataset.mockSizeBand = profile.bandKey;
+    },
+
+    _runWrapperTextureBakeJob(job) {
+        const wrapper = job.wrapper;
+        if (!wrapper) return;
+
+        const glyph = wrapper.querySelector('.depth-v2-glyph--meso');
+        if (!glyph?.querySelector('.meso-mock__frame')) {
+            this.applyToWrapper(wrapper, job.item, { skipBake: true });
+        }
+        this.syncGlyphLayout(wrapper, job.item);
+        const profile = this.buildProfile(job.item, wrapper);
+        let layoutCtx = job.layoutCtx;
+        if (!layoutCtx) {
+            const g = wrapper.querySelector('.depth-v2-glyph--meso');
+            const fontSizePx = this.measureGlyphFontSizePx(g);
+            const widthPx = Math.round(this.getMaxLineWidthEm(profile) * fontSizePx);
+            const bakeDims = this.resolveGradientBakeDimensions(profile, { fontSizePx, widthPx }, wrapper);
+            layoutCtx = { fontSizePx, widthPx, bakeDims };
+        }
+        this.applyTextureBake(wrapper, job.item, profile, layoutCtx);
+    },
+
+    _runOpeningTextureBakeJob(job) {
+        const noteEl = job.host;
+        if (!noteEl) return;
+
+        const glyph = noteEl.querySelector('.depth-v2-glyph--meso');
+        if (!glyph?.querySelector('.meso-mock__frame')) {
+            this.applyToOpeningNote(noteEl, job.item, { skipBake: true });
+        }
+        this.syncOpeningGlyphLayout(noteEl, job.item);
+        const profile = this.buildProfile(job.item, null);
+        let layoutCtx = job.layoutCtx;
+        if (!layoutCtx) {
+            const g = noteEl.querySelector('.depth-v2-glyph--meso');
+            const fontSizePx = this.measureGlyphFontSizePx(g);
+            const widthPx = Math.round(this.getMaxLineWidthEm(profile) * fontSizePx);
+            const bakeDims = this.resolveGradientBakeDimensions(profile, { fontSizePx, widthPx }, noteEl);
+            layoutCtx = { fontSizePx, widthPx, bakeDims };
+        }
+        this.applyTextureBake(noteEl, job.item, profile, layoutCtx);
+    },
+
+    scheduleOpeningTextureBakes(openingEl) {
+        if (!openingEl) return 0;
+
+        const itemsById = new Map(
+            (typeof AppState !== 'undefined' ? AppState.items : []).map(item => [String(item.id), item])
+        );
+        let queued = 0;
+
+        openingEl.querySelectorAll('.opening-screen__note').forEach(noteEl => {
+            const item = itemsById.get(noteEl.dataset.noteId);
+            if (!item) return;
+
+            const frame = noteEl.querySelector('.meso-mock__frame');
+            const grad = frame?.style.getPropertyValue('--meso-mock-gradient');
+            if (grad && grad.includes('url(')) return;
+
+            this._enqueueBakeJob({ type: 'texture', context: 'opening', host: noteEl, item });
+            queued++;
+        });
+
+        return queued;
+    },
+
+    applyToOpeningNote(noteEl, item, options = {}) {
+        const glyph = noteEl?.querySelector('.depth-v2-glyph--meso');
+        if (!glyph) return;
+
+        this._renderContext = 'opening';
+        try {
+            this._applyToOpeningNoteInner(noteEl, glyph, item, options);
+        } finally {
+            this._renderContext = null;
+        }
+    },
+
+    _applyToOpeningNoteInner(noteEl, glyph, item, options = {}) {
+        const profile = this.buildProfile(item, null);
+        const grain = this.getGrainConfig();
+        const frameWidthPct = (profile.frameWidth * 100).toFixed(1);
+        const gradientMode = this.getGradientMode();
+        const lineFill = CONFIG?.opening?.mesoLineFill || 'rgba(242, 240, 238, 0.9)';
+
+        glyph.innerHTML = this.buildGlyphHTML(item, profile);
+
+        const frame = glyph.querySelector('.meso-mock__frame');
+        const fontSizePx = this.measureGlyphFontSizePx(glyph);
+        const frameWidthPx = this.resolveFrameWidthPx(profile, fontSizePx);
+        const widthPx = frameWidthPx;
+        const bakeDims = this.resolveGradientBakeDimensions(profile, { fontSizePx, widthPx }, noteEl);
+        const gradientW = `${bakeDims.widthPx}px`;
+        const sCfg = gradientMode === 'shader'
+            ? this.getShaderConfig()
+            : gradientMode === 'p5'
+                ? this.getP5Config()
+                : null;
+        const overscale = sCfg?.textureOverscale ?? 1.78;
+        glyph.style.setProperty('--meso-mock-gradient-w', gradientW);
+        glyph.style.setProperty('--meso-mock-texture-overscale', String(overscale));
+        if (frame) {
+            frame.style.setProperty('--meso-mock-gradient-w', gradientW);
+            frame.style.setProperty('--meso-mock-texture-overscale', String(overscale));
+            frame.style.setProperty('--meso-mock-gradient-h', `${bakeDims.heightPx}px`);
+            if (this.usesColumnFillLayout()) {
+                frame.style.width = '100%';
+                frame.style.minWidth = '0';
+            } else {
+                frame.style.width = `${frameWidthPx}px`;
+                frame.style.minWidth = `${frameWidthPx}px`;
+            }
+            if (this.isSliceGradientMode()) {
+                const metrics = this.getProfileMetrics(profile);
+                frame.style.setProperty('--meso-mock-content-h', `${metrics.totalH}px`);
+                frame.style.height = `${metrics.totalH}px`;
+            }
+        }
+
+        const usesUniformGradient = gradientMode === 'blobs'
+            || gradientMode === 'canvas'
+            || gradientMode === 'shader'
+            || gradientMode === 'p5';
+        if (usesUniformGradient && frame) {
+            this.applySliceLineLayout(frame, profile, fontSizePx, frameWidthPx, bakeDims, gradientMode, sCfg);
+        }
+
+        const layoutCtx = { fontSizePx, widthPx, bakeDims };
+        if (!options.skipBake) {
+            if (options.deferBake) {
+                this._enqueueBakeJob({ type: 'texture', context: 'opening', host: noteEl, item, layoutCtx });
+            } else {
+                this.applyTextureBake(noteEl, item, profile, layoutCtx);
+            }
+        }
+
+        glyph.style.setProperty('--meso-mock-font-scale', String(profile.fontScale));
+        glyph.style.setProperty('--meso-mock-size-scale', String(this.getSizeScale()));
+        if (gradientMode === 'canvas' || gradientMode === 'shader') {
+            glyph.style.setProperty('--meso-mock-grain-opacity', '0');
+        } else if (gradientMode === 'p5') {
+            const p5Cfg = this.getP5Config();
+            glyph.style.setProperty('--meso-mock-bg', p5Cfg.bgColor);
+            glyph.style.setProperty('--meso-mock-grain-opacity', String(p5Cfg.grainOpacity));
+            glyph.style.setProperty('--meso-mock-grain-tile', `${p5Cfg.grainTile}px`);
+            if (frame) {
+                frame.style.setProperty('--meso-mock-bg', p5Cfg.bgColor);
+            }
+            frame?.querySelectorAll('.meso-mock__line').forEach(line => {
+                line.style.setProperty('--meso-mock-bg', p5Cfg.bgColor);
+            });
+        } else {
+            glyph.style.setProperty('--meso-mock-grain-opacity', String(grain.opacity));
+        }
+        if (gradientMode !== 'p5') {
+            glyph.style.setProperty('--meso-mock-grain-tile', `${grain.tile}px`);
+            glyph.style.setProperty('--meso-mock-grain-contrast', `${grain.contrast}%`);
+            glyph.style.setProperty('--meso-mock-grain-brightness', `${grain.brightness}%`);
+        }
+        glyph.style.setProperty('--meso-mock-grain-image', `url("${this.GRAIN_DATA_URI}")`);
+        glyph.style.setProperty('--meso-mock-frame-width', `${frameWidthPct}%`);
+        glyph.style.setProperty('--meso-mock-frame-height', `${(profile.heightScale * 100).toFixed(1)}%`);
+
+        noteEl.style.setProperty('--meso-mock-row-span', String(profile.rowSpan));
+        noteEl.dataset.mockRowSpan = String(profile.rowSpan);
+        noteEl.dataset.mockSizeBand = profile.bandKey;
+
+        frame?.querySelectorAll('.meso-mock__line').forEach((line) => {
+            line.style.background = lineFill;
+            line.style.backgroundImage = 'none';
+        });
+    },
+
+    syncOpeningGlyphLayout(noteEl, item) {
+        this._renderContext = 'opening';
+        try {
+            this._syncOpeningGlyphLayoutInner(noteEl, item);
+        } finally {
+            this._renderContext = null;
+        }
+    },
+
+    _syncOpeningGlyphLayoutInner(noteEl, item) {
+        const glyph = noteEl?.querySelector('.depth-v2-glyph--meso');
+        if (!glyph) return;
+
+        const frame = glyph.querySelector('.meso-mock__frame');
+        if (!frame) return;
+
+        const lineEls = frame.querySelectorAll('.meso-mock__line');
+        const profile = this.buildProfile(item, null);
+        if (lineEls.length !== profile.lines.length) return;
+
+        const gradientMode = this.getGradientMode();
+        const frameWidthPct = (profile.frameWidth * 100).toFixed(1);
+        const fontSizePx = this.measureGlyphFontSizePx(glyph);
+        const frameWidthPx = this.resolveFrameWidthPx(profile, fontSizePx);
+        const widthPx = frameWidthPx;
+        const bakeDims = this.resolveGradientBakeDimensions(profile, { fontSizePx, widthPx }, noteEl);
+        const gradientW = `${bakeDims.widthPx}px`;
+        const sCfg = gradientMode === 'shader'
+            ? this.getShaderConfig()
+            : gradientMode === 'p5'
+                ? this.getP5Config()
+                : null;
+        const overscale = sCfg?.textureOverscale ?? 1.78;
+
+        glyph.style.setProperty('--meso-mock-gradient-w', gradientW);
+        glyph.style.setProperty('--meso-mock-texture-overscale', String(overscale));
+        frame.style.setProperty('--meso-mock-gradient-w', gradientW);
+        frame.style.setProperty('--meso-mock-texture-overscale', String(overscale));
+        frame.style.setProperty('--meso-mock-gradient-h', `${bakeDims.heightPx}px`);
+        if (this.usesColumnFillLayout()) {
+            frame.style.width = '100%';
+            frame.style.minWidth = '0';
+        } else {
+            frame.style.width = `${frameWidthPx}px`;
+            frame.style.minWidth = `${frameWidthPx}px`;
+        }
+
+        const metrics = this.getProfileMetrics(profile);
+        if (this.isSliceGradientMode()) {
+            frame.style.setProperty('--meso-mock-content-h', `${metrics.totalH}px`);
+            frame.style.height = `${metrics.totalH}px`;
+        }
+
+        const usesUniformGradient = gradientMode === 'blobs'
+            || gradientMode === 'canvas'
+            || gradientMode === 'shader'
+            || gradientMode === 'p5';
+        if (usesUniformGradient) {
+            this.applySliceLineLayout(frame, profile, fontSizePx, frameWidthPx, bakeDims, gradientMode, sCfg);
+        }
+
+        glyph.style.setProperty('--meso-mock-font-scale', String(profile.fontScale));
+        glyph.style.setProperty('--meso-mock-size-scale', String(this.getSizeScale()));
+        glyph.style.setProperty('--meso-mock-frame-width', `${frameWidthPct}%`);
+        glyph.style.setProperty('--meso-mock-frame-height', `${(profile.heightScale * 100).toFixed(1)}%`);
+        noteEl.style.setProperty('--meso-mock-row-span', String(profile.rowSpan));
+        noteEl.dataset.mockRowSpan = String(profile.rowSpan);
+        noteEl.dataset.mockSizeBand = profile.bandKey;
+
+        const lineFill = CONFIG?.opening?.mesoLineFill || 'rgba(242, 240, 238, 0.9)';
+        frame.querySelectorAll('.meso-mock__line').forEach((line) => {
+            line.style.background = lineFill;
+            line.style.backgroundImage = 'none';
+        });
     }
 };
 /* ==========================================================================
@@ -4253,6 +5364,12 @@ const MicroMock = {
     },
 
     buildCardOnlyHTML(item, options = {}) {
+        const useCensor = typeof NoteCensor !== 'undefined'
+            && NoteCensor.isActive()
+            && !options.forceReadable;
+        if (useCensor) {
+            return NoteCensor.buildCardOnlyHTML(item, options);
+        }
         const title = String(item.title || '').trim();
         const titleHTML = title
             ? `<h2 class="note-title note-h">${this.escapeHTML(title)}</h2>`
@@ -4267,6 +5384,9 @@ const MicroMock = {
     },
 
     buildTagsRowHTML(item) {
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            return '';
+        }
         return `<div class="micro-mock__tags">` +
             `${this.buildTagsHTML(item.tags, { noteStyle: true })}` +
             `${this.buildTypologyHTML(item)}` +
@@ -4295,6 +5415,9 @@ const MicroMock = {
         }
         wrapper.style.removeProperty('--micro-mock-row-span');
         wrapper.dataset.microMockNoteId = String(resolved.id);
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            NoteCensor.invalidateWordLayout();
+        }
         return true;
     },
 
@@ -4371,7 +5494,8 @@ const RenderEngine = {
             </div>
         `;
         
-        const layerSmall = `
+        const useV2SilhouetteSkip = typeof DepthV2 !== 'undefined' && DepthV2.isActive();
+        const layerSmall = useV2SilhouetteSkip ? '' : `
             <div class="layer-item layer-small">
                 <div class="meso-silhouette" aria-hidden="true" data-silhouette-state="pending">
                     <svg class="meso-silhouette__svg" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -4420,11 +5544,7 @@ const RenderEngine = {
                 if (noteIndex < 0) return;
 
                 if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
-                    if (ArtifactInspector.isActive) {
-                        ArtifactInspector.close();
-                    } else {
-                        ArtifactInspector.open(wrapper);
-                    }
+                    DepthController.changeLevel(3);
                     return;
                 }
 
@@ -4434,6 +5554,10 @@ const RenderEngine = {
                 return;
             }
 
+            if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+                if (!NoteCensor.isNoteStudyUnlocked(wrapper)) return;
+            }
+
             if (ArtifactInspector.isActive) {
                 ArtifactInspector.close();
             } else {
@@ -4441,7 +5565,9 @@ const RenderEngine = {
             }
         });
         
-        SilhouetteEngine.registerWrapper(wrapper, item);
+        if (!useV2SilhouetteSkip) {
+            SilhouetteEngine.registerWrapper(wrapper, item);
+        }
         if (typeof TextDirection !== 'undefined') {
             TextDirection.applyToWrapper(wrapper, item.textDirection);
         }
@@ -4807,7 +5933,7 @@ const SilhouetteEngine = {
         if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) return;
         if (DepthController.isMicroTransitionActive()) return;
         if (DepthController.isMacroMesoTransitionActive()) return;
-        if (level === 2 || level === 3) this.scheduleBuildAll();
+        if (level === 1 || level === 3) this.scheduleBuildAll();
     }
 };
 
@@ -5291,15 +6417,15 @@ const DepthTransitionOrchestrator = {
                 block
             );
 
-        const enterMesoFilterView = () => {
-            DepthController.changeLevel(2);
+        const enterMicroFilterView = () => {
+            DepthController.changeLevel(3);
             requestAnimationFrame(() => {
                 if (typeof ActionWarehouse !== 'undefined') {
                     ActionWarehouse.syncDeployedBlocksForDepth?.();
                     ActionWarehouse.updateDotFocusFilter();
                 }
-                if (typeof MesoMock !== 'undefined') {
-                    MesoMock.refreshFocusLensTextures?.();
+                if (typeof MicroMock !== 'undefined') {
+                    MicroMock.applyAll?.();
                 }
                 if (typeof AppState !== 'undefined') {
                     AppState.centerCanvasOnLayerEnter();
@@ -5310,10 +6436,10 @@ const DepthTransitionOrchestrator = {
         this.run({
             type: 'block-click',
             fromLevel: 1,
-            toLevel: 2,
+            toLevel: 3,
             block,
             scrollTarget
-        }, enterMesoFilterView);
+        }, enterMicroFilterView);
     },
 
     runWheelZoom() {
@@ -5330,8 +6456,7 @@ const DepthTransitionOrchestrator = {
             CatalogState.catalogLayout
         );
 
-        const notePath = CONFIG.depth.noteClickPath || 'direct-l3';
-        const toLevel = notePath === 'l2-preview-then-l3' ? 2 : 3;
+        const toLevel = 3;
 
         this.run({
             type: 'note-click',
@@ -5341,27 +6466,15 @@ const DepthTransitionOrchestrator = {
             wrapper,
             scrollTarget
         }, () => {
-            if (toLevel === 3) {
-                DepthController.changeLevel(2);
-                const waitForMacro = () => {
-                    if (MacroMesoBridge.isAnimating() || DepthController.currentLevel !== 2) {
-                        requestAnimationFrame(waitForMacro);
-                        return;
-                    }
-                    DepthController.changeLevel(3);
-                    if (wrapper && typeof ArtifactInspector !== 'undefined') {
-                        requestAnimationFrame(() => {
-                            if (DepthController.currentLevel === 3) {
-                                ArtifactInspector.open(wrapper);
-                            }
-                        });
-                    }
-                };
-                requestAnimationFrame(waitForMacro);
-                return;
-            }
-
             DepthController.changeLevel(toLevel);
+            if (wrapper && typeof ArtifactInspector !== 'undefined' &&
+                !(typeof NoteCensor !== 'undefined' && NoteCensor.blocksNoteFocus())) {
+                requestAnimationFrame(() => {
+                    if (DepthController.currentLevel === 3) {
+                        ArtifactInspector.open(wrapper);
+                    }
+                });
+            }
         });
     },
 
@@ -6774,13 +7887,7 @@ const DepthV2 = {
     relayoutForFilterChange(options = {}) {
         if (!this.isActive()) return;
         const level = DepthController.currentLevel;
-        if (level === 2) {
-            this.applyMesoLayoutForState(options);
-            if (typeof MesoMock !== 'undefined') {
-                MesoMock.invalidateColumnGradientLayout();
-                MesoMock.buildColumnGradientLayout();
-            }
-        } else if (level === 3) {
+        if (level === 3) {
             this.layoutMicroGrid(options);
             if (typeof MicroMock !== 'undefined') MicroMock.applyAll();
             if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
@@ -7098,6 +8205,11 @@ const DepthV2 = {
     onLevelChange(level) {
         if (!this.isActive()) return;
         this.ensureShell();
+
+        if (typeof NoteCensor !== 'undefined') {
+            NoteCensor.onLevelChange(level);
+        }
+
         if (level === 1) {
             this._prepareMesoToken++;
             if (typeof MesoMock !== 'undefined') MesoMock.unbindShaderLiveHover();
@@ -7126,42 +8238,18 @@ const DepthV2 = {
             return;
         }
 
+        if (level === 2) return;
+
         app?.classList.remove('is-micro-grid-layout');
-        const hasMesoLayout = app?.classList.contains('is-meso-column-layout') ||
-            app?.classList.contains('is-meso-hive-layout');
-        if (level === 2 && (this._prepareMesoPromise || (hasMesoLayout && this._lastMesoPreparedLevel === 2))) {
-            if (hasMesoLayout && !this._mesoLayoutReadyPromise) {
-                this._mesoLayoutReadyPromise = Promise.resolve();
-            }
-            this.relayoutForFilterChange({ force: true });
-            if (typeof MesoMock !== 'undefined') MesoMock.bindShaderLiveHover();
-            return;
-        }
-        this._lastMesoPreparedLevel = 2;
-        this.prepareMesoGrid();
-        if (typeof MesoMock !== 'undefined') MesoMock.bindShaderLiveHover();
     },
 
     afterNotesRender() {
         if (!this.isActive()) return;
         const level = DepthController.currentLevel;
-        if (level < 2) return;
+        if (level !== 3) return;
         this.ensureShell();
-        if (level === 3) {
-            this.applyGridTokens(3);
-            this.prepareMicroGrid();
-            return;
-        }
-        const app = document.getElementById('app');
-        const hasMesoLayout = app?.classList.contains('is-meso-column-layout') ||
-            app?.classList.contains('is-meso-hive-layout');
-        if (level === 2 && (this._prepareMesoPromise || hasMesoLayout)) {
-            this.applyGridTokens(level);
-            return;
-        }
-        this.prepareMesoGrid();
-        this.applyGridTokens(level);
-        if (typeof MesoMock !== 'undefined') MesoMock.bindShaderLiveHover();
+        this.applyGridTokens(3);
+        this.prepareMicroGrid();
     }
 };
 /* ==========================================================================
@@ -7452,11 +8540,7 @@ const DepthController = {
     isWheelLocked() {
         return this._levelChangeActive ||
             this.isAnyTransitionActive() ||
-            Date.now() < this._wheelLockUntil ||
-            (this.currentLevel === 2 &&
-                typeof DepthV2 !== 'undefined' &&
-                DepthV2.isActive() &&
-                !!DepthV2._prepareMesoPromise);
+            Date.now() < this._wheelLockUntil;
     },
 
     lockWheelAfterTransition() {
@@ -7530,11 +8614,11 @@ const DepthController = {
     },
 
     zoomIn() {
-        if (this.currentLevel >= this.maxLevel || this.isWheelLocked()) return false;
+        const next = getDepthAdjacentLevel(this.currentLevel, 1);
+        if (next === this.currentLevel || this.isWheelLocked()) return false;
         if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
             ArtifactInspector.close();
         }
-        const next = this.currentLevel + 1;
         if (typeof DepthTransitionOrchestrator !== 'undefined' &&
             DepthTransitionOrchestrator.runWheelZoom(next)) {
             return false;
@@ -7543,11 +8627,11 @@ const DepthController = {
     },
 
     zoomOut() {
-        if (this.currentLevel <= this.minLevel || this.isWheelLocked()) return false;
+        const next = getDepthAdjacentLevel(this.currentLevel, -1);
+        if (next === this.currentLevel || this.isWheelLocked()) return false;
         if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
             ArtifactInspector.close();
         }
-        const next = this.currentLevel - 1;
         if (typeof DepthTransitionOrchestrator !== 'undefined' &&
             DepthTransitionOrchestrator.runWheelZoom(next)) {
             return false;
@@ -7557,6 +8641,7 @@ const DepthController = {
 
     changeLevel(newLevel) {
         if (this.currentLevel === newLevel) return false;
+        if (!isDepthLevelActive(newLevel)) return false;
 
         const prevLevel = this.currentLevel;
         const isMacroMesoTransition =
@@ -7786,12 +8871,9 @@ const DepthController = {
             'is-macro-grid-settle'
         );
 
-        if (newLevel >= 2 && prevLevel === 1) {
+        if (newLevel === 3 && prevLevel === 1) {
             if (MacroMesoBridge.isAnimating()) {
                 MacroMesoBridge.cancelAnimation();
-            }
-            if (typeof MesoSpatialLayout !== 'undefined') {
-                MesoSpatialLayout.captureAndStoreSnapshot();
             }
             if (typeof DepthV2 !== 'undefined') {
                 DepthV2.ensureShell();
@@ -7813,51 +8895,16 @@ const DepthController = {
                     if (typeof SpatialNavigation !== 'undefined') {
                         SpatialNavigation.resume();
                     }
-                    const pending = typeof MesoMock !== 'undefined' && MesoMock.hasPendingTextureBakes();
-                    if (!pending) {
-                        AppState.centerCanvasOnLayerEnter();
-                    }
+                    AppState.centerCanvasOnLayerEnter();
                 });
             });
             return true;
         }
 
-        if (prevLevel === 2 && newLevel === 3) {
-            this.currentLevel = newLevel;
-            this.syncViewLevelClass(newLevel);
-            ActionWarehouse.updateScrollReserve();
-            ActionWarehouse.syncDeployedBlocksForDepth?.();
-            ActionWarehouse.updateDotFocusFilter();
-            requestAnimationFrame(() => {
-                AppState.centerCanvasOnLayerEnter();
-                if (typeof SpatialNavigation !== 'undefined') {
-                    SpatialNavigation.resume();
-                }
-                this.endLevelChange();
-            });
-            return true;
-        }
-
-        if (prevLevel === 3 && newLevel === 2) {
+        if (newLevel === 1 && prevLevel === 3) {
             if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
                 ArtifactInspector.close();
             }
-            this.currentLevel = newLevel;
-            this.syncViewLevelClass(newLevel);
-            ActionWarehouse.updateScrollReserve();
-            ActionWarehouse.syncDeployedBlocksForDepth?.();
-            ActionWarehouse.updateDotFocusFilter();
-            requestAnimationFrame(() => {
-                AppState.centerCanvasOnLayerEnter();
-                if (typeof SpatialNavigation !== 'undefined') {
-                    SpatialNavigation.resume();
-                }
-                this.endLevelChange();
-            });
-            return true;
-        }
-
-        if (newLevel === 1 && prevLevel >= 2) {
             // קודם L1 ב-DOM — רק אז סנכרון פיזיקה (לא buildWorld)
             this.currentLevel = newLevel;
             this.syncViewLevelClass(newLevel);
@@ -8163,6 +9210,10 @@ const SpatialNavigation = {
         const wrapper = this.hitTestDepthNote(clientX, clientY);
         if (!wrapper) return false;
 
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            if (!NoteCensor.isNoteStudyUnlocked(wrapper)) return false;
+        }
+
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(clientX, clientY)) {
             return false;
@@ -8186,6 +9237,21 @@ const SpatialNavigation = {
             return;
         }
         if (this.pan.active || this.spaceHeld) return;
+
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            const overWord = NoteCensor.hitWordAt(clientX, clientY);
+            if (overWord) {
+                this.navSurface.style.cursor = 'default';
+                return;
+            }
+            const wrapper = this.hitTestDepthNote(clientX, clientY);
+            if (wrapper && NoteCensor.isNoteStudyUnlocked(wrapper)) {
+                this.navSurface.style.cursor = 'pointer';
+                return;
+            }
+            this.navSurface.style.cursor = 'grab';
+            return;
+        }
 
         const overNote = !!this.hitTestDepthNote(clientX, clientY);
         this.navSurface.style.cursor = overNote ? 'pointer' : 'grab';
@@ -8958,7 +10024,8 @@ const NavigationMap = {
         mapWrap.appendChild(viewportMarker);
         mapsPanel.appendChild(mapWrap);
 
-        [1, 2, 3].forEach((level) => {
+        const layerLevels = getDepthActiveLevels();
+        layerLevels.forEach((level) => {
             const title = document.createElement('button');
             title.type = 'button';
             title.className = 'site-navigation-layers__title';
@@ -9640,123 +10707,6 @@ const NavigationMap = {
         });
     },
 
-    // #region agent log
-    _debugMapAlignment(source, hypothesisId = 'ALL') {
-        if (this._activeLevel !== 1 || !this._baseTransform) return;
-        const now = performance.now();
-        if (source === 'pan' && now - (this._debugAlignLogAt || 0) < 400) return;
-        this._debugAlignLogAt = now;
-        try {
-            const vp = this.getMapViewportMarkerRect();
-            const vpClientTop = vp.top - window.pageYOffset;
-            const vpClientBottom = vpClientTop + vp.height;
-            const vpClientLeft = vp.left - window.pageXOffset;
-            const vpClientRight = vpClientLeft + vp.width;
-            const bandBottom = Math.min(whTop, window.innerHeight);
-            const eff = this.getEffectiveTransform();
-            const marker = document.querySelector('.site-navigation-maps__viewport-marker');
-            const wrap = document.querySelector('.site-navigation-maps__map-wrap');
-            if (!eff || !marker || !wrap || !this.canvas) return;
-            const markerR = marker.getBoundingClientRect();
-            const wrapR = wrap.getBoundingClientRect();
-            const panX = this._panDisplayX;
-            const panY = this._panDisplayY;
-            const cssH = this.canvas.clientHeight;
-            const cssW = this.canvas.clientWidth;
-            const wrapCx = wrapR.left + wrapR.width / 2;
-            const wrapCy = wrapR.top + wrapR.height / 2;
-            const errX = [];
-            const errY = [];
-            const relXs = [];
-            const relYs = [];
-            let screenCount = 0;
-            let inMarker = 0;
-            let outsideTop = 0;
-            let outsideBottom = 0;
-            let outsideLeft = 0;
-            let outsideRight = 0;
-            document.querySelectorAll('#app .layer-dot').forEach((dot) => {
-                const dr = dot.getBoundingClientRect();
-                if (dr.width < 1 ||
-                    dr.top < 0 || dr.bottom > bandBottom ||
-                    dr.left < vpClientLeft || dr.right > vpClientRight) return;
-                screenCount++;
-                const pageX = dr.left + dr.width / 2 + window.pageXOffset;
-                const pageY = dr.top + dr.height / 2 + window.pageYOffset;
-                const mp = eff.toMap(pageX, pageY);
-                const visX = wrapCx + panX + (mp.x - cssW / 2);
-                const visY = wrapCy + panY + (mp.y - cssH / 2);
-                const relX = (visX - markerR.left) / markerR.width;
-                const relY = (visY - markerR.top) / markerR.height;
-                errX.push(relX - (pageX - vp.left) / vp.width);
-                errY.push(relY - (pageY - vp.top) / vp.height);
-                relXs.push(relX);
-                relYs.push(relY);
-                if (relX >= 0 && relX <= 1 && relY >= 0 && relY <= 1) {
-                    inMarker++;
-                } else {
-                    if (relY < 0) outsideTop++;
-                    else if (relY > 1) outsideBottom++;
-                    if (relX < 0) outsideLeft++;
-                    else if (relX > 1) outsideRight++;
-                }
-            });
-            const avg = (arr) => arr.length ? arr.reduce((a, v) => a + v, 0) / arr.length : null;
-            const scrollPan = SpatialNavigation.getScrollAlignedMapBounds(1);
-            const drawPan = this.getMapDrawBounds();
-            fetch('http://127.0.0.1:7699/ingest/ba1e7923-43c5-435b-9e85-9bf447e897b8', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', 'X-Debug-Session-Id': 'e84f18' },
-                body: JSON.stringify({
-                    sessionId: 'e84f18',
-                    runId: 'post-fix-v12',
-                    hypothesisId,
-                    location: 'navigation-map.js:_debugMapAlignment',
-                    message: source,
-                    data: {
-                        source,
-                        scrollY: Math.round(window.pageYOffset),
-                        scrollX: Math.round(window.pageXOffset),
-                        vpH: Math.round(vp.height),
-                        vpW: Math.round(vp.width),
-                        vpTopClient: Math.round(vpClientTop),
-                        innerH: window.innerHeight,
-                        whTop: Math.round(whTop),
-                        scale: this._baseTransform.scale,
-                        panX: +panX.toFixed(2),
-                        panY: +panY.toFixed(2),
-                        avgVisErrX: avg(errX) != null ? +avg(errX).toFixed(4) : null,
-                        avgVisErrY: avg(errY) != null ? +avg(errY).toFixed(4) : null,
-                        outsideTop,
-                        outsideBottom,
-                        outsideLeft,
-                        outsideRight,
-                        edgeSlackX: relXs.length
-                            ? `${Math.min(...relXs).toFixed(3)}/${(1 - Math.max(...relXs)).toFixed(3)}`
-                            : null,
-                        edgeSlackY: relYs.length
-                            ? `${Math.min(...relYs).toFixed(3)}/${(1 - Math.max(...relYs)).toFixed(3)}`
-                            : null,
-                        relXRange: relXs.length
-                            ? `${Math.min(...relXs).toFixed(3)}..${Math.max(...relXs).toFixed(3)}`
-                            : null,
-                        relYRange: relYs.length
-                            ? `${Math.min(...relYs).toFixed(3)}..${Math.max(...relYs).toFixed(3)}`
-                            : null,
-                        screenDots: screenCount,
-                        dotsInMarker: inMarker,
-                        dotCoverage: screenCount ? +(inMarker / screenCount).toFixed(3) : null,
-                        panBoundsMinX: Math.round(this._baseTransform.panBounds?.minX ?? 0),
-                        scrollPanMinX: scrollPan ? Math.round(scrollPan.minX) : null,
-                        drawPanMinX: drawPan ? Math.round(drawPan.minX) : null
-                    },
-                    timestamp: Date.now()
-                })
-            }).catch(() => {});
-        } catch (_) { /* ignore */ }
-    },
-    // #endregion
-
     computeContainScale(worldW, worldH, innerW, innerH) {
         return Math.min(
             innerW / Math.max(1, worldW),
@@ -10102,7 +11052,7 @@ const NavigationMap = {
     },
 
     getSlotForLevel(level, activeLevel) {
-        return level - activeLevel;
+        return getDepthSlotIndex(level, activeLevel);
     },
 
     async _loadLayerMarker(src) {
@@ -10135,7 +11085,8 @@ const NavigationMap = {
 
         root.style.setProperty('--layer-nav-label-box-h', `${maxLabelH}px`);
         root.style.setProperty('--layer-nav-row-step', `${maxLabelH + rowGapPx}px`);
-        root.style.setProperty('--layer-nav-stack-h', `${maxLabelH * 3 + rowGapPx * 2}px`);
+        const slotCount = CONFIG.layerNavigation?.slotCount ?? 2;
+        root.style.setProperty('--layer-nav-stack-h', `${maxLabelH * slotCount + rowGapPx * (slotCount - 1)}px`);
         this.syncLayerMarkerDot();
     },
 
@@ -10227,7 +11178,7 @@ const NavigationMap = {
 
     navigateToLayer(level) {
         const target = Number(level);
-        if (!Number.isFinite(target) || target < 1 || target > 3) return;
+        if (!Number.isFinite(target) || !isDepthLevelActive(target)) return;
         if (this.isTransitionActive()) return;
         if (target === this._activeLevel) return;
 
@@ -10526,9 +11477,6 @@ const NavigationMap = {
         this.applyCanvasPan();
         this.updateViewportMarker(base, vp);
         this.syncLastTransform(this._activeLevel, base.contentBounds, vp);
-        // #region agent log
-        this._debugMapAlignment(force ? 'pan-force' : 'pan', 'G');
-        // #endregion
         const blockActive = typeof ActionWarehouse !== 'undefined' &&
             ActionWarehouse.getActiveBlockCount?.() > 0;
         if (this._activeLevel === 1 && blockActive && this.ctx && base) {
@@ -10798,9 +11746,6 @@ const NavigationMap = {
             this._contentDirty = false;
 
             this.updatePanFromViewport();
-            // #region agent log
-            this._debugMapAlignment('render', 'H');
-            // #endregion
         } catch (err) {
             console.warn('NavigationMap.render failed:', err);
         }
@@ -11767,6 +12712,7 @@ const ArtifactInspector = {
     mode: null, // 'popup'
     _openAnimTimer: null,
     _openSyntheticCard: false,
+    _forceReadableOpen: false,
 
     init() {
         this.backdrop = document.createElement('div');
@@ -11814,6 +12760,13 @@ const ArtifactInspector = {
     open(noteWrapperNode) {
         if (this.isActive) return;
         if (!this.isOpenableWrapper(noteWrapperNode)) return;
+
+        const studyOpen = typeof NoteCensor !== 'undefined'
+            && NoteCensor.isActive()
+            && NoteCensor.isNoteStudyUnlocked(noteWrapperNode);
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive() && !studyOpen) return;
+
+        this._forceReadableOpen = studyOpen;
         this.openPopup(noteWrapperNode);
     },
 
@@ -11927,6 +12880,14 @@ const ArtifactInspector = {
     _resolveOpenSource(wrapper, item) {
         const { card } = this._getSourceFocusElements(wrapper);
         const firstRect = card?.getBoundingClientRect();
+
+        if (this._forceReadableOpen && card && firstRect && firstRect.width > 0) {
+            const readableCard = this._buildSyntheticFocusCard(item, { forceReadable: true });
+            if (readableCard) {
+                return { card: readableCard, firstRect, synthetic: true };
+            }
+        }
+
         if (card && firstRect && firstRect.width > 0) {
             return { card, firstRect, synthetic: false };
         }
@@ -11943,8 +12904,8 @@ const ArtifactInspector = {
         return { card: syntheticCard, firstRect: sourceRect, synthetic: true };
     },
 
-    _buildSyntheticFocusCard(item) {
-        const html = MicroMock.buildCardOnlyHTML(item, { focusScale: true });
+    _buildSyntheticFocusCard(item, options = {}) {
+        const html = MicroMock.buildCardOnlyHTML(item, { focusScale: true, ...options });
         const mount = document.createElement('div');
         mount.innerHTML = html;
         return mount.firstElementChild;
@@ -12344,6 +13305,32 @@ const ArtifactInspector = {
     },
 
     buildMetadataHTML(item) {
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            const idRedact = NoteCensor.buildRedactBlock(String(item.id || ''), `${item.id}:meta-id`, 'note-redact--meta-title', {
+                maxLines: 1,
+                minWidth: 0.2,
+                maxWidth: 0.45
+            });
+            return `
+            <section class="artifact-inspector-metadata">
+                <div class="artifact-inspector-metadata__scroll-glyphs" aria-hidden="true">
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+                </div>
+                <h2 class="artifact-inspector-metadata__id general-h">${idRedact}</h2>
+                <div class="artifact-inspector-metadata__grid">
+                    <dl class="artifact-inspector-metadata__details general-t">
+                        <div><dt>מחבר</dt><dd>${NoteCensor.buildMetadataValueHTML('author', item)}</dd></div>
+                        <div><dt>תאריך כתיבה</dt><dd>${NoteCensor.buildMetadataValueHTML('date', item)}</dd></div>
+                        <div><dt>מספר סידורי</dt><dd>${NoteCensor.buildMetadataValueHTML('serial', item)}</dd></div>
+                        <div><dt>מבנה טיפולוגי</dt><dd>${NoteCensor.buildMetadataValueHTML('typology', item)}</dd></div>
+                    </dl>
+                </div>
+            </section>
+        `;
+        }
+
         const author = item.authorCode
             ? String(item.authorCode).trim().toUpperCase()
             : (item.authorFullName || '—');
@@ -12384,10 +13371,16 @@ const ArtifactInspector = {
         if (!sections.length) return '';
 
         const blocks = sections.map((section) => {
-            const pills = section.tags.map((name) => {
-                const color = AppState.tagColorsMap.get(name) || 'var(--color-3)';
-                return `<span class="artifact-inspector-related__pill action-block general-t"><span class="block-glyph" style="background-color:${color}"></span><span class="block-label">${this.escapeHtml(name)}</span></span>`;
-            }).join('<span class="artifact-inspector-related__plus" aria-hidden="true">+</span>');
+            const pills = (typeof NoteCensor !== 'undefined' && NoteCensor.isActive())
+                ? NoteCensor.buildRedactBlock('related', section.key, 'note-redact--related-heading', {
+                    maxLines: 1,
+                    minWidth: 0.25,
+                    maxWidth: 0.5
+                })
+                : section.tags.map((name) => {
+                    const color = AppState.tagColorsMap.get(name) || 'var(--color-3)';
+                    return `<span class="artifact-inspector-related__pill action-block general-t"><span class="block-glyph" style="background-color:${color}"></span><span class="block-label">${this.escapeHtml(name)}</span></span>`;
+                }).join('<span class="artifact-inspector-related__plus" aria-hidden="true">+</span>');
 
             const notes = section.items.map((item) => {
                 const html = typeof MicroMock !== 'undefined'
@@ -12518,6 +13511,7 @@ const ArtifactInspector = {
         this._openFirstCard = null;
         this._openFocusVisualWidth = null;
         this._openSyntheticCard = false;
+        this._forceReadableOpen = false;
         this.isActive = false;
         this.activeElement = null;
         this.mode = null;
@@ -13622,9 +14616,20 @@ const PhysicsEngine = {
 
     /* --- Note molecule outlines --- */
 
+    getMacroDotRenderRadius() {
+        const factor = CONFIG.outlines?.renderScale ?? 1;
+        return scale(10 * factor) / 2;
+    },
+
+    getOutlineRenderPadding() {
+        const cfg = CONFIG.outlines;
+        return cfg.renderPadding ?? cfg.padding;
+    },
+
     collectNoteOutlineGroups() {
         const scrollX = window.pageXOffset;
         const scrollY = window.pageYOffset;
+        const dotR = this.getMacroDotRenderRadius();
 
         const groups = new Map();
         this.bodiesData.forEach(item => {
@@ -13635,7 +14640,7 @@ const PhysicsEngine = {
             groups.get(item.noteIndex).push({
                 x: pos.x - scrollX,
                 y: pos.y - scrollY,
-                r: item.body.circleRadius
+                r: dotR
             });
         });
 
@@ -13678,7 +14683,7 @@ const PhysicsEngine = {
             if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
             if (this.shouldCullOutlineGroup(pts)) return;
 
-            const R = pts[0].r + cfg.padding;
+            const R = pts[0].r + this.getOutlineRenderPadding();
             const useHull = cfg.mode === 'hull' ||
                            (cfg.mode === 'compare' && noteIndex % 2 === 0);
             if (useHull) {
@@ -13704,7 +14709,7 @@ const PhysicsEngine = {
 
             const isHover = noteIndex === this.hoveredNoteIndex;
             ctx.lineWidth = isHover ? (cfg.hoverWidth ?? cfg.width * 2.5) : cfg.width;
-            const R = pts[0].r + cfg.padding;
+            const R = pts[0].r + this.getOutlineRenderPadding();
             const useHull = cfg.mode === 'hull' ||
                            (cfg.mode === 'compare' && noteIndex % 2 === 0);
 
@@ -14445,6 +15450,68 @@ const ActionWarehouse = {
     statisticsAnimationFrame: null,
     statisticsAnimationStartedAt: 0,
     statisticsAnimationDurationMs: 520,
+    _wordPanelWords: null,
+
+    isWordPanelTheme() {
+        return (CONFIG.theme?.mode || 'default') === 'censored';
+    },
+
+    isWordPanelLevelActive(level) {
+        const resolved = level ?? (typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1);
+        return this.isWordPanelTheme() && resolved === 3;
+    },
+
+    ensureWordPanel() {
+        if (!this.trayBlocksElement) return;
+        if (!this._wordPanelWords) this._wordPanelWords = new Set();
+    },
+
+    syncWordPanelMode(level) {
+        const active = this.isWordPanelLevelActive(level);
+        document.body.classList.toggle('is-word-panel-mode', active);
+        this.shellElement?.classList.toggle('is-word-panel', active);
+        this.trayBlocksElement?.classList.toggle('word-panel', active);
+        if (active) {
+            this.ensureWordPanel();
+            this.updateWordPanelMessage();
+        } else if (this.messagePortElement) {
+            const text = CONFIG.warehouse?.dock?.messageText || 'גררו להפעלה';
+            this.messagePortElement.textContent = text;
+        }
+    },
+
+    updateWordPanelMessage() {
+        if (!this.messagePortElement) return;
+        const text = CONFIG.theme?.wordPanelMessage
+            || CONFIG.warehouse?.dock?.messageText
+            || 'החזיקו על מילה לגילוי';
+        this.messagePortElement.textContent = text;
+    },
+
+    addCommittedWord(text) {
+        const key = String(text || '').trim();
+        if (!key || !this.isWordPanelTheme()) return;
+
+        this.ensureWordPanel();
+        if (this._wordPanelWords.has(key)) return;
+
+        this._wordPanelWords.add(key);
+
+        const chip = document.createElement('div');
+        chip.className = 'word-panel__chip general-t';
+        chip.dataset.wordKey = key;
+        chip.textContent = key;
+        chip.setAttribute('dir', 'auto');
+        this.trayBlocksElement.appendChild(chip);
+
+        requestAnimationFrame(() => this.updateScrollReserve());
+    },
+
+    clearWordPanel() {
+        if (!this.trayBlocksElement) return;
+        this.trayBlocksElement.querySelectorAll('.word-panel__chip').forEach((el) => el.remove());
+        if (this._wordPanelWords) this._wordPanelWords.clear();
+    },
 
     init() {
         this.ensurePhysicsMaps();
@@ -14660,9 +15727,51 @@ const ActionWarehouse = {
         this.shellElement?.classList.remove('is-depth-drop-active', 'is-depth-drop-fading');
     },
 
-    markSlotEmpty(block) {
+    shouldLeaveEmptyDockSlot() {
+        return typeof DepthController !== 'undefined' && DepthController.currentLevel === 3;
+    },
+
+    markSlotDockReserve(block) {
         const slot = block?.slotElement;
         if (!slot || block.nestedIn) return;
+
+        this.clearSlotReserve(block);
+
+        const { width, height } = this.blockMetrics(block);
+        slot.style.width = `${Math.ceil(width)}px`;
+        slot.style.height = `${Math.ceil(height)}px`;
+
+        const reserve = block.element.cloneNode(true);
+        reserve.classList.remove(
+            'is-dragging', 'is-deployed', 'is-selected', 'is-removable',
+            'is-returning', 'is-nested', 'is-depth-ui-mounted', 'is-deploying-to-bar',
+            'is-macro-indication', 'is-dock-irrelevant'
+        );
+        reserve.classList.add('is-dock-reserve');
+        reserve.removeAttribute('id');
+        reserve.setAttribute('aria-hidden', 'true');
+        reserve.style.transform = '';
+        reserve.querySelector('.block-remove-mark')?.remove();
+
+        slot.appendChild(reserve);
+        block._dockReserveEl = reserve;
+        this.restoreDockTrayOrder();
+    },
+
+    clearSlotReserve(block) {
+        block?._dockReserveEl?.remove();
+        delete block?._dockReserveEl;
+    },
+
+    markSlotEmpty(block) {
+        if (!this.shouldLeaveEmptyDockSlot()) {
+            this.markSlotDockReserve(block);
+            return;
+        }
+
+        const slot = block?.slotElement;
+        if (!slot || block.nestedIn) return;
+        this.clearSlotReserve(block);
         const { width, height } = this.blockMetrics(block);
         slot.style.width = `${Math.ceil(width)}px`;
         slot.style.height = `${Math.ceil(height)}px`;
@@ -14680,6 +15789,7 @@ const ActionWarehouse = {
     clearSlotEmpty(block) {
         const slot = block?.slotElement;
         if (!slot) return;
+        this.clearSlotReserve(block);
         slot.classList.remove('is-empty');
         slot.querySelector('.block-slot__ghost')?.remove();
         slot.style.removeProperty('width');
@@ -14743,9 +15853,17 @@ const ActionWarehouse = {
         tray.scrollTop += e.deltaY;
     },
 
-    // Returns every active block to its dock slot
+    // Returns every active block to its dock slot (or clears word panel in censored theme)
     resetAll() {
         if (this.dragState) return;
+
+        if (this.isWordPanelLevelActive()) {
+            this.clearWordPanel();
+            if (typeof NoteCensor !== 'undefined' && NoteCensor._clearAllHoverState) {
+                NoteCensor._clearAllHoverState();
+            }
+            return;
+        }
 
         this.clearMacroIndicationGhost();
         this.ensurePhysicsMaps();
@@ -14809,6 +15927,8 @@ const ActionWarehouse = {
             this.createBlock({ type: 'author', author: author });
         });
 
+        const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+        this.syncWordPanelMode(level);
         requestAnimationFrame(() => this.updateScrollReserve());
         this.captureDockTrayBaseOrder();
         this.updateWarehouseCapacityUI();
@@ -14841,10 +15961,11 @@ const ActionWarehouse = {
         if (!this.trayBlocksElement) return;
         this.ensureDockTrayBaseOrder();
 
-        const hasReservedSlot = this._dockTrayBaseOrder.some(block =>
-            block.slotElement?.classList.contains('is-empty') &&
-            block.slotElement?.parentElement === this.trayBlocksElement
-        );
+        const hasReservedSlot = this._dockTrayBaseOrder.some(block => {
+            const slot = block.slotElement;
+            if (!slot || slot.parentElement !== this.trayBlocksElement) return false;
+            return slot.classList.contains('is-empty') || !!block._dockReserveEl;
+        });
         if (hasReservedSlot) {
             this.restoreDockTrayOrder();
             return;
@@ -16446,7 +17567,7 @@ const ActionWarehouse = {
 
         document.body.classList.toggle(
             'is-block-focus',
-            focus && ((isV2Depth && level <= 3) || isMacro || isCatalogDepth)
+            focus && ((isV2Depth && level === 3) || isMacro || isCatalogDepth)
         );
         document.body.classList.toggle('is-block-filter', hasFilterCriteria);
         document.body.classList.toggle('is-catalog-lens', focus && (isCatalogDepth || (isV2Depth && level >= 2)));
@@ -16557,18 +17678,18 @@ const ActionWarehouse = {
             CatalogState.rebuildFromWarehouse();
         }
 
-        if (isV2Depth && level >= 2 && typeof DepthV2 !== 'undefined') {
+        if (isV2Depth && level === 3 && typeof DepthV2 !== 'undefined') {
             ActionWarehouse.syncDeployedBlocksForDepth?.();
             DepthV2.relayoutForFilterChange({ force: true });
-            if (level === 2 && typeof MesoMock !== 'undefined') {
-                MesoMock.refreshFocusLensTextures();
+            if (typeof MicroMock !== 'undefined') {
+                MicroMock.applyAll?.();
             }
         }
 
         this.updateWarehouseBlockRelevance();
         this.updateWarehouseCapacityUI();
 
-        if (typeof NavigationMap !== 'undefined' && level >= 2) {
+        if (typeof NavigationMap !== 'undefined' && level === 3) {
             NavigationMap.notifyMapRefreshTick(false);
         }
 
@@ -19602,6 +20723,1801 @@ Object.assign(ActionWarehouse, {
         this.enforceBlockClearance(bodiesData, cfg);
     }
 });
+/* ==========================================================================
+   Opening Background — L1-style molecules with fold-mirror symmetry
+   Tag colors from the data sheet; dots + sibling links + subtle hull outline.
+   Experience L1/L3: optional SVG displacement grain (pixel warp, no color tint).
+   ========================================================================== */
+const OpeningBackground = {
+    _surfaces: new Map(),
+    _mounted: false,
+    _resizeObserver: null,
+    _resizeScheduled: false,
+    _rafId: null,
+    _w: 0,
+    _h: 0,
+    _layoutSeed: null,
+    _drawBlobs: null,
+    _grainCanvas: null,
+    _contentBuffer: null,
+    _contentBufferCtx: null,
+    _contentBufferDpr: 0,
+    _blurBuffer: null,
+    _blurBufferCtx: null,
+    _blurBufferDpr: 0,
+    _cachedHullColor: null,
+    _pointerClient: { x: 0, y: 0 },
+    _pointerActive: false,
+    _pointerRoot: null,
+    _boundPointerMove: null,
+    _boundPointerLeave: null,
+    _displaceRaf: null,
+    _displaceSeed: 1,
+    _lastPaintAt: 0,
+    _paintPending: false,
+    _artReady: false,
+
+    _usesGrainDisplacement() {
+        const cfg = this._siteCfg();
+        return cfg.enabled !== false
+            && cfg.washOverContent
+            && cfg.grainMode === 'displace';
+    },
+
+    _siteCfg() {
+        return CONFIG?.siteBackground || {};
+    },
+
+    _openingCfg() {
+        const base = this._siteCfg();
+        const override = CONFIG?.opening?.background;
+        if (override && typeof override === 'object') {
+            return { ...base, ...override };
+        }
+        return base;
+    },
+
+    _hostRole(host) {
+        if (host?.classList?.contains('opening-screen__art') || host?.closest?.('#opening-screen')) {
+            return 'full';
+        }
+        if (host?.id === 'site-background-wash') return 'wash';
+        if (host?.id === 'site-background') {
+            return this._siteCfg().washOverContent ? 'base' : 'full';
+        }
+        return 'full';
+    },
+
+    cfg(host) {
+        const role = this._hostRole(host);
+        return role === 'full' && (host?.classList?.contains('opening-screen__art')
+            || host?.closest?.('#opening-screen'))
+            ? this._openingCfg()
+            : this._siteCfg();
+    },
+
+    _skipBlobs(role, host) {
+        if (role === 'wash' || role === 'base') return true;
+        if (role === 'full') {
+            return this.cfg(host).mode === 'grain';
+        }
+        const siteCfg = this._siteCfg();
+        if (siteCfg.showBlobs === false) return true;
+        return siteCfg.mode === 'grain';
+    },
+
+    _shouldBuildBlobs() {
+        for (const surface of this._surfaces.values()) {
+            if (surface.role === 'full' && this.cfg(surface.host).mode !== 'grain') {
+                return true;
+            }
+        }
+        return false;
+    },
+
+    _blobCfg() {
+        for (const surface of this._surfaces.values()) {
+            if (surface.role === 'full') return this.cfg(surface.host);
+        }
+        return this._siteCfg();
+    },
+
+    _freshSeed() {
+        return (Date.now() ^ (Math.random() * 0x100000000)) >>> 0;
+    },
+
+    _resolveSeed() {
+        const seed = this._siteCfg().seed;
+        if (typeof seed === 'number' && Number.isFinite(seed)) return seed >>> 0;
+        return this._freshSeed();
+    },
+
+    _rand(seed) {
+        let s = seed >>> 0;
+        return () => {
+            s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+            return s / 4294967296;
+        };
+    },
+
+    _parseColorRgb(color) {
+        const raw = String(color || '').trim();
+        if (raw.startsWith('#')) {
+            const hex = raw.slice(1);
+            if (hex.length === 3) {
+                return {
+                    r: parseInt(hex[0] + hex[0], 16),
+                    g: parseInt(hex[1] + hex[1], 16),
+                    b: parseInt(hex[2] + hex[2], 16)
+                };
+            }
+            const n = parseInt(hex, 16);
+            return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+        }
+
+        const rgb = raw.match(/rgba?\(\s*([\d.]+)[,\s]+([\d.]+)[,\s]+([\d.]+)/);
+        if (rgb) {
+            return { r: +rgb[1], g: +rgb[2], b: +rgb[3] };
+        }
+
+        return { r: 45, g: 45, b: 45 };
+    },
+
+    _darkenColor(color, amount = 0.35) {
+        const { r, g, b } = this._parseColorRgb(color);
+        const f = 1 - amount;
+        const clamp = (v) => Math.max(0, Math.min(255, Math.round(v)));
+        const toHex = (v) => clamp(v).toString(16).padStart(2, '0');
+        return `#${toHex(r * f)}${toHex(g * f)}${toHex(b * f)}`;
+    },
+
+    _moleculeGlowColors(blob) {
+        const core = blob.pts?.[0]?.color || this._hullStrokeColor();
+        return { core, edge: this._darkenColor(core, 0.42) };
+    },
+
+    _resolveTagColor(color) {
+        const raw = String(color || '').trim();
+        if (!raw) return this._hullStrokeColor();
+        if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(raw)) return raw;
+
+        const varMatch = raw.match(/var\(\s*(--[^,)]+)/);
+        if (varMatch) {
+            const resolved = getComputedStyle(document.documentElement)
+                .getPropertyValue(varMatch[1]).trim();
+            if (resolved) return resolved;
+        }
+
+        return this._hullStrokeColor();
+    },
+
+    _resolveCssColor(token, fallback = '#2D2D2D') {
+        const raw = String(token || '').trim();
+        if (!raw) return fallback;
+        if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(raw)) return raw;
+
+        const varName = raw.startsWith('var(')
+            ? raw.match(/var\(\s*(--[^,)]+)/)?.[1]
+            : raw;
+        if (varName?.startsWith('--')) {
+            const resolved = getComputedStyle(document.documentElement)
+                .getPropertyValue(varName).trim();
+            if (resolved) return resolved;
+        }
+
+        return fallback;
+    },
+
+    _hullStrokeColor() {
+        if (this._cachedHullColor) return this._cachedHullColor;
+
+        const cssVar = CONFIG?.warehouse?.linkage?.line?.cssColorVariable || '--main-text';
+        this._cachedHullColor = getComputedStyle(document.documentElement)
+            .getPropertyValue(cssVar).trim() || '#101010';
+        return this._cachedHullColor;
+    },
+
+    _getNoteItems() {
+        if (typeof OpeningData !== 'undefined' && OpeningData.items?.length) {
+            return OpeningData.items;
+        }
+        if (typeof AppState !== 'undefined' && AppState.items?.length) {
+            return AppState.items;
+        }
+        return [];
+    },
+
+    _openingColorPool: null,
+    _openingColorCursor: 0,
+    _openingMoleculePlan: null,
+
+    _isOpeningArt() {
+        for (const surface of this._surfaces.values()) {
+            const host = surface.host;
+            if (host?.classList?.contains('opening-screen__art') || host?.closest?.('#opening-screen')) {
+                return true;
+            }
+        }
+        return false;
+    },
+
+    _resetOpeningColorPool() {
+        this._openingColorPool = null;
+        this._openingColorCursor = 0;
+        this._openingMoleculePlan = null;
+    },
+
+    _mirrorDivisor(cfg) {
+        return (cfg.mirrorFolds ?? 2) >= 2 ? 4 : 1;
+    },
+
+    _prepareOpeningMoleculePlan(cfg) {
+        if (this._openingMoleculePlan?.length) return;
+
+        const paletteLen = this._getTagColorEntries().length;
+        if (!paletteLen) return;
+
+        const mirrorDiv = this._mirrorDivisor(cfg);
+        const dotMin = cfg.dotCountMin ?? 2;
+        const dotMax = cfg.dotCountMax ?? 5;
+        const maxUnique = Math.max(1, Math.ceil((cfg.blobCount ?? 8) / mirrorDiv));
+        const pillUnique = Math.max(0, Math.ceil((cfg.pillCount ?? 0) / mirrorDiv));
+        const maxDotSlots = maxUnique * dotMax + pillUnique;
+        let remaining = Math.min(paletteLen, maxDotSlots) - pillUnique;
+        remaining = Math.max(0, remaining);
+        const plan = [];
+        const rand = this._rand((this._layoutSeed ^ 0xC0FFEE) >>> 0);
+
+        while (remaining > 0 && plan.length < maxUnique) {
+            if (remaining < dotMin) {
+                if (plan.length) {
+                    plan[plan.length - 1] += remaining;
+                } else {
+                    plan.push(remaining);
+                }
+                break;
+            }
+
+            let dots;
+            if (remaining <= dotMax || plan.length === maxUnique - 1) {
+                dots = Math.min(dotMax, remaining);
+            } else {
+                dots = Math.floor(rand() * (dotMax - dotMin + 1)) + dotMin;
+            }
+
+            plan.push(dots);
+            remaining -= dots;
+        }
+
+        this._openingMoleculePlan = plan;
+    },
+
+    _prepareOpeningColorPool() {
+        if (this._openingColorPool?.length) return;
+
+        const palette = this._getTagColorEntries();
+        if (this._isOpeningArt() && !palette.length) return;
+
+        const fallback = this._resolveTagColor(CONFIG?.data?.fallbackTagColor);
+        const pool = palette.length ? [...palette] : [fallback];
+        const rand = this._rand((this._layoutSeed ^ 0x9E3779B9) >>> 0);
+
+        for (let i = pool.length - 1; i > 0; i--) {
+            const j = Math.floor(rand() * (i + 1));
+            [pool[i], pool[j]] = [pool[j], pool[i]];
+        }
+
+        this._openingColorPool = pool;
+        this._openingColorCursor = 0;
+    },
+
+    _takeOpeningColors(count) {
+        this._prepareOpeningColorPool();
+        const colors = [];
+        const pool = this._openingColorPool;
+        let cursor = this._openingColorCursor;
+
+        for (let i = 0; i < count; i++) {
+            if (cursor >= pool.length) {
+                console.warn('OpeningBackground: tag color pool exhausted, reusing from start');
+                cursor = 0;
+            }
+            colors.push(pool[cursor++]);
+        }
+
+        this._openingColorCursor = cursor;
+        return colors;
+    },
+
+    _getTagColorEntries() {
+        const map = (typeof OpeningData !== 'undefined' && OpeningData.tagColorsMap?.size)
+            ? OpeningData.tagColorsMap
+            : (typeof AppState !== 'undefined' ? AppState.tagColorsMap : null);
+
+        if (!map?.size) return [];
+
+        const colors = [];
+        const hullFallback = this._hullStrokeColor();
+        map.forEach((color) => {
+            const resolved = this._resolveTagColor(color);
+            if (!resolved || resolved === hullFallback) return;
+            if (!/^#([0-9a-fA-F]{6}|[0-9a-fA-F]{3})$/.test(resolved)) return;
+            if (!colors.includes(resolved)) colors.push(resolved);
+        });
+        return colors;
+    },
+
+    _isOpeningArtHost(host) {
+        return !!(host?.classList?.contains('opening-screen__art')
+            || host?.closest?.('#opening-screen'));
+    },
+
+    _shouldDeferOpeningBlobs() {
+        return this._isOpeningArt()
+            && this._shouldBuildBlobs()
+            && !this._getTagColorEntries().length;
+    },
+
+    _sampleMoleculeSpec(rand, cfg, moleculeIndex = 0) {
+        const dotMin = cfg.dotCountMin ?? 1;
+        const dotMax = cfg.dotCountMax ?? 5;
+
+        if (this._isOpeningArt()) {
+            this._prepareOpeningMoleculePlan(cfg);
+            const plan = this._openingMoleculePlan;
+            const dotCount = plan?.[moleculeIndex]
+                ?? (Math.floor(rand() * (dotMax - dotMin + 1)) + dotMin);
+            const palette = this._getTagColorEntries();
+            const fallback = this._resolveTagColor(CONFIG?.data?.fallbackTagColor);
+            const colors = [];
+            for (let i = 0; i < dotCount; i++) {
+                colors.push(palette.length ? palette[Math.floor(rand() * palette.length)] : fallback);
+            }
+            return { dotCount, colors };
+        }
+
+        const items = this._getNoteItems().filter((item) => item.tags?.length);
+
+        if (items.length) {
+            const item = items[Math.floor(rand() * items.length)];
+            const dotCount = Math.min(dotMax, Math.max(dotMin, item.tags.length));
+            const colors = [];
+            for (let i = 0; i < dotCount; i++) {
+                colors.push(this._resolveTagColor(item.tags[i % item.tags.length].color));
+            }
+            return { dotCount, colors };
+        }
+
+        const palette = this._getTagColorEntries();
+        const dotCount = Math.floor(rand() * (dotMax - dotMin + 1)) + dotMin;
+        if (palette.length) {
+            const colors = [];
+            for (let i = 0; i < dotCount; i++) {
+                colors.push(palette[Math.floor(rand() * palette.length)]);
+            }
+            return { dotCount, colors };
+        }
+
+        const fallback = this._resolveTagColor(CONFIG?.data?.fallbackTagColor);
+        return {
+            dotCount: Math.floor(rand() * (dotMax - dotMin + 1)) + dotMin,
+            colors: [fallback]
+        };
+    },
+
+    _samplePillTagColor(rand) {
+        const items = this._getNoteItems().filter((item) => item.tags?.length);
+        if (items.length) {
+            const item = items[Math.floor(rand() * items.length)];
+            const tag = item.tags[Math.floor(rand() * item.tags.length)];
+            return this._resolveTagColor(tag.color);
+        }
+
+        const palette = this._getTagColorEntries();
+        if (palette.length) {
+            return palette[Math.floor(rand() * palette.length)];
+        }
+
+        return this._resolveTagColor(CONFIG?.data?.fallbackTagColor);
+    },
+
+    _applyTagColorsToBlobs(cfg, blobs = this._drawBlobs) {
+        if (!blobs?.length) return;
+
+        const openingUnique = this._isOpeningArt()
+            || document.body.classList.contains('opening-page');
+        if (openingUnique) {
+            this._openingColorPool = null;
+            this._openingColorCursor = 0;
+        }
+
+        const specs = new Map();
+        for (let i = 0; i < blobs.length; i++) {
+            const blob = blobs[i];
+            if (blob.kind === 'pill') continue;
+
+            const idx = blob.moleculeIndex ?? 0;
+            if (!specs.has(idx)) {
+                if (openingUnique) {
+                    const dotCount = blob.pts?.length || 1;
+                    specs.set(idx, {
+                        dotCount,
+                        colors: this._takeOpeningColors(dotCount)
+                    });
+                } else {
+                    const rand = this._rand((this._layoutSeed + idx * 7919) >>> 0);
+                    specs.set(idx, this._sampleMoleculeSpec(rand, cfg));
+                }
+            }
+
+            const spec = specs.get(idx);
+            blob.pts = blob.pts.map((p, j) => ({
+                ...p,
+                color: spec.colors[j % spec.colors.length]
+            }));
+        }
+
+        const pillSpecs = new Map();
+        for (let i = 0; i < blobs.length; i++) {
+            const blob = blobs[i];
+            if (blob.kind !== 'pill') continue;
+
+            const idx = blob.pillIndex ?? 0;
+            if (!pillSpecs.has(idx)) {
+                if (openingUnique) {
+                    pillSpecs.set(idx, this._takeOpeningColors(1)[0]);
+                } else {
+                    const rand = this._rand((this._layoutSeed + idx * 11003 + 50000) >>> 0);
+                    pillSpecs.set(idx, this._samplePillTagColor(rand));
+                }
+            }
+            blob.color = pillSpecs.get(idx);
+        }
+    },
+
+    _convexHull(points) {
+        const pts = [...points].sort((a, b) => a.x - b.x || a.y - b.y);
+        const cross = (o, a, b) => (a.x - o.x) * (b.y - o.y) - (a.y - o.y) * (b.x - o.x);
+
+        const lower = [];
+        for (const p of pts) {
+            while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], p) <= 0) {
+                lower.pop();
+            }
+            lower.push(p);
+        }
+
+        const upper = [];
+        for (let i = pts.length - 1; i >= 0; i--) {
+            const p = pts[i];
+            while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], p) <= 0) {
+                upper.pop();
+            }
+            upper.push(p);
+        }
+
+        lower.pop();
+        upper.pop();
+        const hull = lower.concat(upper);
+        return hull.length > 0 ? hull : [points[0]];
+    },
+
+    _traceHullOutlinePath(pts, R, ctx) {
+        const hull = pts.length <= 2 ? pts : this._convexHull(pts);
+
+        ctx.beginPath();
+        if (hull.length === 1) {
+            ctx.arc(hull[0].x, hull[0].y, R, 0, Math.PI * 2);
+            return hull;
+        }
+
+        const n = hull.length;
+        for (let i = 0; i < n; i++) {
+            const prev = hull[(i - 1 + n) % n];
+            const p = hull[i];
+            const next = hull[(i + 1) % n];
+            const a1 = Math.atan2(-(p.x - prev.x), p.y - prev.y);
+            const a2 = Math.atan2(-(next.x - p.x), next.y - p.y);
+            ctx.arc(p.x, p.y, R, a1, a2);
+        }
+        ctx.closePath();
+        return hull;
+    },
+
+    _roundRectPath(ctx, x, y, w, h, r) {
+        const radius = Math.min(r, w * 0.5, h * 0.5);
+        ctx.beginPath();
+        ctx.moveTo(x + radius, y);
+        ctx.lineTo(x + w - radius, y);
+        ctx.arc(x + w - radius, y + radius, radius, -Math.PI / 2, Math.PI / 2);
+        ctx.lineTo(x + radius, y + h);
+        ctx.arc(x + radius, y + radius, radius, Math.PI / 2, -Math.PI / 2);
+        ctx.closePath();
+    },
+
+    _buildPillBlock(cx, cy, minDim, rand, cfg, pillIndex) {
+        const heightMin = minDim * (cfg.pillHeightMin ?? 0.024);
+        const heightMax = minDim * (cfg.pillHeightMax ?? 0.04);
+        const height = rand() * (heightMax - heightMin) + heightMin;
+        const widthMinRatio = cfg.pillWidthMinRatio ?? 1.35;
+        const widthMaxRatio = cfg.pillWidthMaxRatio ?? 3.2;
+        const width = height * (widthMinRatio + rand() * (widthMaxRatio - widthMinRatio));
+        const rotation = (rand() - 0.5) * (cfg.pillRotationMax ?? 0.45);
+        const fillColor = this._resolveCssColor(cfg.pillFillColor ?? 'var(--color-3)');
+
+        return {
+            kind: 'pill',
+            pillIndex,
+            cx,
+            cy,
+            width,
+            height,
+            rotation,
+            fillColor,
+            color: this._resolveTagColor(CONFIG?.data?.fallbackTagColor),
+            gradientR: Math.hypot(width, height) * 0.5
+        };
+    },
+
+    _mirrorPillBlob(blob, axisX, axisY, flipX, flipY) {
+        const mx = (v) => (flipX ? 2 * axisX - v : v);
+        const my = (v) => (flipY ? 2 * axisY - v : v);
+        let rotation = blob.rotation ?? 0;
+        if (flipX) rotation = Math.PI - rotation;
+        if (flipY) rotation = -rotation;
+
+        return {
+            ...blob,
+            cx: mx(blob.cx),
+            cy: my(blob.cy),
+            rotation
+        };
+    },
+
+    _buildMoleculeCluster(cx, cy, scale, rand, cfg, moleculeSpec) {
+        const dotMin = cfg.dotCountMin ?? 1;
+        const dotMax = cfg.dotCountMax ?? 5;
+        const dotCount = moleculeSpec?.dotCount
+            ?? (Math.floor(rand() * (dotMax - dotMin + 1)) + dotMin);
+        const tagColors = moleculeSpec?.colors?.length
+            ? moleculeSpec.colors
+            : [this._resolveTagColor(CONFIG?.data?.fallbackTagColor)];
+        const dotR = scale * (cfg.dotRadiusRatio ?? 0.4);
+        const hullPad = cfg.hullPaddingPx ?? CONFIG?.outlines?.padding ?? 7;
+        const membraneR = dotR + hullPad;
+        const clusterBase = scale * (cfg.clusterBaseRatio ?? 0.38);
+        const clusterPerDot = scale * (cfg.clusterPerDotRatio ?? 0.004);
+        const clusterRadius = dotCount === 1 ? 0 : clusterBase + dotCount * clusterPerDot;
+        const jitter = scale * (cfg.spawnJitterRatio ?? 0.12);
+        const rotation = rand() * Math.PI * 2;
+        const pts = [];
+
+        for (let i = 0; i < dotCount; i++) {
+            const angle = rotation + (i / dotCount) * Math.PI * 2;
+            const jx = (rand() - 0.5) * jitter;
+            const jy = (rand() - 0.5) * jitter;
+            pts.push({
+                x: cx + Math.cos(angle) * clusterRadius + jx,
+                y: cy + Math.sin(angle) * clusterRadius + jy,
+                r: dotR,
+                color: tagColors[i % tagColors.length]
+            });
+        }
+
+        let hitR = membraneR;
+        pts.forEach((p) => {
+            const d = Math.hypot(p.x - cx, p.y - cy) + membraneR;
+            if (d > hitR) hitR = d;
+        });
+
+        return { pts, membraneR, cx, cy, gradientR: hitR, kind: 'molecule' };
+    },
+
+    _mirrorMoleculeBlob(blob, axisX, axisY, flipX, flipY) {
+        const mx = (v) => (flipX ? 2 * axisX - v : v);
+        const my = (v) => (flipY ? 2 * axisY - v : v);
+
+        return {
+            ...blob,
+            cx: mx(blob.cx),
+            cy: my(blob.cy),
+            pts: blob.pts.map((p) => ({
+                x: mx(p.x),
+                y: my(p.y),
+                r: p.r,
+                color: p.color
+            }))
+        };
+    },
+
+    _expandFoldMirrors(blob, axisX, axisY) {
+        return [
+            this._mirrorMoleculeBlob(blob, axisX, axisY, false, false),
+            this._mirrorMoleculeBlob(blob, axisX, axisY, true, false),
+            this._mirrorMoleculeBlob(blob, axisX, axisY, false, true),
+            this._mirrorMoleculeBlob(blob, axisX, axisY, true, true)
+        ];
+    },
+
+    _shiftElement(blob, dx, dy) {
+        if (blob.kind === 'pill') {
+            return { ...blob, cx: blob.cx + dx, cy: blob.cy + dy };
+        }
+        return this._shiftBlob(blob, dx, dy);
+    },
+
+    _shiftBlob(blob, dx, dy) {
+        return {
+            ...blob,
+            cx: blob.cx + dx,
+            cy: blob.cy + dy,
+            pts: blob.pts.map((p) => ({
+                x: p.x + dx,
+                y: p.y + dy,
+                r: p.r,
+                color: p.color,
+                ox: p.ox,
+                oy: p.oy,
+                vx: p.vx,
+                vy: p.vy,
+                phase: p.phase
+            }))
+        };
+    },
+
+    _initMoleculeDotPhysics(blob, rand) {
+        if (blob.kind === 'pill' || !blob.pts?.length) return blob;
+
+        blob.pts = blob.pts.map((p) => ({
+            ...p,
+            ox: 0,
+            oy: 0,
+            vx: (rand() - 0.5) * 0.06,
+            vy: (rand() - 0.5) * 0.06,
+            phase: rand() * Math.PI * 2
+        }));
+        return blob;
+    },
+
+    _moleculeDrawPts(blob) {
+        const dx = blob.offsetDx ?? 0;
+        const dy = blob.offsetDy ?? 0;
+
+        return blob.pts.map((p) => ({
+            x: p.x + (p.ox ?? 0) + dx,
+            y: p.y + (p.oy ?? 0) + dy,
+            r: p.r,
+            color: p.color
+        }));
+    },
+
+    _moleculeBounds(drawPts, membraneR) {
+        let cx = 0;
+        let cy = 0;
+        for (let i = 0; i < drawPts.length; i++) {
+            cx += drawPts[i].x;
+            cy += drawPts[i].y;
+        }
+        cx /= drawPts.length;
+        cy /= drawPts.length;
+
+        let gradientR = membraneR;
+        for (let i = 0; i < drawPts.length; i++) {
+            const p = drawPts[i];
+            const d = Math.hypot(p.x - cx, p.y - cy) + membraneR;
+            if (d > gradientR) gradientR = d;
+        }
+
+        return { cx, cy, gradientR };
+    },
+
+    _dotMotionEnabled(cfg) {
+        cfg = cfg || this._blobCfg();
+        if (cfg.dotMotion === false) return false;
+        if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return false;
+        return this._drawBlobs?.some((blob) => blob.kind !== 'pill' && blob.pts?.length > 0);
+    },
+
+    _loopActive(cfg) {
+        cfg = cfg || this._blobCfg();
+        return this._dotMotionEnabled(cfg);
+    },
+
+    _shouldContinueLoop(cfg) {
+        return this._dotMotionEnabled(cfg)
+            || (this._mouseFollowEnabled() && this._pointerActive);
+    },
+
+    _updateMoleculeDots(cfg) {
+        if (!this._drawBlobs?.length) return false;
+
+        const stiffness = cfg.dotSiblingStiffness ?? 0.14;
+        const home = cfg.dotHomeStiffness ?? 0.055;
+        const damping = cfg.dotSpringDamping ?? 0.86;
+        const maxOffsetRatio = cfg.dotMaxOffsetRatio ?? 0.42;
+        const ambientAmp = cfg.dotAmbientAmp ?? 0.1;
+        const minDim = Math.min(this._w, this._h);
+        const ambientScale = minDim * 0.0011 * ambientAmp;
+        const t = performance.now() * 0.001;
+        const localX = this._pointerClient.x;
+        const localY = this._pointerClient.y;
+        let moved = false;
+
+        for (let b = 0; b < this._drawBlobs.length; b++) {
+            const blob = this._drawBlobs[b];
+            if (blob.kind === 'pill') continue;
+
+            const pts = blob.pts;
+            const n = pts.length;
+            if (n === 0) continue;
+
+            const ax = new Float64Array(n);
+            const ay = new Float64Array(n);
+
+            for (let i = 0; i < n; i++) {
+                ax[i] += -pts[i].ox * home;
+                ay[i] += -pts[i].oy * home;
+                ax[i] += Math.sin(t * 1.15 + pts[i].phase) * ambientScale;
+                ay[i] += Math.cos(t * 0.92 + pts[i].phase * 1.6) * ambientScale;
+            }
+
+            for (let i = 0; i < n; i++) {
+                for (let j = i + 1; j < n; j++) {
+                    const pi = pts[i];
+                    const pj = pts[j];
+                    const dx = (pj.x + pj.ox) - (pi.x + pi.ox);
+                    const dy = (pj.y + pj.oy) - (pi.y + pi.oy);
+                    const dist = Math.hypot(dx, dy) || 0.001;
+                    const rest = Math.hypot(pj.x - pi.x, pj.y - pi.y) || dist;
+                    const stretch = dist - rest;
+                    const fx = (dx / dist) * stretch * stiffness;
+                    const fy = (dy / dist) * stretch * stiffness;
+                    ax[i] += fx;
+                    ay[i] += fy;
+                    ax[j] -= fx;
+                    ay[j] -= fy;
+                }
+            }
+
+            if (this._pointerActive && cfg.dotPointerRepel !== false) {
+                const blobDx = blob.offsetDx ?? 0;
+                const blobDy = blob.offsetDy ?? 0;
+                const repelScale = cfg.dotPointerRepelScale ?? 0.38;
+                const radiusScale = cfg.dotPointerRadiusScale ?? 2.4;
+
+                for (let i = 0; i < n; i++) {
+                    const p = pts[i];
+                    const wx = p.x + p.ox + blobDx;
+                    const wy = p.y + p.oy + blobDy;
+                    const toX = localX - wx;
+                    const toY = localY - wy;
+                    const dist = Math.hypot(toX, toY);
+                    const hitR = p.r * radiusScale;
+
+                    if (dist < hitR && dist >= 0.5) {
+                        const fade = 1 - dist / hitR;
+                        const strength = minDim * (cfg.mouseHoverMaxShift ?? 0.017) * repelScale * fade * fade;
+                        p.vx += -(toX / dist) * strength;
+                        p.vy += -(toY / dist) * strength;
+                    }
+                }
+            }
+
+            for (let i = 0; i < n; i++) {
+                const p = pts[i];
+                p.vx = (p.vx + ax[i]) * damping;
+                p.vy = (p.vy + ay[i]) * damping;
+                p.ox += p.vx;
+                p.oy += p.vy;
+
+                const maxO = p.r * maxOffsetRatio;
+                const o = Math.hypot(p.ox, p.oy);
+                if (o > maxO) {
+                    p.ox = (p.ox / o) * maxO;
+                    p.oy = (p.oy / o) * maxO;
+                    p.vx *= 0.45;
+                    p.vy *= 0.45;
+                }
+
+                if (Math.abs(p.vx) > 0.0008 || Math.abs(p.vy) > 0.0008
+                    || Math.abs(p.ox) > 0.02 || Math.abs(p.oy) > 0.02) {
+                    moved = true;
+                }
+            }
+        }
+
+        return moved;
+    },
+
+    _drawFoldCreases(ctx, w, h, axisX, axisY, cfg) {
+        const alpha = cfg.foldCreaseAlpha ?? 0;
+        if (alpha <= 0) return;
+
+        ctx.save();
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.strokeStyle = `rgba(45, 45, 45, ${alpha / 255})`;
+        ctx.lineWidth = cfg.foldCreaseWidth ?? 0.75;
+        ctx.beginPath();
+        ctx.moveTo(axisX, 0);
+        ctx.lineTo(axisX, h);
+        ctx.moveTo(0, axisY);
+        ctx.lineTo(w, axisY);
+        ctx.stroke();
+        ctx.restore();
+    },
+
+    _drawMoleculeGlow(ctx, blob, cfg) {
+        const blurScale = cfg.blurScale ?? 0;
+        if (blurScale <= 0) return;
+
+        const { pts, membraneR, cx, cy, gradientR } = blob;
+        const colors = this._moleculeGlowColors(blob);
+        const edgeRgb = this._parseColorRgb(colors.edge);
+        const glowAlpha = cfg.glowAlpha ?? 1;
+
+        const grad = ctx.createRadialGradient(cx, cy, 0, cx, cy, gradientR);
+        grad.addColorStop(0, colors.core);
+        grad.addColorStop(0.68, colors.edge);
+        grad.addColorStop(1, `rgba(${edgeRgb.r}, ${edgeRgb.g}, ${edgeRgb.b}, 0)`);
+
+        ctx.save();
+        ctx.globalAlpha = glowAlpha;
+        ctx.fillStyle = grad;
+        ctx.filter = `blur(${membraneR * blurScale}px)`;
+        this._traceHullOutlinePath(pts, membraneR, ctx);
+        ctx.fill();
+        ctx.filter = 'none';
+        ctx.restore();
+    },
+
+    _drawMoleculeCrisp(ctx, blob, cfg) {
+        const drawPts = this._moleculeDrawPts(blob);
+        const { membraneR } = blob;
+        const dotScale = cfg.dotVisualScale ?? 0.85;
+        const hullWidth = cfg.hullStrokeWidth ?? CONFIG?.outlines?.width ?? 0.27;
+        const hullAlpha = cfg.hullStrokeAlpha ?? 0.55;
+
+        ctx.save();
+        ctx.filter = 'none';
+        ctx.globalCompositeOperation = 'source-over';
+
+        this._drawSiblingLinks(ctx, drawPts, cfg);
+
+        for (let i = 0; i < drawPts.length; i++) {
+            const p = drawPts[i];
+            const r = p.r * dotScale;
+            ctx.globalAlpha = 1;
+            ctx.fillStyle = p.color || this._hullStrokeColor();
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, r, 0, Math.PI * 2);
+            ctx.fill();
+        }
+
+        ctx.strokeStyle = this._hullStrokeColor();
+        ctx.globalAlpha = hullAlpha;
+        ctx.lineWidth = hullWidth;
+        this._traceHullOutlinePath(drawPts, membraneR, ctx);
+        ctx.stroke();
+        ctx.restore();
+    },
+
+    _drawMoleculeAtmosphere(ctx, blob, cfg) {
+        const drawPts = this._moleculeDrawPts(blob);
+        const bounds = this._moleculeBounds(drawPts, blob.membraneR);
+        this._drawMoleculeGlow(ctx, { ...blob, pts: drawPts, ...bounds }, cfg);
+    },
+
+    _drawPillGlow(ctx, pill, cfg) {
+        const blurScale = cfg.blurScale ?? 0;
+        if (blurScale <= 0) return;
+
+        const {
+            cx, cy, width, height, rotation, color
+        } = pill;
+        const blurPx = height * blurScale * 1.35;
+        const glowAlpha = cfg.pillGlowAlpha ?? 0.55;
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(rotation ?? 0);
+        ctx.globalAlpha = glowAlpha;
+        ctx.fillStyle = color;
+        ctx.filter = `blur(${blurPx}px)`;
+        this._roundRectPath(
+            ctx,
+            -width * 0.52,
+            -height * 0.52,
+            width * 1.04,
+            height * 1.04,
+            height * 0.5
+        );
+        ctx.fill();
+        ctx.filter = 'none';
+        ctx.restore();
+    },
+
+    _drawPillCrisp(ctx, pill, cfg) {
+        const {
+            cx, cy, width, height, rotation, color, fillColor
+        } = pill;
+        const blockH = CONFIG?.warehouse?.blockHeight ?? 26;
+        const glyphSize = CONFIG?.warehouse?.blockGlyphSize ?? 10;
+        const glyphR = (height / blockH) * glyphSize * 0.5;
+        const padX = (height / blockH) * (cfg.pillPadX ?? 10);
+        const borderW = (height / blockH) * (cfg.pillBorderWidth ?? 2);
+        const borderAlpha = cfg.pillBorderAlpha ?? 0.9;
+
+        ctx.save();
+        ctx.translate(cx, cy);
+        ctx.rotate(rotation ?? 0);
+        ctx.filter = 'none';
+        ctx.globalCompositeOperation = 'source-over';
+
+        const x = -width * 0.5;
+        const y = -height * 0.5;
+        const r = height * 0.5;
+
+        ctx.fillStyle = fillColor;
+        this._roundRectPath(ctx, x, y, width, height, r);
+        ctx.fill();
+
+        ctx.strokeStyle = color;
+        ctx.lineWidth = borderW;
+        ctx.globalAlpha = borderAlpha;
+        this._roundRectPath(ctx, x, y, width, height, r);
+        ctx.stroke();
+
+        const glyphCx = x + padX + glyphR;
+        ctx.globalAlpha = 1;
+        ctx.fillStyle = color;
+        ctx.beginPath();
+        ctx.arc(glyphCx, 0, glyphR, 0, Math.PI * 2);
+        ctx.fill();
+
+        ctx.restore();
+    },
+
+    _drawPillBlock(ctx, pill, cfg) {
+        const style = cfg.moleculeStyle ?? 'l1';
+        if (style === 'glow') {
+            this._drawPillGlow(ctx, pill, cfg);
+            return;
+        }
+        this._drawPillCrisp(ctx, pill, cfg);
+    },
+
+    _drawSiblingLinks(ctx, pts, cfg) {
+        if (pts.length < 2) return;
+
+        const lineCfg = CONFIG?.warehouse?.linkage?.line || {};
+        if (lineCfg.visible === false) return;
+
+        ctx.save();
+        ctx.strokeStyle = this._hullStrokeColor();
+        ctx.lineWidth = cfg.linkWidth ?? lineCfg.width ?? 0.5;
+        ctx.globalAlpha = cfg.linkAlpha ?? 0.42;
+        ctx.beginPath();
+
+        for (let i = 0; i < pts.length; i++) {
+            for (let j = i + 1; j < pts.length; j++) {
+                ctx.moveTo(pts[i].x, pts[i].y);
+                ctx.lineTo(pts[j].x, pts[j].y);
+            }
+        }
+
+        ctx.stroke();
+        ctx.restore();
+    },
+
+    _shouldDrawCrisp(cfg) {
+        return (cfg.moleculeStyle ?? 'l1') !== 'glow';
+    },
+
+    _blurSource(cfg) {
+        return cfg.blurSource ?? 'content';
+    },
+
+    _contentBlurPx(cfg, w, h) {
+        if (typeof cfg.contentBlurPx === 'number' && cfg.contentBlurPx > 0) {
+            return cfg.contentBlurPx;
+        }
+        const minDim = Math.min(w, h);
+        return Math.max(8, Math.min(24, Math.round(minDim * (cfg.blurScale ?? 0.14) * 0.85)));
+    },
+
+    _ensureContentBuffer(w, h, dpr) {
+        const bw = Math.max(1, Math.round(w * dpr));
+        const bh = Math.max(1, Math.round(h * dpr));
+        if (!this._contentBuffer
+            || this._contentBuffer.width !== bw
+            || this._contentBuffer.height !== bh) {
+            this._contentBuffer = document.createElement('canvas');
+            this._contentBuffer.width = bw;
+            this._contentBuffer.height = bh;
+            this._contentBufferCtx = this._contentBuffer.getContext('2d');
+            this._contentBufferDpr = dpr;
+            this._contentBufferCtx?.setTransform(dpr, 0, 0, dpr, 0, 0);
+        } else if (this._contentBufferDpr !== dpr && this._contentBufferCtx) {
+            this._contentBufferDpr = dpr;
+            this._contentBufferCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+        return this._contentBufferCtx;
+    },
+
+    _ensureBlurBuffer(w, h, dpr) {
+        const bw = Math.max(1, Math.round(w * dpr));
+        const bh = Math.max(1, Math.round(h * dpr));
+        if (!this._blurBuffer
+            || this._blurBuffer.width !== bw
+            || this._blurBuffer.height !== bh) {
+            this._blurBuffer = document.createElement('canvas');
+            this._blurBuffer.width = bw;
+            this._blurBuffer.height = bh;
+            this._blurBufferCtx = this._blurBuffer.getContext('2d');
+            this._blurBufferDpr = dpr;
+            this._blurBufferCtx?.setTransform(dpr, 0, 0, dpr, 0, 0);
+        } else if (this._blurBufferDpr !== dpr && this._blurBufferCtx) {
+            this._blurBufferDpr = dpr;
+            this._blurBufferCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        }
+        return this._blurBufferCtx;
+    },
+
+    _drawCrispBlobs(targetCtx, cfg) {
+        if (!this._drawBlobs?.length || !targetCtx) return;
+
+        targetCtx.globalCompositeOperation = 'source-over';
+        for (let i = 0; i < this._drawBlobs.length; i++) {
+            const blob = this._drawBlobs[i];
+            const dx = blob.offsetDx ?? 0;
+            const dy = blob.offsetDy ?? 0;
+            const shifted = this._shiftElement(blob, dx, dy);
+
+            if (shifted.kind === 'pill') {
+                this._drawPillCrisp(targetCtx, shifted, cfg);
+            } else {
+                this._drawMoleculeCrisp(targetCtx, blob, cfg);
+            }
+        }
+    },
+
+    _drawAtmosphereBlobs(targetCtx, cfg) {
+        if (!this._drawBlobs?.length || !targetCtx) return;
+
+        targetCtx.globalCompositeOperation = cfg.glowBlendMode ?? 'multiply';
+        for (let i = 0; i < this._drawBlobs.length; i++) {
+            const blob = this._drawBlobs[i];
+            const dx = blob.offsetDx ?? 0;
+            const dy = blob.offsetDy ?? 0;
+            const shifted = this._shiftElement(blob, dx, dy);
+
+            if (shifted.kind === 'pill') {
+                this._drawPillGlow(targetCtx, shifted, cfg);
+            } else {
+                this._drawMoleculeAtmosphere(targetCtx, blob, cfg);
+            }
+        }
+    },
+
+    _shouldDrawAtmosphere(cfg) {
+        if (this._blurSource(cfg) === 'content') {
+            return cfg.glowOverlay === true && (cfg.glowAlpha ?? 0) > 0;
+        }
+        if (cfg.glowOverlay === false) return false;
+        if ((cfg.moleculeStyle ?? 'l1') === 'glow') return true;
+        return (cfg.blurScale ?? 0) > 0;
+    },
+
+    _paintBlobs(ctx, w, h, cfg, host) {
+        if (!this._drawBlobs) return;
+
+        const axisX = w * (cfg.scatterCenterX ?? 0.5);
+        const axisY = h * (cfg.scatterCenterY ?? 0.5);
+        const source = this._blurSource(cfg);
+        const drawCrisp = this._shouldDrawCrisp(cfg);
+        const drawAtmosphere = this._shouldDrawAtmosphere(cfg);
+
+        if (source === 'content' && drawCrisp) {
+            const dpr = ctx.canvas.width / Math.max(1, w);
+            const bctx = this._ensureContentBuffer(w, h, dpr);
+            if (bctx) {
+                bctx.clearRect(0, 0, w, h);
+                this._drawCrispBlobs(bctx, cfg);
+
+                const blurPx = this._contentBlurPx(cfg, w, h);
+                ctx.save();
+                ctx.globalCompositeOperation = cfg.blobBlendMode ?? 'multiply';
+                ctx.globalAlpha = cfg.blobLayerAlpha ?? 1;
+                ctx.filter = `blur(${blurPx}px)`;
+                ctx.drawImage(this._contentBuffer, 0, 0, w, h);
+                ctx.filter = 'none';
+                ctx.globalAlpha = 1;
+                ctx.restore();
+            }
+        } else {
+            if (drawCrisp) {
+                ctx.globalCompositeOperation = 'source-over';
+                this._drawCrispBlobs(ctx, cfg);
+            }
+
+            if (drawAtmosphere || source === 'glow') {
+                this._drawAtmosphereBlobs(ctx, cfg);
+            }
+        }
+
+        if (source === 'content' && drawAtmosphere) {
+            this._drawAtmosphereBlobs(ctx, cfg);
+        }
+
+        this._drawFoldCreases(ctx, w, h, axisX, axisY, cfg);
+    },
+
+    _buildGrainCanvas(w, h, rand, cfgOverride) {
+        const cfg = cfgOverride || this._siteCfg();
+        const tile = Math.max(32, Math.round(cfg.grainTilePx ?? 96));
+        const spread = cfg.grainSpread ?? 18;
+        const mid = cfg.grainMid ?? 128;
+        const blurPx = cfg.grainBlurPx ?? 0.45;
+
+        const tileCanvas = document.createElement('canvas');
+        tileCanvas.width = tile;
+        tileCanvas.height = tile;
+        const tileCtx = tileCanvas.getContext('2d');
+        if (!tileCtx) return null;
+
+        const imageData = tileCtx.createImageData(tile, tile);
+        const data = imageData.data;
+
+        for (let i = 0; i < data.length; i += 4) {
+            const centered = (rand() - 0.5) * 2;
+            const val = Math.max(0, Math.min(255, Math.round(mid + centered * spread)));
+            data[i] = val;
+            data[i + 1] = val;
+            data[i + 2] = val;
+            data[i + 3] = 255;
+        }
+
+        tileCtx.putImageData(imageData, 0, 0);
+
+        let source = tileCanvas;
+        if (blurPx > 0) {
+            const blurred = document.createElement('canvas');
+            blurred.width = tile;
+            blurred.height = tile;
+            const bctx = blurred.getContext('2d');
+            if (bctx) {
+                bctx.filter = `blur(${blurPx}px)`;
+                bctx.drawImage(tileCanvas, 0, 0);
+                bctx.filter = 'none';
+                source = blurred;
+            }
+        }
+
+        const grainCanvas = document.createElement('canvas');
+        grainCanvas.width = w;
+        grainCanvas.height = h;
+        const gctx = grainCanvas.getContext('2d');
+        if (!gctx) return null;
+
+        const pattern = gctx.createPattern(source, 'repeat');
+        if (pattern) {
+            gctx.fillStyle = pattern;
+            gctx.fillRect(0, 0, w, h);
+        }
+
+        grainCanvas._grainAlpha = cfg.grainAlpha ?? 10;
+        grainCanvas._grainWashAlpha = cfg.grainWashAlpha ?? cfg.grainAlpha ?? 8;
+        return grainCanvas;
+    },
+
+    _applyGrain(ctx, w, h, role, hostCfg) {
+        const grain = this._grainCanvas;
+        if (!grain) return;
+
+        const cfg = hostCfg || this._siteCfg();
+        const alpha = role === 'wash'
+            ? (cfg.grainWashAlpha ?? grain._grainWashAlpha ?? grain._grainAlpha ?? 8)
+            : (cfg.grainAlpha ?? grain._grainAlpha ?? 10);
+
+        if (alpha <= 0) return;
+
+        ctx.globalCompositeOperation = cfg.grainBlendMode ?? 'multiply';
+        ctx.globalAlpha = alpha / 255;
+        ctx.drawImage(grain, 0, 0, w, h);
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+    },
+
+    _buildScatterMolecules(w, h, targetCount, rand, cfg) {
+        const minDim = Math.min(w, h);
+        const radiusMin = minDim * (cfg.radiusMin ?? 0.04);
+        const radiusMax = minDim * (cfg.radiusMax ?? 0.14);
+        const spread = minDim * (cfg.scatterSpread ?? 0.28);
+        const centerX = w * (cfg.scatterCenterX ?? 0.5);
+        const centerY = h * (cfg.scatterCenterY ?? 0.5);
+        const mirrorFolds = cfg.mirrorFolds ?? 2;
+        const useMirror = mirrorFolds >= 2;
+        const mirrorDivisor = useMirror ? 4 : 1;
+        const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
+        const blobs = [];
+
+        for (let i = 0; i < uniqueCount; i++) {
+            const scale = rand() * (radiusMax - radiusMin) + radiusMin;
+            let cx;
+            let cy;
+
+            if (useMirror) {
+                const inset = spread * 0.04;
+                cx = centerX + inset + rand() * Math.max(inset, spread - inset);
+                cy = centerY - inset - rand() * Math.max(inset, spread - inset);
+            } else {
+                cx = centerX + (rand() - 0.5) * 2 * spread;
+                cy = centerY + (rand() - 0.5) * 2 * spread;
+            }
+
+            const colorRand = this._rand((this._layoutSeed + i * 7919) >>> 0);
+            const spec = this._sampleMoleculeSpec(colorRand, cfg, i);
+            const cluster = this._buildMoleculeCluster(cx, cy, scale, rand, cfg, spec);
+
+            blobs.push({
+                ...cluster,
+                moleculeIndex: i
+            });
+        }
+
+        return blobs;
+    },
+
+    _buildScatterPills(w, h, targetCount, rand, cfg) {
+        const minDim = Math.min(w, h);
+        const spread = minDim * (cfg.scatterSpread ?? 0.28);
+        const centerX = w * (cfg.scatterCenterX ?? 0.5);
+        const centerY = h * (cfg.scatterCenterY ?? 0.5);
+        const mirrorFolds = cfg.mirrorFolds ?? 2;
+        const useMirror = mirrorFolds >= 2;
+        const mirrorDivisor = useMirror ? 4 : 1;
+        const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
+        const pills = [];
+
+        for (let i = 0; i < uniqueCount; i++) {
+            let cx;
+            let cy;
+
+            if (useMirror) {
+                const inset = spread * 0.06;
+                cx = centerX + inset + rand() * Math.max(inset, spread * 0.92 - inset);
+                cy = centerY - inset - rand() * Math.max(inset, spread * 0.92 - inset);
+            } else {
+                cx = centerX + (rand() - 0.5) * 2 * spread;
+                cy = centerY + (rand() - 0.5) * 2 * spread;
+            }
+
+            pills.push(this._buildPillBlock(cx, cy, minDim, rand, cfg, i));
+        }
+
+        return pills;
+    },
+
+    _assignMouseFactors(blob, rand) {
+        return {
+            ...blob,
+            hoverWeight: 0.8 + rand() * 0.4,
+            offsetDx: 0,
+            offsetDy: 0,
+            repelVx: 0,
+            repelVy: 0
+        };
+    },
+
+    _buildLayoutBlobs(w, h, rand, cfg) {
+        const axisX = w * (cfg.scatterCenterX ?? 0.5);
+        const axisY = h * (cfg.scatterCenterY ?? 0.5);
+        const mirrorFolds = cfg.mirrorFolds ?? 2;
+
+        if (this._isOpeningArt()) {
+            this._prepareOpeningMoleculePlan(cfg);
+        }
+
+        const uniqueBlobs = this._buildScatterMolecules(w, h, cfg.blobCount ?? 48, rand, cfg);
+        const pillTarget = cfg.pillCount ?? 0;
+        const uniquePills = pillTarget > 0
+            ? this._buildScatterPills(w, h, pillTarget, rand, cfg)
+            : [];
+        const drawBlobs = [];
+
+        uniqueBlobs.forEach((blob) => {
+            const mirrored = mirrorFolds >= 2
+                ? this._expandFoldMirrors(blob, axisX, axisY)
+                : [blob];
+
+            mirrored.forEach((instance) => {
+                drawBlobs.push(this._initMoleculeDotPhysics(
+                    this._assignMouseFactors(instance, rand),
+                    rand
+                ));
+            });
+        });
+
+        uniquePills.forEach((pill) => {
+            const mirrored = mirrorFolds >= 2
+                ? [
+                    this._mirrorPillBlob(pill, axisX, axisY, false, false),
+                    this._mirrorPillBlob(pill, axisX, axisY, true, false),
+                    this._mirrorPillBlob(pill, axisX, axisY, false, true),
+                    this._mirrorPillBlob(pill, axisX, axisY, true, true)
+                ]
+                : [pill];
+
+            mirrored.forEach((instance) => {
+                drawBlobs.push(this._assignMouseFactors(instance, rand));
+            });
+        });
+
+        this._applyTagColorsToBlobs(cfg, drawBlobs);
+        return drawBlobs;
+    },
+
+    _hoverRepelVelocity(blob, localX, localY, cfg, minDim) {
+        const cx = blob.cx + (blob.offsetDx ?? 0);
+        const cy = blob.cy + (blob.offsetDy ?? 0);
+        const toX = localX - cx;
+        const toY = localY - cy;
+        const dist = Math.hypot(toX, toY);
+        const hitR = blob.gradientR ?? blob.membraneR ?? 0;
+        const radius = hitR * (cfg.mouseHoverRadiusScale ?? 1.1) + (cfg.mouseHoverPadding ?? 10);
+
+        let targetVx = 0;
+        let targetVy = 0;
+        if (dist < radius && dist >= 0.5) {
+            const t = 1 - dist / radius;
+            const strength = minDim * (cfg.mouseHoverMaxShift ?? 0.017) * (blob.hoverWeight ?? 1) * t * t;
+            targetVx = -(toX / dist) * strength;
+            targetVy = -(toY / dist) * strength;
+        }
+
+        const smooth = cfg.mouseHoverSmoothing ?? 0.1;
+        blob.repelVx = (blob.repelVx ?? 0) + (targetVx - (blob.repelVx ?? 0)) * smooth;
+        blob.repelVy = (blob.repelVy ?? 0) + (targetVy - (blob.repelVy ?? 0)) * smooth;
+
+        return { vx: blob.repelVx, vy: blob.repelVy };
+    },
+
+    _updateBlobHovers(cfg) {
+        if (!this._drawBlobs || !this._pointerActive) return false;
+
+        const localX = this._pointerClient.x;
+        const localY = this._pointerClient.y;
+        const minDim = Math.min(this._w, this._h);
+        let moved = false;
+
+        for (let i = 0; i < this._drawBlobs.length; i++) {
+            const blob = this._drawBlobs[i];
+            const { vx, vy } = this._hoverRepelVelocity(blob, localX, localY, cfg, minDim);
+            if (Math.abs(vx) > 0.0004 || Math.abs(vy) > 0.0004) {
+                blob.offsetDx = (blob.offsetDx ?? 0) + vx;
+                blob.offsetDy = (blob.offsetDy ?? 0) + vy;
+                moved = true;
+            }
+        }
+
+        return moved;
+    },
+
+    _viewportSize() {
+        return {
+            w: window.innerWidth,
+            h: window.innerHeight
+        };
+    },
+
+    _resolveMaxDpr() {
+        const blobCfg = this._shouldBuildBlobs() ? this._blobCfg() : this._siteCfg();
+        const siteCfg = this._siteCfg();
+        const cap = blobCfg.maxDpr ?? siteCfg.maxDpr ?? 1.5;
+        return Math.min(window.devicePixelRatio || 1, cap);
+    },
+
+    _scheduleResizePaint() {
+        if (this._resizeScheduled) return;
+        this._resizeScheduled = true;
+        requestAnimationFrame(() => {
+            this._resizeScheduled = false;
+            const { w, h } = this._viewportSize();
+            this.render(w, h);
+        });
+    },
+
+    _rebuildLayout(w, h) {
+        const cfg = this._siteCfg();
+        if (w < 1 || h < 1) return;
+
+        const dpr = this._resolveMaxDpr();
+        const bw = Math.max(1, Math.round(w * dpr));
+        const bh = Math.max(1, Math.round(h * dpr));
+
+        this._surfaces.forEach((surface) => {
+            const { canvas, ctx } = surface;
+            if (!canvas || !ctx) return;
+            canvas.width = bw;
+            canvas.height = bh;
+            canvas.style.width = `${w}px`;
+            canvas.style.height = `${h}px`;
+            ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+        });
+
+        if (this._layoutSeed == null) {
+            this._layoutSeed = this._resolveSeed();
+        }
+
+        if (this._shouldDeferOpeningBlobs()) {
+            this._w = w;
+            this._h = h;
+            this._drawBlobs = null;
+            this._grainCanvas = null;
+            return;
+        }
+
+        const rand = this._rand(this._layoutSeed);
+        this._w = w;
+        this._h = h;
+        this._drawBlobs = this._shouldBuildBlobs()
+            ? this._buildLayoutBlobs(w, h, rand, this._blobCfg())
+            : null;
+        this._grainCanvas = this._buildGrainCanvas(
+            w,
+            h,
+            rand,
+            this._shouldBuildBlobs() ? this._blobCfg() : this._siteCfg()
+        );
+    },
+
+    _paintSurface(surface) {
+        const { role, ctx, host } = surface;
+        const w = this._w;
+        const h = this._h;
+        const cfg = this.cfg(host);
+        if (!ctx || w < 1 || h < 1) return;
+
+        if (role === 'wash') {
+            ctx.clearRect(0, 0, w, h);
+            this._applyGrain(ctx, w, h, role, this._siteCfg());
+            return;
+        }
+
+        if (role === 'base') {
+            this._beginPaintFrame(ctx);
+            this._fillBackground(ctx, w, h, cfg, false);
+            return;
+        }
+
+        const grainOnly = this._skipBlobs(role, host);
+        const openingArt = this._isOpeningArtHost(host);
+
+        this._beginPaintFrame(ctx);
+
+        if (!grainOnly && !this._drawBlobs) {
+            if (openingArt) {
+                this._fillBackground(ctx, w, h, cfg, true);
+            }
+            return;
+        }
+
+        this._fillBackground(ctx, w, h, cfg, openingArt);
+
+        if (!grainOnly && this._drawBlobs) {
+            this._paintBlobs(ctx, w, h, cfg, host);
+        }
+
+        this._applyGrain(ctx, w, h, role, cfg);
+        this._beginPaintFrame(ctx);
+    },
+
+    _paintAll() {
+        this._surfaces.forEach((surface) => this._paintSurface(surface));
+    },
+
+    _beginPaintFrame(ctx) {
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.globalAlpha = 1;
+        ctx.filter = 'none';
+    },
+
+    _fillBackground(ctx, w, h, cfg, openingArt) {
+        if (openingArt) {
+            ctx.fillStyle = this._resolveCssColor(cfg.bgColor ?? 'var(--color-5)', '#F2F0EE');
+        } else {
+            ctx.fillStyle = cfg.bgColor ?? '#f4f1ea';
+        }
+        ctx.fillRect(0, 0, w, h);
+    },
+
+    _tick() {
+        this._rafId = null;
+        const cfg = this._blobCfg();
+        let dirty = false;
+
+        if (this._pointerActive && this._mouseFollowEnabled()) {
+            dirty = this._updateBlobHovers(cfg) || dirty;
+        }
+
+        if (this._dotMotionEnabled(cfg)) {
+            dirty = this._updateMoleculeDots(cfg) || dirty;
+        }
+
+        if (dirty) {
+            const throttle = cfg.repaintThrottleMs ?? 0;
+            const now = performance.now();
+            if (!throttle || now - this._lastPaintAt >= throttle) {
+                this._lastPaintAt = now;
+                this._paintPending = false;
+                this._paintAll();
+            } else {
+                this._paintPending = true;
+            }
+        }
+
+        if (this._shouldContinueLoop(cfg) || this._paintPending) {
+            this._rafId = requestAnimationFrame(() => this._tick());
+        }
+    },
+
+    _ensureLoop() {
+        if (this._rafId != null) return;
+        const cfg = this._blobCfg();
+        if (!this._shouldContinueLoop(cfg) && !this._paintPending) return;
+        this._rafId = requestAnimationFrame(() => this._tick());
+    },
+
+    _mouseFollowEnabled() {
+        if (!this._drawBlobs?.length) return false;
+        const cfg = this._blobCfg();
+        if (cfg.mouseFollow === false) return false;
+        if (cfg.mouseFollow !== true && window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) {
+            return false;
+        }
+        return true;
+    },
+
+    _getPointerRoot() {
+        const opening = document.getElementById('opening-screen');
+        if (opening) return opening;
+        return document;
+    },
+
+    _onPointerMove(event) {
+        if (!this._mouseFollowEnabled() || this._surfaces.size === 0) return;
+
+        this._pointerClient.x = event.clientX;
+        this._pointerClient.y = event.clientY;
+        this._pointerActive = true;
+        this._ensureLoop();
+    },
+
+    _onPointerLeave() {
+        this._pointerActive = false;
+        if (!this._dotMotionEnabled(this._blobCfg()) && this._rafId != null) {
+            cancelAnimationFrame(this._rafId);
+            this._rafId = null;
+        }
+    },
+
+    _bindPointer() {
+        const root = this._getPointerRoot();
+        if (!root) return;
+
+        this._pointerRoot = root;
+        this._boundPointerMove = (e) => this._onPointerMove(e);
+        this._boundPointerLeave = () => this._onPointerLeave();
+        root.addEventListener('pointermove', this._boundPointerMove, { passive: true });
+        root.addEventListener('pointerleave', this._boundPointerLeave);
+    },
+
+    _unbindPointer() {
+        const root = this._pointerRoot;
+        if (!root) return;
+
+        if (this._boundPointerMove) {
+            root.removeEventListener('pointermove', this._boundPointerMove);
+            this._boundPointerMove = null;
+        }
+        if (this._boundPointerLeave) {
+            root.removeEventListener('pointerleave', this._boundPointerLeave);
+            this._boundPointerLeave = null;
+        }
+        this._pointerRoot = null;
+    },
+
+    _signalArtReady() {
+        if (this._artReady || !this._isOpeningArt()) return;
+        if (!this._drawBlobs?.length || !this._getTagColorEntries().length) return;
+
+        this._artReady = true;
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                if (typeof OpeningScreen !== 'undefined' && OpeningScreen.onArtReady) {
+                    OpeningScreen.onArtReady();
+                }
+            });
+        });
+    },
+
+    onDataReady() {
+        if (!this._mounted || !this._shouldBuildBlobs()) {
+            return;
+        }
+
+        this._resetOpeningColorPool();
+        const { w, h } = this._viewportSize();
+        this.render(w, h);
+
+        const blobCfg = this._blobCfg();
+        if (this._mouseFollowEnabled() && !this._pointerRoot) {
+            this._bindPointer();
+        } else if (this._loopActive(blobCfg)) {
+            this._ensureLoop();
+        }
+
+        this._signalArtReady();
+    },
+
+    render(w, h) {
+        this._rebuildLayout(w, h);
+        this._paintAll();
+        if (this._loopActive()) {
+            this._ensureLoop();
+        }
+    },
+
+    _mountSurface(host) {
+        if (!host || this._surfaces.has(host)) return false;
+
+        const role = this._hostRole(host);
+        const canvas = document.createElement('canvas');
+        canvas.className = role === 'wash'
+            ? 'site-background__canvas site-background__canvas--wash opening-screen__bg-canvas'
+            : 'site-background__canvas opening-screen__bg-canvas';
+        canvas.setAttribute('aria-hidden', 'true');
+        host.prepend(canvas);
+
+        const ctx = canvas.getContext('2d', { alpha: role === 'wash' });
+        if (!ctx) return false;
+
+        this._surfaces.set(host, { host, role, canvas, ctx });
+        return true;
+    },
+
+    _initRuntime() {
+        const paint = () => {
+            const { w, h } = this._viewportSize();
+            this.render(w, h);
+        };
+
+        paint();
+
+        if (this._shouldBuildBlobs()) {
+            const blobCfg = this._blobCfg();
+            if (this._mouseFollowEnabled()
+                || (this._dotMotionEnabled(blobCfg) && blobCfg.dotPointerRepel !== false)) {
+                this._bindPointer();
+            }
+            if (this._loopActive(blobCfg)) {
+                this._ensureLoop();
+            }
+        }
+
+        if (typeof ResizeObserver !== 'undefined') {
+            this._resizeObserver = new ResizeObserver(() => this._scheduleResizePaint());
+            this._resizeObserver.observe(document.documentElement);
+        } else {
+            window.addEventListener('resize', () => this._scheduleResizePaint());
+        }
+    },
+
+    mount(host) {
+        if (!host) return;
+        if (this._siteCfg().enabled === false && !host.closest?.('#opening-screen')) return;
+
+        const added = this._mountSurface(host);
+        if (!added) return;
+
+        if (!this._mounted) {
+            this._mounted = true;
+            this._initRuntime();
+        } else {
+            const { w, h } = this._viewportSize();
+            this.render(w, h);
+        }
+    },
+
+    mountSiteBackground() {
+        if (this._siteCfg().enabled === false) return;
+
+        const baseHost = document.getElementById('site-background');
+        if (baseHost) this.mount(baseHost);
+
+        if (this._siteCfg().washOverContent && !this._usesGrainDisplacement()) {
+            const washHost = document.getElementById('site-background-wash');
+            if (washHost) this.mount(washHost);
+        }
+
+        if (this._usesGrainDisplacement()) {
+            this._configureGrainDisplacement();
+        }
+    },
+
+    _configureGrainDisplacement() {
+        const cfg = this._siteCfg();
+        const map = document.querySelector('#site-grain-displace feDisplacementMap');
+        const turb = document.getElementById('site-grain-turbulence');
+        if (map) {
+            map.setAttribute('scale', String(cfg.grainDisplacementScale ?? 2.5));
+        }
+        if (turb) {
+            turb.setAttribute('baseFrequency', String(cfg.grainDisplacementFrequency ?? 0.75));
+            turb.setAttribute('numOctaves', String(cfg.grainDisplacementOctaves ?? 3));
+        }
+        document.documentElement.classList.add('has-site-grain-displace');
+        this._startGrainDisplacementAnimation();
+    },
+
+    _startGrainDisplacementAnimation() {
+        const cfg = this._siteCfg();
+        if (cfg.grainDisplacementAnimate === false) return;
+        if (window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches) return;
+
+        const turb = document.getElementById('site-grain-turbulence');
+        if (!turb) return;
+
+        const rate = cfg.grainDisplacementSeedRate ?? 0.4;
+        const step = () => {
+            this._displaceSeed = (this._displaceSeed + rate) % 1000;
+            turb.setAttribute('seed', String(Math.floor(this._displaceSeed)));
+            this._displaceRaf = requestAnimationFrame(step);
+        };
+
+        if (this._displaceRaf != null) {
+            cancelAnimationFrame(this._displaceRaf);
+        }
+        this._displaceRaf = requestAnimationFrame(step);
+    },
+
+    _stopGrainDisplacementAnimation() {
+        if (this._displaceRaf != null) {
+            cancelAnimationFrame(this._displaceRaf);
+            this._displaceRaf = null;
+        }
+        document.documentElement.classList.remove('has-site-grain-displace');
+    },
+
+    unmount() {
+        this._stopGrainDisplacementAnimation();
+        this._unbindPointer();
+        if (this._rafId != null) {
+            cancelAnimationFrame(this._rafId);
+            this._rafId = null;
+        }
+        if (this._resizeObserver) {
+            this._resizeObserver.disconnect();
+            this._resizeObserver = null;
+        }
+        this._surfaces.forEach((surface) => surface.canvas?.remove());
+        this._surfaces.clear();
+        this._layoutSeed = null;
+        this._drawBlobs = null;
+        this._grainCanvas = null;
+        this._resetOpeningColorPool();
+        this._contentBuffer = null;
+        this._contentBufferCtx = null;
+        this._contentBufferDpr = 0;
+        this._blurBuffer = null;
+        this._blurBufferCtx = null;
+        this._blurBufferDpr = 0;
+        this._cachedHullColor = null;
+        this._mounted = false;
+        this._pointerClient = { x: 0, y: 0 };
+        this._pointerActive = false;
+    }
+};
 document.addEventListener('DOMContentLoaded', () => {
     try {
         if (typeof applyPresentationProfile === 'function') applyPresentationProfile();
@@ -19614,6 +22530,20 @@ document.addEventListener('DOMContentLoaded', () => {
         applySiteGridTokens();
     } catch (err) {
         console.error('Site token init failed:', err);
+    }
+
+    try {
+        if (typeof OpeningBackground !== 'undefined') {
+            OpeningBackground.mountSiteBackground();
+        }
+    } catch (err) {
+        console.error('Site background init failed:', err);
+    }
+
+    try {
+        if (typeof NoteCensor !== 'undefined') NoteCensor.init();
+    } catch (err) {
+        console.error('NoteCensor.init failed:', err);
     }
 
     try {
@@ -19656,6 +22586,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const safetyMs = CONFIG.boot.safetyRevealMs ?? 5000;
     const safetyTimer = setTimeout(() => {
         console.warn('Boot safety reveal — data pipeline did not finish in time');
+        if (typeof AppState.prepareBoot === 'function') AppState.prepareBoot();
         AppState.revealApp();
         try {
             if (typeof NavigationMap !== 'undefined') {

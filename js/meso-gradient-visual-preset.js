@@ -1,6 +1,6 @@
 /* ==========================================================================
    MESO GRADIENT VISUAL BASELINE — tri-blob preset (fallback stub)
-   Full shader baseline lives in docs; p5 mode uses MesoGradientP5 primarily.
+   Full shader baseline lives in docs; p5 mode uses MesoGradientP5 organic blob field.
    ========================================================================== */
 const MesoGradientVisualPreset = {
     id: 'smooth-tri-blob-v1',

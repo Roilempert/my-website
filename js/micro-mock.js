@@ -62,6 +62,12 @@ const MicroMock = {
     },
 
     buildCardOnlyHTML(item, options = {}) {
+        const useCensor = typeof NoteCensor !== 'undefined'
+            && NoteCensor.isActive()
+            && !options.forceReadable;
+        if (useCensor) {
+            return NoteCensor.buildCardOnlyHTML(item, options);
+        }
         const title = String(item.title || '').trim();
         const titleHTML = title
             ? `<h2 class="note-title note-h">${this.escapeHTML(title)}</h2>`
@@ -76,6 +82,9 @@ const MicroMock = {
     },
 
     buildTagsRowHTML(item) {
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            return '';
+        }
         return `<div class="micro-mock__tags">` +
             `${this.buildTagsHTML(item.tags, { noteStyle: true })}` +
             `${this.buildTypologyHTML(item)}` +
@@ -104,6 +113,9 @@ const MicroMock = {
         }
         wrapper.style.removeProperty('--micro-mock-row-span');
         wrapper.dataset.microMockNoteId = String(resolved.id);
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            NoteCensor.invalidateWordLayout();
+        }
         return true;
     },
 

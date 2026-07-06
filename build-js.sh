@@ -1,10 +1,10 @@
 #!/bin/sh
 # Rebuild js/app.js after editing modules in js/
 set -e
-ROOT="$(dirname "$0")"
+ROOT="$(cd "$(dirname "$0")" && pwd)"
 BUILD_ID=$(date -u +%Y%m%d%H%M%S)
 cd "$ROOT/js"
-# config.js loads separately from index.html — edit it, then refresh (no build needed)
+# config.js loads separately from experience.html — edit it, then refresh (no build needed)
 {
   echo "/* app build $BUILD_ID */"
   cat \
@@ -16,6 +16,7 @@ cd "$ROOT/js"
     meso-gradient-engine.js \
     meso-gradient-p5.js \
     meso-silhouette-cache.js \
+    note-censor.js \
     meso-mock.js \
     micro-mock.js \
     render-engine.js \
@@ -36,10 +37,11 @@ cd "$ROOT/js"
     warehouse-grid.js \
     warehouse-filter.js \
     warehouse-orbit.js \
+    opening-background.js \
     bootstrap.js
 } > app.js
 echo "Built js/app.js ($(wc -l < app.js | tr -d ' ') lines)"
-if [ -f "$ROOT/index.html" ]; then
-  sed -i '' "s|src=\"js/app.js[^\"]*\"|src=\"js/app.js?v=$BUILD_ID\"|" "$ROOT/index.html"
-  echo "Updated index.html cache bust → ?v=$BUILD_ID"
+if [ -f "$ROOT/experience.html" ]; then
+  sed -i '' "s|src=\"js/app.js[^\"]*\"|src=\"js/app.js?v=$BUILD_ID\"|" "$ROOT/experience.html"
+  echo "Updated experience.html cache bust → ?v=$BUILD_ID"
 fi

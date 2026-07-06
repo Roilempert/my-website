@@ -10,6 +10,7 @@ const ArtifactInspector = {
     mode: null, // 'popup'
     _openAnimTimer: null,
     _openSyntheticCard: false,
+    _forceReadableOpen: false,
 
     init() {
         this.backdrop = document.createElement('div');
@@ -57,6 +58,13 @@ const ArtifactInspector = {
     open(noteWrapperNode) {
         if (this.isActive) return;
         if (!this.isOpenableWrapper(noteWrapperNode)) return;
+
+        const studyOpen = typeof NoteCensor !== 'undefined'
+            && NoteCensor.isActive()
+            && NoteCensor.isNoteStudyUnlocked(noteWrapperNode);
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive() && !studyOpen) return;
+
+        this._forceReadableOpen = studyOpen;
         this.openPopup(noteWrapperNode);
     },
 
@@ -170,6 +178,14 @@ const ArtifactInspector = {
     _resolveOpenSource(wrapper, item) {
         const { card } = this._getSourceFocusElements(wrapper);
         const firstRect = card?.getBoundingClientRect();
+
+        if (this._forceReadableOpen && card && firstRect && firstRect.width > 0) {
+            const readableCard = this._buildSyntheticFocusCard(item, { forceReadable: true });
+            if (readableCard) {
+                return { card: readableCard, firstRect, synthetic: true };
+            }
+        }
+
         if (card && firstRect && firstRect.width > 0) {
             return { card, firstRect, synthetic: false };
         }
@@ -186,8 +202,8 @@ const ArtifactInspector = {
         return { card: syntheticCard, firstRect: sourceRect, synthetic: true };
     },
 
-    _buildSyntheticFocusCard(item) {
-        const html = MicroMock.buildCardOnlyHTML(item, { focusScale: true });
+    _buildSyntheticFocusCard(item, options = {}) {
+        const html = MicroMock.buildCardOnlyHTML(item, { focusScale: true, ...options });
         const mount = document.createElement('div');
         mount.innerHTML = html;
         return mount.firstElementChild;
@@ -587,6 +603,32 @@ const ArtifactInspector = {
     },
 
     buildMetadataHTML(item) {
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            const idRedact = NoteCensor.buildRedactBlock(String(item.id || ''), `${item.id}:meta-id`, 'note-redact--meta-title', {
+                maxLines: 1,
+                minWidth: 0.2,
+                maxWidth: 0.45
+            });
+            return `
+            <section class="artifact-inspector-metadata">
+                <div class="artifact-inspector-metadata__scroll-glyphs" aria-hidden="true">
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+                </div>
+                <h2 class="artifact-inspector-metadata__id general-h">${idRedact}</h2>
+                <div class="artifact-inspector-metadata__grid">
+                    <dl class="artifact-inspector-metadata__details general-t">
+                        <div><dt>מחבר</dt><dd>${NoteCensor.buildMetadataValueHTML('author', item)}</dd></div>
+                        <div><dt>תאריך כתיבה</dt><dd>${NoteCensor.buildMetadataValueHTML('date', item)}</dd></div>
+                        <div><dt>מספר סידורי</dt><dd>${NoteCensor.buildMetadataValueHTML('serial', item)}</dd></div>
+                        <div><dt>מבנה טיפולוגי</dt><dd>${NoteCensor.buildMetadataValueHTML('typology', item)}</dd></div>
+                    </dl>
+                </div>
+            </section>
+        `;
+        }
+
         const author = item.authorCode
             ? String(item.authorCode).trim().toUpperCase()
             : (item.authorFullName || '—');
@@ -627,10 +669,16 @@ const ArtifactInspector = {
         if (!sections.length) return '';
 
         const blocks = sections.map((section) => {
-            const pills = section.tags.map((name) => {
-                const color = AppState.tagColorsMap.get(name) || 'var(--color-3)';
-                return `<span class="artifact-inspector-related__pill action-block general-t"><span class="block-glyph" style="background-color:${color}"></span><span class="block-label">${this.escapeHtml(name)}</span></span>`;
-            }).join('<span class="artifact-inspector-related__plus" aria-hidden="true">+</span>');
+            const pills = (typeof NoteCensor !== 'undefined' && NoteCensor.isActive())
+                ? NoteCensor.buildRedactBlock('related', section.key, 'note-redact--related-heading', {
+                    maxLines: 1,
+                    minWidth: 0.25,
+                    maxWidth: 0.5
+                })
+                : section.tags.map((name) => {
+                    const color = AppState.tagColorsMap.get(name) || 'var(--color-3)';
+                    return `<span class="artifact-inspector-related__pill action-block general-t"><span class="block-glyph" style="background-color:${color}"></span><span class="block-label">${this.escapeHtml(name)}</span></span>`;
+                }).join('<span class="artifact-inspector-related__plus" aria-hidden="true">+</span>');
 
             const notes = section.items.map((item) => {
                 const html = typeof MicroMock !== 'undefined'
@@ -761,6 +809,7 @@ const ArtifactInspector = {
         this._openFirstCard = null;
         this._openFocusVisualWidth = null;
         this._openSyntheticCard = false;
+        this._forceReadableOpen = false;
         this.isActive = false;
         this.activeElement = null;
         this.mode = null;

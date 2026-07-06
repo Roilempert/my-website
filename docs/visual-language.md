@@ -92,6 +92,26 @@ Four classes replace legacy `--type-*` / ratzif22 / NarkissTam body.
 
 ## Components
 
+### Opening screen
+
+Ceremonial onboarding threshold before Experience 1. Single **כניסה** continue button → spatial laboratory; Experience 2 via `.experience-switch` after entry.
+
+| Property | Value |
+|----------|--------|
+| Layer | `#opening-screen`, fixed inset `--site-grid-padding`, `z-index: 11000` |
+| Background | `--color-5`; L1 molecule canvas art (blurred) fades in after title types |
+| Load sequence | Blank bg → slow cursor blink → title types → molecules fade in (text above art, beige canvas) |
+| Text layer | Above molecules (`z-index: 3`); canvas uses `--color-5` fill |
+| Silhouette art | L1-style molecules + pills (`OpeningBackground`), not meso grid |
+| Title | `.general-h`, `--color-4`, RTL — `titleCursorWaitMs` then slow typewriter |
+| Subtitle | `.general-t`, ceremonial invitation copy |
+| Continue | `.general-t` pill — fill `--color-3`, text `--color-1`, radius `--space-5`, pad `--space-10` / `--space-30` |
+| Corners | `decoration-corner-tr.svg` × 4 (warehouse pattern) |
+| Dev bypass | `?skipOpening=1` persists skip in `localStorage`; `?opening=1` resets. **Do not use skip on exhibition iMac.** |
+| Warm boot | Palette fetch + first canvas paint; fonts/assets preload (`CONFIG.opening.preloadAssets`) |
+
+Config: `CONFIG.opening` in `js/config.js`. Module: `js/opening-screen.js`.
+
 ### Warehouse (rows 11–12)
 
 - **Shell:** **2 rows** high, cols 1–24 inside padding; transparent outer wrapper with **4 corner decorations** (5×5, color 3, static).
@@ -241,6 +261,14 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-06 | Opening fix: defer canvas mount until palette loaded; transparent art canvas so text stays visible behind molecules |
+| 2026-07-06 | Opening sequence: blank → slow cursor → slow typewriter → molecules fade over text; `contentBlurPx: 5`; text z-index behind art |
+| 2026-07-06 | Opening title: typewriter on load (RTL logical chars + blink cursor); subtle breathe after typing until art fades in |
+| 2026-07-06 | Opening load: title-only hold (`is-art-pending`) with breathe animation; molecules + subtitle fade in after first canvas paint (`is-art-ready`) |
+| 2026-07-06 | Censored L3: original `--site-micro-note-min-height` + fluid body; redaction bars use note-t/note-h line-box height |
+| 2026-07-06 | Opening screen warm boot: preload fonts/assets, prepareBoot (warehouse, physics, minimap), archive wall during threshold |
+| 2026-07-06 | Opening screen implemented: silhouette art from cache, ceremonial copy, Continue → Exp 1; dev bypass via `?skipOpening=1` |
+| 2026-07-05 | Documented planned opening screen: silhouette forms as abstract decorative art (`experience-model.md`); tokens TBD |
 | 2026-07-05 | L1 molecule hover restored to floating `.molecule-hover-title` on canvas (title mode); warehouse hover port unused |
 | 2026-07-05 | Focus inspector: details panel bottom aligns to shell row 10; gap sync targets `.artifact-inspector-metadata__details` |
 | 2026-07-05 | L1 molecule hover: warehouse **hover port** (left) + **system message port** (right) with flickering cursor; midpoint divider; title types on hover (`messageTypewriterMsPerChar: 35`) |

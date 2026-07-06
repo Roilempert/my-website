@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Human Notes - Alternative Index" />
+  <title>עקבות | אינדקס אלטרנטיבי</title>
+  <link rel="stylesheet" href="styles.css" />
+  <script src="vendor/matter.min.js" defer></script>
+  <script src="js/config.js" defer></script>
+  <script src="js/app.js?v=20260706152143" defer></script>
+</head>
+  <body class="site-grid">
+    <div id="site-background" data-site-layer="background" aria-hidden="true"></div>
+    <div id="site-background-wash" data-site-layer="background-wash" aria-hidden="true">
+      <svg class="site-grain-filter-defs" width="0" height="0" aria-hidden="true" focusable="false">
+        <filter id="site-grain-displace" x="-8%" y="-8%" width="116%" height="116%" color-interpolation-filters="sRGB">
+          <feTurbulence id="site-grain-turbulence" type="fractalNoise" baseFrequency="0.75" numOctaves="3" stitchTiles="stitch" result="noise" />
+          <feDisplacementMap in="SourceGraphic" in2="noise" scale="2.5" xChannelSelector="R" yChannelSelector="G" />
+        </filter>
+      </svg>
+    </div>
+    <div id="nav-surface" data-site-layer="nav" aria-hidden="true"></div>
+    <main id="app" data-site-layer="canvas"></main>
+  </body>
+</html>

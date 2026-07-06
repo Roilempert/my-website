@@ -3,7 +3,8 @@
    ========================================================================== */
 const MesoMock = {
     _textureCache: new Map(),
-    _bakeVersion: 80,
+    _bakeVersion: 88,
+    _renderContext: null,
     _columnGradientLayout: null,
     _shaderLiveBound: false,
     _shaderLiveWrapper: null,
@@ -82,22 +83,10 @@ const MesoMock = {
         try {
             if (job.type === 'structure') {
                 this.applyToWrapper(job.wrapper, job.item, { skipBake: true });
+            } else if (job.context === 'opening') {
+                this._runOpeningTextureBakeJob(job);
             } else {
-                const glyph = job.wrapper.querySelector('.depth-v2-glyph--meso');
-                if (!glyph?.querySelector('.meso-mock__frame')) {
-                    this.applyToWrapper(job.wrapper, job.item, { skipBake: true });
-                }
-                this.syncGlyphLayout(job.wrapper, job.item);
-                const profile = this.buildProfile(job.item, job.wrapper);
-                let layoutCtx = job.layoutCtx;
-                if (!layoutCtx) {
-                    const g = job.wrapper.querySelector('.depth-v2-glyph--meso');
-                    const fontSizePx = this.measureGlyphFontSizePx(g);
-                    const widthPx = Math.round(this.getMaxLineWidthEm(profile) * fontSizePx);
-                    const bakeDims = this.resolveGradientBakeDimensions(profile, { fontSizePx, widthPx }, job.wrapper);
-                    layoutCtx = { fontSizePx, widthPx, bakeDims };
-                }
-                this.applyTextureBake(job.wrapper, job.item, profile, layoutCtx);
+                this._runWrapperTextureBakeJob(job);
             }
         } catch (err) {
             console.warn('MesoMock bake job failed', job.item?.id, err);
@@ -117,21 +106,11 @@ const MesoMock = {
         while (extra < batch.texture && this._bakeQueue[0]?.type === 'texture') {
             const next = this._bakeQueue.shift();
             try {
-                const glyph = next.wrapper.querySelector('.depth-v2-glyph--meso');
-                if (!glyph?.querySelector('.meso-mock__frame')) {
-                    this.applyToWrapper(next.wrapper, next.item, { skipBake: true });
+                if (next.context === 'opening') {
+                    this._runOpeningTextureBakeJob(next);
+                } else {
+                    this._runWrapperTextureBakeJob(next);
                 }
-                this.syncGlyphLayout(next.wrapper, next.item);
-                const profile = this.buildProfile(next.item, next.wrapper);
-                let layoutCtx = next.layoutCtx;
-                if (!layoutCtx) {
-                    const g = next.wrapper.querySelector('.depth-v2-glyph--meso');
-                    const fontSizePx = this.measureGlyphFontSizePx(g);
-                    const widthPx = Math.round(this.getMaxLineWidthEm(profile) * fontSizePx);
-                    const bakeDims = this.resolveGradientBakeDimensions(profile, { fontSizePx, widthPx }, next.wrapper);
-                    layoutCtx = { fontSizePx, widthPx, bakeDims };
-                }
-                this.applyTextureBake(next.wrapper, next.item, profile, layoutCtx);
             } catch (err) {
                 console.warn('MesoMock bake job failed', next.item?.id, err);
             }
@@ -349,13 +328,25 @@ const MesoMock = {
     resolveGradientBakeDimensions(profile, layoutPx, wrapper = null) {
         if (this.isTextureGradientMode()) {
             const uniform = this.getUniformGradientBakeDimensions();
+            let dims = { ...uniform };
+
             if (wrapper && this.usesColumnFillLayout()) {
                 const colW = this.getMesoColumnWidthPx();
                 if (colW) {
-                    return { ...uniform, widthPx: colW, contentW: colW };
+                    dims = { ...dims, widthPx: colW, contentW: colW };
                 }
             }
-            return uniform;
+
+            /* Per-note slice: bake must cover full silhouette height or line offsets miss the texture */
+            if (profile && this.isSliceGradientMode()) {
+                const metrics = this.getProfileMetrics(profile);
+                const contentH = Math.ceil(metrics.totalH);
+                if (contentH > dims.heightPx) {
+                    dims = { ...dims, heightPx: contentH, contentH };
+                }
+            }
+
+            return dims;
         }
         return this.getGradientBakeDimensions(profile, layoutPx);
     },
@@ -536,29 +527,18 @@ const MesoMock = {
                 height: h,
                 tagColors: tagPalette.tagColors,
                 seed,
-                mandalaScale: pCfg.mandalaScale,
-                mandalaFit: pCfg.mandalaFit,
-                tagFit: pCfg.tagFit,
-                symmetricLayout: pCfg.symmetricLayout,
-                symmetryCount: pCfg.symmetryCount,
-                shapeBreak: pCfg.shapeBreak,
-                ringDistJitter: pCfg.ringDistJitter,
-                ringAngleJitter: pCfg.ringAngleJitter,
-                circleSquash: pCfg.circleSquash,
-                blendFactor: pCfg.blendFactor,
-                falloff: pCfg.falloff,
-                colorEdgeSoft: pCfg.colorEdgeSoft,
-                colorEdgeCore: pCfg.colorEdgeCore,
-                colorSharpness: pCfg.colorSharpness,
-                boundaryGlow: pCfg.boundaryGlow,
-                colorSatBoost: pCfg.colorSatBoost,
-                maskSoft: pCfg.maskSoft,
-                sharpChance: pCfg.sharpChance,
-                sharpFalloff: pCfg.sharpFalloff,
-                sharpBlendK: pCfg.sharpBlendK,
-                seamChance: pCfg.seamChance,
-                seamStrength: pCfg.seamStrength,
                 bgColor: pCfg.bgColor,
+                blobCount: pCfg.blobCount,
+                radiusMinScale: pCfg.radiusMinScale,
+                radiusMaxScale: pCfg.radiusMaxScale,
+                verticesMin: pCfg.verticesMin,
+                verticesMax: pCfg.verticesMax,
+                distortionMin: pCfg.distortionMin,
+                distortionMax: pCfg.distortionMax,
+                blurScale: pCfg.blurScale,
+                grainAlpha: pCfg.grainAlpha,
+                edgeDarken: pCfg.edgeDarken,
+                blendMode: pCfg.blendMode,
                 rand: (s, i) => this.rand(s, i)
             });
 
@@ -605,6 +585,20 @@ const MesoMock = {
     },
 
     getMesoColumnWidthPx() {
+        if (typeof document !== 'undefined') {
+            const opening = document.getElementById('opening-screen');
+            if (opening && !opening.hidden && document.body.classList.contains('opening-active')) {
+                const raw = getComputedStyle(opening).getPropertyValue('--opening-meso-col-width').trim();
+                if (raw && typeof measureSiteGridTokenPx === 'function') {
+                    const root = document.documentElement;
+                    root.style.setProperty('--opening-meso-measure-w', raw);
+                    const px = measureSiteGridTokenPx('--opening-meso-measure-w', 'width');
+                    root.style.removeProperty('--opening-meso-measure-w');
+                    if (px > 8) return Math.round(px);
+                }
+            }
+        }
+
         const app = typeof document !== 'undefined' ? document.getElementById('app') : null;
         if (app?.classList.contains('is-meso-hive-layout')) {
             const raw = getComputedStyle(document.documentElement).getPropertyValue('--v2-hive-cell-width');
@@ -707,6 +701,9 @@ const MesoMock = {
     },
 
     getGradientMode() {
+        if (this._renderContext === 'opening') {
+            return CONFIG?.opening?.mesoGradientMode || 'bands';
+        }
         return CONFIG?.depth?.v2?.meso?.mockGradientMode ?? 'shader';
     },
 
@@ -733,29 +730,18 @@ const MesoMock = {
         const dpr = typeof window !== 'undefined' ? window.devicePixelRatio || 1 : 1;
         return {
             scale: Math.min(dpr, meso.mockCanvasScale ?? 1.5),
-            bgColor: meso.mockShaderBgColor ?? '#F3F3F3',
-            mandalaScale: meso.mockP5Scale ?? 0.62,
-            mandalaFit: meso.mockP5MandalaFit ?? 1.0,
-            tagFit: meso.mockP5TagFit ?? 3.2,
-            symmetricLayout: meso.mockP5SymmetricLayout ?? 1,
-            symmetryCount: meso.mockP5SymmetryCount ?? 8,
-            shapeBreak: meso.mockP5ShapeBreak ?? 0.35,
-            ringDistJitter: meso.mockP5RingDistJitter ?? 0.04,
-            ringAngleJitter: meso.mockP5RingAngleJitter ?? 0.02,
-            circleSquash: meso.mockP5CircleSquash ?? 0.12,
-            blendFactor: meso.mockP5BlendFactor ?? 0.32,
-            falloff: meso.mockP5Falloff ?? 4.0,
-            colorEdgeSoft: meso.mockP5ColorEdgeSoft ?? 0.008,
-            colorEdgeCore: meso.mockP5ColorEdgeCore ?? 0.055,
-            colorSharpness: meso.mockP5ColorSharpness ?? 2.0,
-            boundaryGlow: meso.mockP5BoundaryGlow ?? 0.35,
-            colorSatBoost: meso.mockP5ColorSatBoost ?? 1.8,
-            maskSoft: meso.mockP5MaskSoft ?? 0.2,
-            sharpChance: meso.mockP5SharpChance ?? 0.25,
-            sharpFalloff: meso.mockP5SharpFalloff ?? 6.5,
-            sharpBlendK: meso.mockP5SharpBlendK ?? 0.24,
-            seamChance: meso.mockP5SeamChance ?? 0.22,
-            seamStrength: meso.mockP5SeamStrength ?? 1.4,
+            bgColor: meso.mockP5BgColor ?? meso.mockShaderBgColor ?? '#f4f1ea',
+            blobCount: meso.mockP5BlobCount ?? 200,
+            radiusMinScale: meso.mockP5RadiusMinScale ?? 0.04,
+            radiusMaxScale: meso.mockP5RadiusMaxScale ?? 0.32,
+            blendMode: meso.mockP5BlendMode ?? 'source-over',
+            verticesMin: meso.mockP5VerticesMin ?? 15,
+            verticesMax: meso.mockP5VerticesMax ?? 60,
+            distortionMin: meso.mockP5DistortionMin ?? 0.2,
+            distortionMax: meso.mockP5DistortionMax ?? 2.0,
+            blurScale: meso.mockP5BlurScale ?? 0.12,
+            grainAlpha: meso.mockP5GrainAlpha ?? 18,
+            edgeDarken: meso.mockP5EdgeDarken ?? 0.35,
             textureOverscale: meso.mockP5TextureOverscale ?? 1.35,
             grainOpacity: meso.mockP5GrainOpacity ?? 0,
             grainTile: meso.mockGrainTile ?? 64
@@ -1583,29 +1569,18 @@ const MesoMock = {
             height: h,
             tagColors: tagPalette.tagColors,
             seed: profile.seed,
-            mandalaScale: pCfg.mandalaScale,
-            mandalaFit: pCfg.mandalaFit,
-            tagFit: pCfg.tagFit,
-            symmetricLayout: pCfg.symmetricLayout,
-            symmetryCount: pCfg.symmetryCount,
-            shapeBreak: pCfg.shapeBreak,
-            ringDistJitter: pCfg.ringDistJitter,
-            ringAngleJitter: pCfg.ringAngleJitter,
-            circleSquash: pCfg.circleSquash,
-            blendFactor: pCfg.blendFactor,
-            falloff: pCfg.falloff,
-            colorEdgeSoft: pCfg.colorEdgeSoft,
-            colorEdgeCore: pCfg.colorEdgeCore,
-            colorSharpness: pCfg.colorSharpness,
-            boundaryGlow: pCfg.boundaryGlow,
-            colorSatBoost: pCfg.colorSatBoost,
-            maskSoft: pCfg.maskSoft,
-            sharpChance: pCfg.sharpChance,
-            sharpFalloff: pCfg.sharpFalloff,
-            sharpBlendK: pCfg.sharpBlendK,
-            seamChance: pCfg.seamChance,
-            seamStrength: pCfg.seamStrength,
             bgColor: pCfg.bgColor,
+            blobCount: pCfg.blobCount,
+            radiusMinScale: pCfg.radiusMinScale,
+            radiusMaxScale: pCfg.radiusMaxScale,
+            verticesMin: pCfg.verticesMin,
+            verticesMax: pCfg.verticesMax,
+            distortionMin: pCfg.distortionMin,
+            distortionMax: pCfg.distortionMax,
+            blurScale: pCfg.blurScale,
+            grainAlpha: pCfg.grainAlpha,
+            edgeDarken: pCfg.edgeDarken,
+            blendMode: pCfg.blendMode,
             rand: (s, i) => this.rand(s, i)
         });
 
@@ -2314,5 +2289,253 @@ const MesoMock = {
         wrapper.style.setProperty('--meso-mock-row-span', String(profile.rowSpan));
         wrapper.dataset.mockRowSpan = String(profile.rowSpan);
         wrapper.dataset.mockSizeBand = profile.bandKey;
+    },
+
+    _runWrapperTextureBakeJob(job) {
+        const wrapper = job.wrapper;
+        if (!wrapper) return;
+
+        const glyph = wrapper.querySelector('.depth-v2-glyph--meso');
+        if (!glyph?.querySelector('.meso-mock__frame')) {
+            this.applyToWrapper(wrapper, job.item, { skipBake: true });
+        }
+        this.syncGlyphLayout(wrapper, job.item);
+        const profile = this.buildProfile(job.item, wrapper);
+        let layoutCtx = job.layoutCtx;
+        if (!layoutCtx) {
+            const g = wrapper.querySelector('.depth-v2-glyph--meso');
+            const fontSizePx = this.measureGlyphFontSizePx(g);
+            const widthPx = Math.round(this.getMaxLineWidthEm(profile) * fontSizePx);
+            const bakeDims = this.resolveGradientBakeDimensions(profile, { fontSizePx, widthPx }, wrapper);
+            layoutCtx = { fontSizePx, widthPx, bakeDims };
+        }
+        this.applyTextureBake(wrapper, job.item, profile, layoutCtx);
+    },
+
+    _runOpeningTextureBakeJob(job) {
+        const noteEl = job.host;
+        if (!noteEl) return;
+
+        const glyph = noteEl.querySelector('.depth-v2-glyph--meso');
+        if (!glyph?.querySelector('.meso-mock__frame')) {
+            this.applyToOpeningNote(noteEl, job.item, { skipBake: true });
+        }
+        this.syncOpeningGlyphLayout(noteEl, job.item);
+        const profile = this.buildProfile(job.item, null);
+        let layoutCtx = job.layoutCtx;
+        if (!layoutCtx) {
+            const g = noteEl.querySelector('.depth-v2-glyph--meso');
+            const fontSizePx = this.measureGlyphFontSizePx(g);
+            const widthPx = Math.round(this.getMaxLineWidthEm(profile) * fontSizePx);
+            const bakeDims = this.resolveGradientBakeDimensions(profile, { fontSizePx, widthPx }, noteEl);
+            layoutCtx = { fontSizePx, widthPx, bakeDims };
+        }
+        this.applyTextureBake(noteEl, job.item, profile, layoutCtx);
+    },
+
+    scheduleOpeningTextureBakes(openingEl) {
+        if (!openingEl) return 0;
+
+        const itemsById = new Map(
+            (typeof AppState !== 'undefined' ? AppState.items : []).map(item => [String(item.id), item])
+        );
+        let queued = 0;
+
+        openingEl.querySelectorAll('.opening-screen__note').forEach(noteEl => {
+            const item = itemsById.get(noteEl.dataset.noteId);
+            if (!item) return;
+
+            const frame = noteEl.querySelector('.meso-mock__frame');
+            const grad = frame?.style.getPropertyValue('--meso-mock-gradient');
+            if (grad && grad.includes('url(')) return;
+
+            this._enqueueBakeJob({ type: 'texture', context: 'opening', host: noteEl, item });
+            queued++;
+        });
+
+        return queued;
+    },
+
+    applyToOpeningNote(noteEl, item, options = {}) {
+        const glyph = noteEl?.querySelector('.depth-v2-glyph--meso');
+        if (!glyph) return;
+
+        this._renderContext = 'opening';
+        try {
+            this._applyToOpeningNoteInner(noteEl, glyph, item, options);
+        } finally {
+            this._renderContext = null;
+        }
+    },
+
+    _applyToOpeningNoteInner(noteEl, glyph, item, options = {}) {
+        const profile = this.buildProfile(item, null);
+        const grain = this.getGrainConfig();
+        const frameWidthPct = (profile.frameWidth * 100).toFixed(1);
+        const gradientMode = this.getGradientMode();
+        const lineFill = CONFIG?.opening?.mesoLineFill || 'rgba(242, 240, 238, 0.9)';
+
+        glyph.innerHTML = this.buildGlyphHTML(item, profile);
+
+        const frame = glyph.querySelector('.meso-mock__frame');
+        const fontSizePx = this.measureGlyphFontSizePx(glyph);
+        const frameWidthPx = this.resolveFrameWidthPx(profile, fontSizePx);
+        const widthPx = frameWidthPx;
+        const bakeDims = this.resolveGradientBakeDimensions(profile, { fontSizePx, widthPx }, noteEl);
+        const gradientW = `${bakeDims.widthPx}px`;
+        const sCfg = gradientMode === 'shader'
+            ? this.getShaderConfig()
+            : gradientMode === 'p5'
+                ? this.getP5Config()
+                : null;
+        const overscale = sCfg?.textureOverscale ?? 1.78;
+        glyph.style.setProperty('--meso-mock-gradient-w', gradientW);
+        glyph.style.setProperty('--meso-mock-texture-overscale', String(overscale));
+        if (frame) {
+            frame.style.setProperty('--meso-mock-gradient-w', gradientW);
+            frame.style.setProperty('--meso-mock-texture-overscale', String(overscale));
+            frame.style.setProperty('--meso-mock-gradient-h', `${bakeDims.heightPx}px`);
+            if (this.usesColumnFillLayout()) {
+                frame.style.width = '100%';
+                frame.style.minWidth = '0';
+            } else {
+                frame.style.width = `${frameWidthPx}px`;
+                frame.style.minWidth = `${frameWidthPx}px`;
+            }
+            if (this.isSliceGradientMode()) {
+                const metrics = this.getProfileMetrics(profile);
+                frame.style.setProperty('--meso-mock-content-h', `${metrics.totalH}px`);
+                frame.style.height = `${metrics.totalH}px`;
+            }
+        }
+
+        const usesUniformGradient = gradientMode === 'blobs'
+            || gradientMode === 'canvas'
+            || gradientMode === 'shader'
+            || gradientMode === 'p5';
+        if (usesUniformGradient && frame) {
+            this.applySliceLineLayout(frame, profile, fontSizePx, frameWidthPx, bakeDims, gradientMode, sCfg);
+        }
+
+        const layoutCtx = { fontSizePx, widthPx, bakeDims };
+        if (!options.skipBake) {
+            if (options.deferBake) {
+                this._enqueueBakeJob({ type: 'texture', context: 'opening', host: noteEl, item, layoutCtx });
+            } else {
+                this.applyTextureBake(noteEl, item, profile, layoutCtx);
+            }
+        }
+
+        glyph.style.setProperty('--meso-mock-font-scale', String(profile.fontScale));
+        glyph.style.setProperty('--meso-mock-size-scale', String(this.getSizeScale()));
+        if (gradientMode === 'canvas' || gradientMode === 'shader') {
+            glyph.style.setProperty('--meso-mock-grain-opacity', '0');
+        } else if (gradientMode === 'p5') {
+            const p5Cfg = this.getP5Config();
+            glyph.style.setProperty('--meso-mock-bg', p5Cfg.bgColor);
+            glyph.style.setProperty('--meso-mock-grain-opacity', String(p5Cfg.grainOpacity));
+            glyph.style.setProperty('--meso-mock-grain-tile', `${p5Cfg.grainTile}px`);
+            if (frame) {
+                frame.style.setProperty('--meso-mock-bg', p5Cfg.bgColor);
+            }
+            frame?.querySelectorAll('.meso-mock__line').forEach(line => {
+                line.style.setProperty('--meso-mock-bg', p5Cfg.bgColor);
+            });
+        } else {
+            glyph.style.setProperty('--meso-mock-grain-opacity', String(grain.opacity));
+        }
+        if (gradientMode !== 'p5') {
+            glyph.style.setProperty('--meso-mock-grain-tile', `${grain.tile}px`);
+            glyph.style.setProperty('--meso-mock-grain-contrast', `${grain.contrast}%`);
+            glyph.style.setProperty('--meso-mock-grain-brightness', `${grain.brightness}%`);
+        }
+        glyph.style.setProperty('--meso-mock-grain-image', `url("${this.GRAIN_DATA_URI}")`);
+        glyph.style.setProperty('--meso-mock-frame-width', `${frameWidthPct}%`);
+        glyph.style.setProperty('--meso-mock-frame-height', `${(profile.heightScale * 100).toFixed(1)}%`);
+
+        noteEl.style.setProperty('--meso-mock-row-span', String(profile.rowSpan));
+        noteEl.dataset.mockRowSpan = String(profile.rowSpan);
+        noteEl.dataset.mockSizeBand = profile.bandKey;
+
+        frame?.querySelectorAll('.meso-mock__line').forEach((line) => {
+            line.style.background = lineFill;
+            line.style.backgroundImage = 'none';
+        });
+    },
+
+    syncOpeningGlyphLayout(noteEl, item) {
+        this._renderContext = 'opening';
+        try {
+            this._syncOpeningGlyphLayoutInner(noteEl, item);
+        } finally {
+            this._renderContext = null;
+        }
+    },
+
+    _syncOpeningGlyphLayoutInner(noteEl, item) {
+        const glyph = noteEl?.querySelector('.depth-v2-glyph--meso');
+        if (!glyph) return;
+
+        const frame = glyph.querySelector('.meso-mock__frame');
+        if (!frame) return;
+
+        const lineEls = frame.querySelectorAll('.meso-mock__line');
+        const profile = this.buildProfile(item, null);
+        if (lineEls.length !== profile.lines.length) return;
+
+        const gradientMode = this.getGradientMode();
+        const frameWidthPct = (profile.frameWidth * 100).toFixed(1);
+        const fontSizePx = this.measureGlyphFontSizePx(glyph);
+        const frameWidthPx = this.resolveFrameWidthPx(profile, fontSizePx);
+        const widthPx = frameWidthPx;
+        const bakeDims = this.resolveGradientBakeDimensions(profile, { fontSizePx, widthPx }, noteEl);
+        const gradientW = `${bakeDims.widthPx}px`;
+        const sCfg = gradientMode === 'shader'
+            ? this.getShaderConfig()
+            : gradientMode === 'p5'
+                ? this.getP5Config()
+                : null;
+        const overscale = sCfg?.textureOverscale ?? 1.78;
+
+        glyph.style.setProperty('--meso-mock-gradient-w', gradientW);
+        glyph.style.setProperty('--meso-mock-texture-overscale', String(overscale));
+        frame.style.setProperty('--meso-mock-gradient-w', gradientW);
+        frame.style.setProperty('--meso-mock-texture-overscale', String(overscale));
+        frame.style.setProperty('--meso-mock-gradient-h', `${bakeDims.heightPx}px`);
+        if (this.usesColumnFillLayout()) {
+            frame.style.width = '100%';
+            frame.style.minWidth = '0';
+        } else {
+            frame.style.width = `${frameWidthPx}px`;
+            frame.style.minWidth = `${frameWidthPx}px`;
+        }
+
+        const metrics = this.getProfileMetrics(profile);
+        if (this.isSliceGradientMode()) {
+            frame.style.setProperty('--meso-mock-content-h', `${metrics.totalH}px`);
+            frame.style.height = `${metrics.totalH}px`;
+        }
+
+        const usesUniformGradient = gradientMode === 'blobs'
+            || gradientMode === 'canvas'
+            || gradientMode === 'shader'
+            || gradientMode === 'p5';
+        if (usesUniformGradient) {
+            this.applySliceLineLayout(frame, profile, fontSizePx, frameWidthPx, bakeDims, gradientMode, sCfg);
+        }
+
+        glyph.style.setProperty('--meso-mock-font-scale', String(profile.fontScale));
+        glyph.style.setProperty('--meso-mock-size-scale', String(this.getSizeScale()));
+        glyph.style.setProperty('--meso-mock-frame-width', `${frameWidthPct}%`);
+        glyph.style.setProperty('--meso-mock-frame-height', `${(profile.heightScale * 100).toFixed(1)}%`);
+        noteEl.style.setProperty('--meso-mock-row-span', String(profile.rowSpan));
+        noteEl.dataset.mockRowSpan = String(profile.rowSpan);
+        noteEl.dataset.mockSizeBand = profile.bandKey;
+
+        const lineFill = CONFIG?.opening?.mesoLineFill || 'rgba(242, 240, 238, 0.9)';
+        frame.querySelectorAll('.meso-mock__line').forEach((line) => {
+            line.style.background = lineFill;
+            line.style.backgroundImage = 'none';
+        });
     }
 };

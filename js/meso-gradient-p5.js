@@ -1,459 +1,301 @@
 /* ==========================================================================
-   MESO GRADIENT P5 — Mandala morph shader (p5 sketch port)
-   generateMandala layout; hub = right-edge center; tag colors per ring.
-   Baseline: p5-mandala-v1 (docs/architecture/meso-gradient-p5-baseline.md)
+   MESO GRADIENT P5 — Multiply-blended organic blob field (Canvas 2D)
+   Port of p5 sketch: full-canvas blobs, blur, grain overlay.
+   Tag colors from the data sheet drive core/edge palette pairs.
    ========================================================================== */
 const MesoGradientP5 = {
-    MAX_CIRCLES: 25,
-    MAX_SEAMS: 8,
-
     _canvas: null,
-    _gl: null,
-    _program: null,
-    _buffer: null,
+    _ctx: null,
     _ready: false,
-    _shaderRev: 5,
-
-    VERT_SRC: `
-        attribute vec2 a_position;
-        void main() {
-            gl_Position = vec4(a_position, 0.0, 1.0);
-        }
-    `,
-
-    FRAG_SRC: `
-        precision mediump float;
-
-        uniform vec2 u_resolution;
-        uniform int u_count;
-        uniform vec2 u_positions[25];
-        uniform vec3 u_colors[25];
-        uniform float u_radii[25];
-        uniform vec2 u_stretch[25];
-        uniform float u_blendFactor;
-        uniform float u_falloff;
-        uniform int u_sharpCircle;
-        uniform float u_sharpFalloff;
-        uniform float u_sharpBlendK;
-        uniform vec3 u_bgColor;
-        uniform float u_maskSoft;
-        uniform int u_seamCount;
-        uniform vec3 u_seamColors[8];
-        uniform vec2 u_seamPosA[8];
-        uniform vec2 u_seamPosB[8];
-        uniform float u_seamStrength;
-        uniform float u_colorEdgeSoft;
-        uniform float u_colorEdgeCore;
-        uniform float u_colorSharpness;
-        uniform float u_boundaryGlow;
-        uniform float u_colorSatBoost;
-
-        float smin(float a, float b, float k) {
-            float h = clamp(0.5 + 0.5 * (b - a) / k, 0.0, 1.0);
-            return mix(b, a, h) - k * h * (1.0 - h);
-        }
-
-        void main() {
-            /* hub = right-edge vertical center (RTL) */
-            vec2 pixel = gl_FragCoord.xy - vec2(u_resolution.x, u_resolution.y * 0.5);
-            vec2 uv = pixel / min(u_resolution.x, u_resolution.y);
-
-            float d = 100.0;
-            vec3 colorAcc = vec3(0.0);
-            float weightAcc = 0.0;
-            float bestInside = -999.0;
-            float secondInside = -999.0;
-
-            for (int i = 0; i < 25; i++) {
-                if (i >= u_count) break;
-
-                vec2 delta = uv - u_positions[i];
-                vec2 stretch = max(u_stretch[i], vec2(0.65));
-                vec2 scaled = delta / stretch;
-                float dist = length(scaled) * min(stretch.x, stretch.y);
-                float inside = u_radii[i] - dist;
-                float k = (i == u_sharpCircle) ? u_sharpBlendK : u_blendFactor;
-                float f = (i == u_sharpCircle) ? u_sharpFalloff : u_falloff;
-                d = smin(d, dist - u_radii[i], k);
-
-                if (inside > bestInside) {
-                    secondInside = bestInside;
-                    bestInside = inside;
-                } else if (inside > secondInside) {
-                    secondInside = inside;
-                }
-
-                float w = 1.0 / (pow(dist, f) + 0.0001);
-                float insideBoost = smoothstep(-u_colorEdgeSoft, u_colorEdgeCore, inside);
-                w *= 1.0 + insideBoost * u_colorSatBoost;
-                colorAcc += u_colors[i] * w;
-                weightAcc += w;
-            }
-
-            for (int s = 0; s < 8; s++) {
-                if (s >= u_seamCount) break;
-
-                float da = length(uv - u_seamPosA[s]);
-                float db = length(uv - u_seamPosB[s]);
-                float gap = abs(da - db);
-                float seamW = exp(-gap * 14.0) * exp(-min(da, db) * 2.0);
-                seamW *= smoothstep(0.12, 0.015, gap);
-                colorAcc += u_seamColors[s] * seamW * u_seamStrength;
-                weightAcc += seamW * u_seamStrength;
-            }
-
-            vec3 finalColor = weightAcc > 0.001
-                ? colorAcc / weightAcc
-                : u_bgColor;
-
-            float contactGap = abs(bestInside - secondInside);
-            float contact = exp(-contactGap * 60.0) * smoothstep(0.0, 0.05, min(bestInside, secondInside));
-            vec3 edgeGlow = min(finalColor * 1.4 + vec3(0.1), vec3(1.0));
-            finalColor = mix(finalColor, edgeGlow, contact * u_boundaryGlow);
-
-            float mask = smoothstep(u_maskSoft, -0.15, d);
-
-            gl_FragColor = vec4(mix(u_bgColor, finalColor, mask), 1.0);
-        }
-    `,
-
-    parseColorVec3(color) {
-        if (typeof MesoGradientEngine !== 'undefined') {
-            return MesoGradientEngine.parseColorVec3(color);
-        }
-        return [0.5, 0.5, 0.5];
-    },
-
-    buildMandalaFromTags(tagColors, seed, opts) {
-        const MAX = this.MAX_CIRCLES;
-        const MAX_SEAMS = this.MAX_SEAMS;
-        const TWO_PI = Math.PI * 2;
-        const rand = opts.rand || ((s, i) => ((s ^ i) % 1000) / 1000);
-        const geomScale = (opts.scale ?? 1) * (opts.mandalaFit ?? 1);
-        const seamChance = opts.seamChance ?? 0.32;
-        const positionsFlat = [];
-        const colorsFlat = [];
-        const radiiFlat = [];
-        const stretchFlat = [];
-        const circlePositions = [];
-        let activeCircleCount = 0;
-
-        const shapeBreak = opts.shapeBreak ?? 0.35;
-        const symmetricLayout = (opts.symmetricLayout ?? 1) > 0;
-        const symmetryCount = opts.symmetryCount ?? 8;
-        const distJitter = symmetricLayout ? 0 : (opts.ringDistJitter ?? 0.04) * shapeBreak;
-        const angleJitter = symmetricLayout ? 0 : (opts.ringAngleJitter ?? 0.02) * shapeBreak;
-        const circleSquash = (opts.circleSquash ?? 0.12) * shapeBreak;
-
-        const ringCountFor = (slot) => {
-            if (symmetricLayout && symmetryCount > 0) return symmetryCount;
-            return Math.floor(4 + rand(seed, slot) * 5);
-        };
-
-        const squashPair = (slot) => {
-            const sx = 1 + (rand(seed, slot) - 0.5) * 2 * circleSquash;
-            const sy = 1 + (rand(seed, slot + 1) - 0.5) * 2 * circleSquash;
-            return [sx, sy];
-        };
-
-        const palette = tagColors.length ? tagColors : ['#888888'];
-        const n = palette.length;
-
-        const circleColors = [];
-        const seamColorStrs = [];
-        for (let i = 0; i < n; i++) {
-            if (i === 0) {
-                circleColors.push(palette[i]);
-            } else if (rand(seed, 600 + i) < seamChance) {
-                seamColorStrs.push(palette[i]);
-            } else {
-                circleColors.push(palette[i]);
-            }
-        }
-        if (circleColors.length === 0) {
-            circleColors.push(palette[0]);
-        }
-
-        const cn = circleColors.length;
-        const tagFit = opts.tagFit ?? 3.2;
-        const layoutScale = cn <= 1 ? 1 : Math.min(1, tagFit / (cn + 0.8));
-        const ringStepScale = cn <= 3 ? 1 : 3 / cn;
-        const totalScale = geomScale * layoutScale;
-
-        const rgbCircle = (idx) => this.parseColorVec3(circleColors[Math.min(idx, cn - 1)]);
-
-        const tagForLayer = (layer) => {
-            if (cn === 1) return 0;
-            if (cn === 2) return layer === 0 ? 0 : 1;
-            return Math.min(layer, cn - 1);
-        };
-
-        const push = (x, y, rgb, r, sx = 1, sy = 1) => {
-            if (activeCircleCount >= MAX) return;
-            const scx = x * totalScale;
-            const scy = y * totalScale;
-            positionsFlat.push(scx, scy);
-            colorsFlat.push(rgb[0], rgb[1], rgb[2]);
-            radiiFlat.push(r * totalScale);
-            stretchFlat.push(sx, sy);
-            circlePositions.push(scx, scy);
-            activeCircleCount++;
-        };
-
-        const pushOnRing = (baseDist, angle, rgb, r, slot) => {
-            const a = angle + (rand(seed, slot) - 0.5) * angleJitter;
-            const d = baseDist * (1 + (rand(seed, slot + 1) - 0.5) * 2 * distJitter);
-            const [sx, sy] = squashPair(slot + 2);
-            push(Math.cos(a) * d, Math.sin(a) * d, rgb, r, sx, sy);
-        };
-
-        const [hubSx, hubSy] = symmetricLayout ? [1, 1] : squashPair(5);
-        push(0, 0, rgbCircle(tagForLayer(0)), 0.11 + rand(seed, 0) * 0.09, hubSx, hubSy);
-
-        const innerCount = ringCountFor(1);
-        const innerDist = 0.2 + rand(seed, 2) * 0.15;
-        const innerRadius = 0.08 + rand(seed, 3) * 0.07;
-        const innerOffset = symmetricLayout ? 0 : rand(seed, 4) * TWO_PI;
-        const colorInner = rgbCircle(tagForLayer(1));
-
-        for (let i = 0; i < innerCount; i++) {
-            const angle = innerOffset + i * (TWO_PI / innerCount);
-            pushOnRing(innerDist, angle, colorInner, innerRadius, 30 + i);
-        }
-
-        const outerCount = ringCountFor(5);
-        let outerDist = innerDist + (0.15 + rand(seed, 6) * 0.15) * ringStepScale;
-        const outerRadius = 0.05 + rand(seed, 7) * 0.07;
-        const outerOffset = symmetricLayout ? 0 : rand(seed, 8) * TWO_PI;
-        const colorOuter = rgbCircle(tagForLayer(2));
-
-        for (let i = 0; i < outerCount; i++) {
-            if (activeCircleCount >= MAX) break;
-            const angle = outerOffset + i * (TWO_PI / outerCount);
-            pushOnRing(outerDist, angle, colorOuter, outerRadius, 50 + i);
-        }
-
-        for (let tagIdx = 3; tagIdx < cn && activeCircleCount < MAX; tagIdx++) {
-            const ringCount = ringCountFor(10 + tagIdx * 4);
-            outerDist += (0.15 + rand(seed, 11 + tagIdx * 4) * 0.15) * ringStepScale;
-            const ringRadius = 0.05 + rand(seed, 12 + tagIdx * 4) * 0.07;
-            const ringOffset = symmetricLayout ? 0 : rand(seed, 13 + tagIdx * 4) * TWO_PI;
-            const ringColor = rgbCircle(tagIdx);
-
-            for (let i = 0; i < ringCount; i++) {
-                if (activeCircleCount >= MAX) break;
-                const angle = ringOffset + i * (TWO_PI / ringCount);
-                pushOnRing(outerDist, angle, ringColor, ringRadius, 70 + tagIdx * 10 + i);
-            }
-        }
-
-        while (positionsFlat.length / 2 < MAX) {
-            positionsFlat.push(0, 0);
-            colorsFlat.push(0, 0, 0);
-            radiiFlat.push(0);
-            stretchFlat.push(1, 1);
-        }
-
-        const seamColorsFlat = [];
-        const seamPosAFlat = [];
-        const seamPosBFlat = [];
-        let seamCount = 0;
-        const circleN = circlePositions.length / 2;
-
-        const pickCirclePair = (si) => {
-            if (circleN < 2) return null;
-            let a = Math.floor(rand(seed, 700 + si * 3) * circleN);
-            let b = Math.floor(rand(seed, 701 + si * 3) * (circleN - 1));
-            if (b >= a) b++;
-            return {
-                ax: circlePositions[a * 2],
-                ay: circlePositions[a * 2 + 1],
-                bx: circlePositions[b * 2],
-                by: circlePositions[b * 2 + 1]
-            };
-        };
-
-        for (let si = 0; si < seamColorStrs.length && seamCount < MAX_SEAMS; si++) {
-            const pair = pickCirclePair(si);
-            if (!pair) break;
-            const rgb = this.parseColorVec3(seamColorStrs[si]);
-            seamColorsFlat.push(rgb[0], rgb[1], rgb[2]);
-            seamPosAFlat.push(pair.ax, pair.ay);
-            seamPosBFlat.push(pair.bx, pair.by);
-            seamCount++;
-        }
-
-        while (seamColorsFlat.length / 3 < MAX_SEAMS) {
-            seamColorsFlat.push(0, 0, 0);
-            seamPosAFlat.push(0, 0);
-            seamPosBFlat.push(0, 0);
-        }
-
-        let sharpCircleIndex = -1;
-        const sharpChance = opts.sharpChance ?? 0.25;
-        if (activeCircleCount > 1 && rand(seed, 99) < sharpChance) {
-            sharpCircleIndex = Math.floor(rand(seed, 98) * activeCircleCount);
-        }
-
-        return {
-            positionsFlat: new Float32Array(positionsFlat),
-            colorsFlat: new Float32Array(colorsFlat),
-            radiiFlat: new Float32Array(radiiFlat),
-            stretchFlat: new Float32Array(stretchFlat),
-            count: activeCircleCount,
-            sharpCircleIndex,
-            seamCount,
-            seamColorsFlat: new Float32Array(seamColorsFlat),
-            seamPosAFlat: new Float32Array(seamPosAFlat),
-            seamPosBFlat: new Float32Array(seamPosBFlat)
-        };
-    },
-
-    _compileShader(gl, type, source) {
-        const shader = gl.createShader(type);
-        gl.shaderSource(shader, source);
-        gl.compileShader(shader);
-        if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-            console.warn('MesoGradientP5 shader:', gl.getShaderInfoLog(shader));
-            gl.deleteShader(shader);
-            return null;
-        }
-        return shader;
-    },
 
     init() {
-        if (this._ready && this._compiledRev === this._shaderRev) return true;
-        this._ready = false;
+        if (this._ready) return true;
         if (typeof document === 'undefined') return false;
 
         const canvas = this._canvas || document.createElement('canvas');
-        const gl = this._gl || canvas.getContext('webgl', {
-            alpha: false,
-            antialias: false,
-            depth: false,
-            stencil: false,
-            preserveDrawingBuffer: true
-        });
-
-        if (!gl) return false;
-
-        const vs = this._compileShader(gl, gl.VERTEX_SHADER, this.VERT_SRC);
-        const fs = this._compileShader(gl, gl.FRAGMENT_SHADER, this.FRAG_SRC);
-        if (!vs || !fs) return false;
-
-        const program = gl.createProgram();
-        gl.attachShader(program, vs);
-        gl.attachShader(program, fs);
-        gl.linkProgram(program);
-
-        if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
-            console.warn('MesoGradientP5: program link failed', gl.getProgramInfoLog(program));
-            return false;
-        }
-
-        if (!this._buffer) {
-            const buffer = gl.createBuffer();
-            gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
-            gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-                -1, -1, 1, -1, -1, 1,
-                -1, 1, 1, -1, 1, 1
-            ]), gl.STATIC_DRAW);
-            this._buffer = buffer;
-        }
+        const ctx = canvas.getContext('2d', { alpha: false });
+        if (!ctx) return false;
 
         this._canvas = canvas;
-        this._gl = gl;
-        this._program = program;
-        this._loc = {
-            a_position: gl.getAttribLocation(program, 'a_position'),
-            u_resolution: gl.getUniformLocation(program, 'u_resolution'),
-            u_count: gl.getUniformLocation(program, 'u_count'),
-            u_positions: gl.getUniformLocation(program, 'u_positions[0]'),
-            u_colors: gl.getUniformLocation(program, 'u_colors[0]'),
-            u_radii: gl.getUniformLocation(program, 'u_radii[0]'),
-            u_stretch: gl.getUniformLocation(program, 'u_stretch[0]'),
-            u_blendFactor: gl.getUniformLocation(program, 'u_blendFactor'),
-            u_falloff: gl.getUniformLocation(program, 'u_falloff'),
-            u_sharpCircle: gl.getUniformLocation(program, 'u_sharpCircle'),
-            u_sharpFalloff: gl.getUniformLocation(program, 'u_sharpFalloff'),
-            u_sharpBlendK: gl.getUniformLocation(program, 'u_sharpBlendK'),
-            u_bgColor: gl.getUniformLocation(program, 'u_bgColor'),
-            u_maskSoft: gl.getUniformLocation(program, 'u_maskSoft'),
-            u_seamCount: gl.getUniformLocation(program, 'u_seamCount'),
-            u_seamColors: gl.getUniformLocation(program, 'u_seamColors[0]'),
-            u_seamPosA: gl.getUniformLocation(program, 'u_seamPosA[0]'),
-            u_seamPosB: gl.getUniformLocation(program, 'u_seamPosB[0]'),
-            u_seamStrength: gl.getUniformLocation(program, 'u_seamStrength'),
-            u_colorEdgeSoft: gl.getUniformLocation(program, 'u_colorEdgeSoft'),
-            u_colorEdgeCore: gl.getUniformLocation(program, 'u_colorEdgeCore'),
-            u_colorSharpness: gl.getUniformLocation(program, 'u_colorSharpness'),
-            u_boundaryGlow: gl.getUniformLocation(program, 'u_boundaryGlow'),
-            u_colorSatBoost: gl.getUniformLocation(program, 'u_colorSatBoost')
-        };
-        this._compiledRev = this._shaderRev;
+        this._ctx = ctx;
         this._ready = true;
         return true;
+    },
+
+    _defaultRand(seed, i) {
+        const x = Math.sin((Number(seed) || 0) * 12.9898 + i * 78.233) * 43758.5453;
+        return x - Math.floor(x);
+    },
+
+    _randRange(rand, seed, i, min, max) {
+        return min + rand(seed, i) * (max - min);
+    },
+
+    _parseHex(color) {
+        if (!color || typeof color !== 'string') return { r: 136, g: 136, b: 136 };
+        let hex = color.trim();
+        if (hex.startsWith('rgb')) {
+            const m = hex.match(/[\d.]+/g);
+            if (m && m.length >= 3) {
+                return {
+                    r: Math.round(Number(m[0])),
+                    g: Math.round(Number(m[1])),
+                    b: Math.round(Number(m[2]))
+                };
+            }
+        }
+        if (!hex.startsWith('#')) hex = `#${hex}`;
+        if (hex.length === 4) {
+            hex = `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}`;
+        }
+        const n = parseInt(hex.slice(1, 7), 16);
+        if (Number.isNaN(n)) return { r: 136, g: 136, b: 136 };
+        return { r: (n >> 16) & 255, g: (n >> 8) & 255, b: n & 255 };
+    },
+
+    _toCssColor(color) {
+        if (!color) return '#888888';
+        if (typeof color === 'string' && color.startsWith('rgb')) return color;
+        const { r, g, b } = this._parseHex(color);
+        return `rgb(${r}, ${g}, ${b})`;
+    },
+
+    _darkenColor(color, amount = 0.35) {
+        const { r, g, b } = this._parseHex(color);
+        const f = 1 - Math.min(1, Math.max(0, amount));
+        return `rgb(${Math.round(r * f)}, ${Math.round(g * f)}, ${Math.round(b * f)})`;
+    },
+
+    _buildNoise(seed) {
+        const perm = new Uint8Array(512);
+        const src = new Uint8Array(256);
+        for (let i = 0; i < 256; i++) src[i] = i;
+
+        let s = (Number(seed) || 1) >>> 0;
+        for (let i = 255; i > 0; i--) {
+            s = (Math.imul(s, 1664525) + 1013904223) >>> 0;
+            const j = s % (i + 1);
+            const tmp = src[i];
+            src[i] = src[j];
+            src[j] = tmp;
+        }
+        for (let i = 0; i < 512; i++) perm[i] = src[i & 255];
+
+        const fade = (t) => t * t * t * (t * (t * 6 - 15) + 10);
+        const lerp = (a, b, t) => a + t * (b - a);
+        const grad = (hash, x, y) => {
+            const h = hash & 3;
+            const u = h < 2 ? x : y;
+            const v = h < 2 ? y : x;
+            return ((h & 1) ? -u : u) + ((h & 2) ? -v : v);
+        };
+
+        return (x, y) => {
+            const xi = Math.floor(x) & 255;
+            const yi = Math.floor(y) & 255;
+            const xf = x - Math.floor(x);
+            const yf = y - Math.floor(y);
+            const u = fade(xf);
+            const v = fade(yf);
+            const aa = perm[xi] + yi;
+            const ab = perm[xi + 1] + yi;
+            const x1 = lerp(grad(perm[aa], xf, yf), grad(perm[ab], xf - 1, yf), u);
+            const x2 = lerp(grad(perm[aa + 1], xf, yf - 1), grad(perm[ab + 1], xf - 1, yf - 1), u);
+            return (lerp(x1, x2, v) + 1) * 0.5;
+        };
+    },
+
+    buildPalettesFromTags(tagColors, edgeDarken = 0.35) {
+        const list = (tagColors || []).filter(Boolean);
+        const colors = list.length ? list : ['#888888'];
+        const palettes = [];
+        const seen = new Set();
+
+        const pushPair = (core, edge) => {
+            const key = `${core}|${edge}`;
+            if (seen.has(key)) return;
+            seen.add(key);
+            palettes.push({
+                core: this._toCssColor(core),
+                edge: this._toCssColor(edge)
+            });
+        };
+
+        for (let i = 0; i < colors.length; i++) {
+            const core = colors[i];
+            const edge = colors.length > 1
+                ? this._darkenColor(colors[(i + 1) % colors.length], edgeDarken * 0.65)
+                : this._darkenColor(core, edgeDarken);
+            pushPair(core, edge);
+        }
+
+        if (colors.length >= 2) {
+            for (let i = 0; i < colors.length && palettes.length < 12; i++) {
+                for (let j = i + 1; j < colors.length && palettes.length < 12; j++) {
+                    pushPair(colors[i], this._darkenColor(colors[j], edgeDarken * 0.45));
+                    pushPair(colors[j], this._darkenColor(colors[i], edgeDarken * 0.45));
+                }
+            }
+        }
+
+        return palettes.length ? palettes : [{ core: '#888888', edge: '#555555' }];
+    },
+
+    _fillTagWash(ctx, w, h, tagColors, strength = 0.72) {
+        const colors = (tagColors || []).filter(Boolean);
+        if (!colors.length) return;
+
+        const g = ctx.createLinearGradient(0, 0, w * 0.35, h);
+        const stops = colors.length === 1 ? [colors[0], colors[0]] : colors;
+        stops.forEach((color, i) => {
+            g.addColorStop(i / Math.max(1, stops.length - 1), this._toCssColor(color));
+        });
+
+        ctx.save();
+        ctx.globalAlpha = strength;
+        ctx.fillStyle = g;
+        ctx.fillRect(0, 0, w, h);
+        ctx.restore();
+    },
+
+    _scaledBlobCount(w, h, refCount) {
+        const refArea = 1920 * 1080;
+        const area = Math.max(1, w * h);
+        const areaScale = area / refArea;
+        /* Silhouette bakes are tall+narrow — need far more blobs than full-viewport scale */
+        const tallBoost = h > w * 1.2 ? Math.sqrt(h / Math.max(w, 1)) : 1;
+        const scaled = Math.round(refCount * Math.max(areaScale, 0.08) * tallBoost * 4);
+        return Math.max(48, Math.min(refCount, scaled));
+    },
+
+    _buildBlobs(opts, w, h) {
+        const seed = opts.seed ?? 0;
+        const rand = opts.rand || ((s, i) => this._defaultRand(s, i));
+        const palettes = this.buildPalettesFromTags(opts.tagColors || [], opts.edgeDarken ?? 0.35);
+        const refCount = opts.blobCount ?? 200;
+        const count = this._scaledBlobCount(w, h, refCount);
+        const sizeRef = Math.sqrt(w * h);
+        const rMin = sizeRef * (opts.radiusMinScale ?? 0.04);
+        const rMax = sizeRef * (opts.radiusMaxScale ?? 0.32);
+        const vMin = opts.verticesMin ?? 15;
+        const vMax = opts.verticesMax ?? 60;
+        const dMin = opts.distortionMin ?? 0.2;
+        const dMax = opts.distortionMax ?? 2.0;
+        const stratified = Math.floor(count * 0.65);
+        const cols = Math.max(2, Math.round(Math.sqrt(count * (w / Math.max(h, 1)))));
+        const rows = Math.max(2, Math.ceil(stratified / cols));
+        const blobs = [];
+
+        for (let i = 0; i < count; i++) {
+            let x;
+            let y;
+            if (i < stratified) {
+                const col = i % cols;
+                const row = Math.floor(i / cols);
+                x = ((col + 0.5) / cols) * w + this._randRange(rand, seed, i * 7 + 1, -1, 1) * (w / cols) * 0.45;
+                y = ((row + 0.5) / rows) * h + this._randRange(rand, seed, i * 7 + 2, -1, 1) * (h / rows) * 0.45;
+            } else {
+                x = this._randRange(rand, seed, i * 5 + 1, 0, w);
+                y = this._randRange(rand, seed, i * 5 + 2, 0, h);
+            }
+
+            blobs.push({
+                x,
+                y,
+                r: this._randRange(rand, seed, i * 5 + 3, rMin, rMax),
+                colors: palettes[Math.floor(rand(seed, 400 + i) * palettes.length)],
+                seed: rand(seed, 500 + i) * 10000,
+                vertices: Math.floor(this._randRange(rand, seed, i * 5 + 4, vMin, vMax)),
+                distortion: this._randRange(rand, seed, i * 5 + 5, dMin, dMax)
+            });
+        }
+
+        return blobs;
+    },
+
+    _drawOrganicBlob(ctx, blob, blurScale = 0.12) {
+        const { x, y, r, colors, seed, vertices, distortion } = blob;
+        const noise = this._buildNoise(seed);
+        const edgeRgb = this._parseHex(colors.edge);
+
+        const grad = ctx.createRadialGradient(x, y, 0, x, y, r);
+        grad.addColorStop(0, colors.core);
+        grad.addColorStop(0.7, colors.edge);
+        grad.addColorStop(1, `rgba(${edgeRgb.r}, ${edgeRgb.g}, ${edgeRgb.b}, 0)`);
+
+        ctx.fillStyle = grad;
+        ctx.filter = `blur(${r * blurScale}px)`;
+        ctx.beginPath();
+
+        const TWO_PI = Math.PI * 2;
+        const step = TWO_PI / Math.max(3, vertices);
+
+        for (let a = 0; a < TWO_PI; a += step) {
+            const xoff = ((Math.cos(a) + 1) * 0.5) * distortion;
+            const yoff = ((Math.sin(a) + 1) * 0.5) * distortion;
+            const n = noise(xoff, yoff);
+            const dynamicRadius = r * (0.3 + n * 1.4);
+            const px = x + Math.cos(a) * dynamicRadius;
+            const py = y + Math.sin(a) * dynamicRadius;
+            if (a === 0) ctx.moveTo(px, py);
+            else ctx.lineTo(px, py);
+        }
+
+        ctx.closePath();
+        ctx.fill();
+        ctx.filter = 'none';
+    },
+
+    _applyGrainOverlay(ctx, w, h, seed, alpha = 18) {
+        const imageData = ctx.createImageData(w, h);
+        const data = imageData.data;
+        let g = ((Number(seed) || 1) >>> 0) ^ 0x9e3779b9;
+
+        for (let i = 0; i < data.length; i += 4) {
+            g = (Math.imul(g, 1664525) + 1013904223) >>> 0;
+            const val = g & 255;
+            data[i] = val;
+            data[i + 1] = val;
+            data[i + 2] = val;
+            data[i + 3] = alpha;
+        }
+
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.putImageData(imageData, 0, 0);
     },
 
     renderFrame(opts) {
         if (!this.init()) return null;
 
-        const gl = this._gl;
         const canvas = this._canvas;
+        const ctx = this._ctx;
         const w = Math.max(1, Math.round(opts.width || 64));
         const h = Math.max(1, Math.round(opts.height || 64));
 
         canvas.width = w;
         canvas.height = h;
-        gl.viewport(0, 0, w, h);
 
-        const mandala = this.buildMandalaFromTags(opts.tagColors || [], opts.seed ?? 0, {
-            scale: opts.mandalaScale ?? opts.scale ?? 1,
-            mandalaFit: opts.mandalaFit ?? 1,
-            tagFit: opts.tagFit,
-            symmetricLayout: opts.symmetricLayout,
-            symmetryCount: opts.symmetryCount,
-            shapeBreak: opts.shapeBreak,
-            ringDistJitter: opts.ringDistJitter,
-            ringAngleJitter: opts.ringAngleJitter,
-            circleSquash: opts.circleSquash,
-            sharpChance: opts.sharpChance,
-            seamChance: opts.seamChance,
-            rand: opts.rand
-        });
+        ctx.globalCompositeOperation = 'source-over';
+        const compact = opts.compact || h <= 120;
+        if (compact) {
+            this._fillTagWash(ctx, w, h, opts.tagColors || [], 1);
+        } else {
+            ctx.fillStyle = opts.bgColor || '#f4f1ea';
+            ctx.fillRect(0, 0, w, h);
+            this._fillTagWash(ctx, w, h, opts.tagColors || [], 0.72);
+        }
 
-        gl.useProgram(this._program);
-        gl.bindBuffer(gl.ARRAY_BUFFER, this._buffer);
-        gl.enableVertexAttribArray(this._loc.a_position);
-        gl.vertexAttribPointer(this._loc.a_position, 2, gl.FLOAT, false, 0, 0);
+        ctx.globalCompositeOperation = opts.blendMode || 'source-over';
+        const blobs = this._buildBlobs(opts, w, h);
+        const blurScale = compact ? Math.min(opts.blurScale ?? 0.12, 0.05) : (opts.blurScale ?? 0.12);
 
-        const bg = this.parseColorVec3(opts.bgColor || '#F3F3F3');
+        for (let i = 0; i < blobs.length; i++) {
+            this._drawOrganicBlob(ctx, blobs[i], blurScale);
+        }
 
-        gl.uniform2f(this._loc.u_resolution, w, h);
-        gl.uniform1i(this._loc.u_count, mandala.count);
-        gl.uniform2fv(this._loc.u_positions, mandala.positionsFlat);
-        gl.uniform3fv(this._loc.u_colors, mandala.colorsFlat);
-        gl.uniform1fv(this._loc.u_radii, mandala.radiiFlat);
-        gl.uniform2fv(this._loc.u_stretch, mandala.stretchFlat);
-        gl.uniform1f(this._loc.u_blendFactor, opts.blendFactor ?? 0.35);
-        gl.uniform1f(this._loc.u_falloff, opts.falloff ?? 4.0);
-        gl.uniform1i(this._loc.u_sharpCircle, mandala.sharpCircleIndex);
-        gl.uniform1f(this._loc.u_sharpFalloff, opts.sharpFalloff ?? 7.0);
-        gl.uniform1f(this._loc.u_sharpBlendK, opts.sharpBlendK ?? 0.20);
-        gl.uniform1f(this._loc.u_maskSoft, opts.maskSoft ?? 0.2);
-        gl.uniform1i(this._loc.u_seamCount, mandala.seamCount);
-        gl.uniform3fv(this._loc.u_seamColors, mandala.seamColorsFlat);
-        gl.uniform2fv(this._loc.u_seamPosA, mandala.seamPosAFlat);
-        gl.uniform2fv(this._loc.u_seamPosB, mandala.seamPosBFlat);
-        gl.uniform1f(this._loc.u_seamStrength, opts.seamStrength ?? 1.4);
-        gl.uniform1f(this._loc.u_colorEdgeSoft, opts.colorEdgeSoft ?? 0.006);
-        gl.uniform1f(this._loc.u_colorEdgeCore, opts.colorEdgeCore ?? 0.048);
-        gl.uniform1f(this._loc.u_colorSharpness, opts.colorSharpness ?? 2.0);
-        gl.uniform1f(this._loc.u_boundaryGlow, opts.boundaryGlow ?? 0.35);
-        gl.uniform1f(this._loc.u_colorSatBoost, opts.colorSatBoost ?? 1.8);
-        gl.uniform3f(this._loc.u_bgColor, bg[0], bg[1], bg[2]);
+        ctx.globalCompositeOperation = 'source-over';
+        this._applyGrainOverlay(ctx, w, h, opts.seed ?? 0, opts.grainAlpha ?? 18);
 
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
         return canvas;
     },
 

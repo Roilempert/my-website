@@ -2,20 +2,33 @@
 
 ## Project goal
 
-A spatial research platform that treats personal notes from mobile phones as material for study — how people interact, what they feel, and what they think, as captured in short written traces. The site turns a live note archive into an explorable field: visitors can wander without a fixed path or deliberately study specific topics through the interface.
+A **laboratory** for exploring how people use mobile notes — a platform to investigate, explore, and learn from short written traces captured on phones. Visitors are invited to express **nosiness**: unconventional filtering and digital roaming to snoop through a live note archive. The site is **ceremonial** — a threshold for seeing into the human mind through its words — while remaining **slick, fun, and well designed**, not a dry database or institutional archive.
 
-The experience should feel **slick, fun, and well designed** — polished interaction and visual craft, not a dry database or institutional archive.
+Full experience architecture: [`docs/architecture/experience-model.md`](docs/architecture/experience-model.md).
 
 ## What I want to achieve
 
 - **Live data pipeline:** A stable system that loads note data (Google Sheets with local CSV fallback) and maps each row to an object on the canvas.
-- **Two modes of use:**
-  - **Discovery** — aimless roaming across a deep scroll/zoom space; notes surface through motion, proximity, and curiosity.
-  - **Study** — intentional focus on topics via blocks, tags, capture, and depth levels (macro → meso → micro).
-- **Deep display space:** Multi-directional navigation across three zoom levels for exploring note particles.
+- **Three-part experience** *(opening screen planned; Experience 2 planned):*
+  - **Opening screen** — ceremonial onboarding threshold; typographic **silhouette forms** as abstract artistic decoration (not readable notes). *Status: planned.*
+  - **Experience 1 — Spatial laboratory** — the current build: L1 macro physics, L3 micro (full notes grid), blocks, capture, inspector. Two complementary modes inside this path:
+    - **Discovery (roaming)** — curiosity-driven snooping through motion, proximity, and aimless roaming across a deep scroll/zoom space.
+    - **Study (focus)** — intentional investigation via blocks, tags, capture, and depth zoom (macro → micro).
+  - **Experience 2 — Archive roaming** — a second, different way to roam the archive. *Status: planned — design TBD.*
+- **Deep display space:** Two zoom levels — macro (dots + physics) and micro (full readable notes). L2 meso silhouettes removed from navigation; silhouette geometry kept for opening-screen art only.
 - **Data-driven physics:** Stable object behavior, clustering, and capture driven by each note's data (tags, layout), with precise colliders and no clipping.
-- **Typographic meso:** Medium zoom shows **typographic silhouettes** — abstract structure from title/body layout, not full readable notes. *(Interim: gradient mock at L2 until `SilhouetteEngine` is wired in V2 — see Meso layer below.)*
+- **Typographic meso:** Medium zoom shows **typographic silhouettes** — abstract structure from title/body layout, not full readable notes. Silhouettes also serve opening-screen art. *(Interim: gradient mock at L2 until `SilhouetteEngine` is wired in V2 — see Meso layer below.)*
 - **Optimization:** High, stable client-side performance for exhibition hardware and large note counts.
+
+## Experience architecture
+
+| Part | Status | Role |
+|------|--------|------|
+| **Opening screen** | planned | Ceremonial entry; sets the rules of looking; silhouette SVG paths as decorative art |
+| **Experience 1 — Spatial laboratory** | **active** | Full current build — L1 macro + L3 micro grid, warehouse/blocks, inspector |
+| **Experience 2 — Archive roaming** | planned | Complementary archive path — different roaming and filtering mechanics TBD |
+
+Details, silhouette art intent, and Experience 2 open questions: [`docs/architecture/experience-model.md`](docs/architecture/experience-model.md).
 
 ## Context
 
@@ -23,12 +36,15 @@ Bezalel visual communication graduation project, year 4. Built for **frontal exh
 
 **Exhibition hardware:** 21.5-inch screen — design and performance targets assume this viewport; launcher steps in [`EXHIBITION-START-HERE.txt`](EXHIBITION-START-HERE.txt).
 
+**Saved baseline (2026-07-05):** Before major redesign, the pre-change site was saved in two places — Git branch `archive/2026-07-05-pre-redesign` (GitHub) and local folder `my-website-old` (sibling to this repo). Details: [`docs/archive/2026-07-05-pre-redesign/README.md`](docs/archive/2026-07-05-pre-redesign/README.md).
+
 ## Design direction
 
 | Layer | Direction |
 |-------|-----------|
 | **Product UI** | Slick, fun, well crafted — spatial, responsive, rewarding to move through |
-| **Content** | Hebrew personal notes from phones; tags as study categories |
+| **Ceremonial tone** | Threshold and invitation to look — respect for private words; nosiness as a designed affordance, not voyeurism for its own sake |
+| **Content** | Hebrew personal notes from phones; tags as investigation categories |
 | **Agent/docs tone** | Clear, professional, analytical (English) — see `.cursor/rules/english-communication.mdc` |
 
 Do not default to a cold clinical or faux-archival aesthetic unless a specific task calls for it.
@@ -46,12 +62,15 @@ Canvas grids inside `#app` (macro physics, L2 meso, L3 micro) are separate and w
 - **Work language:** English for docs, agents, and code comments.
 - Libraries: Matter.js (`vendor/matter.min.js` — bundled locally for offline/exhibition).
 - **Docs:** [`docs/DOC-INDEX.md`](docs/DOC-INDEX.md) · **Visual language:** [`docs/visual-language.md`](docs/visual-language.md) · **Stability:** [`docs/CHECKPOINT.md`](docs/CHECKPOINT.md)
-- **Depth architecture (V2 active):** [`docs/architecture/depth-v2.md`](docs/architecture/depth-v2.md) · legacy: [`docs/architecture/depth-legacy.md`](docs/architecture/depth-legacy.md)
+- **Experience model:** [`docs/architecture/experience-model.md`](docs/architecture/experience-model.md) · **Depth (V2 active):** [`docs/architecture/depth-v2.md`](docs/architecture/depth-v2.md) · legacy: [`docs/architecture/depth-legacy.md`](docs/architecture/depth-legacy.md)
 
 ## Glossary
 
 | Term | Definition | In code |
 |---|---|---|
+| **Opening screen** | Pre-experience onboarding threshold; silhouette art, path choice. *Planned.* | — |
+| **Experience 1** | Spatial laboratory — current full build (L1 + depth + blocks). | — |
+| **Experience 2** | Complementary archive-roaming path. *Planned.* | — |
 | **Note** | Base content unit from data (title, body, ID, tags). | `item` / `.note-wrapper` |
 | **Tag** | Category with name and color from the sheet tag dictionary. | `tagColorsMap` |
 | **Dot** | Visual for one tag inside a note; the small physics body in space. | `.layer-dot` / `bodiesData` |
@@ -79,8 +98,8 @@ Canvas grids inside `#app` (macro physics, L2 meso, L3 micro) are separate and w
 | **Ring** | Radial layout of captured notes around a block; radius grows with count. | `updateOrbits` |
 | **Stretch** | Note captured by two or more blocks, pulled between them on springs. | `stretchedNotes` |
 | **Edge scroll** | Canvas navigation by holding the pointer at screen edges; clamped to content bounds. | `SpatialNavigation` |
-| **Depth levels** | Three wheel zoom levels: macro (dots + physics), meso (typographic silhouettes), micro (full notes). | `DepthController` |
-| **Inspector** | Single-note focus on click (meso/micro). | `ArtifactInspector` |
+| **Depth levels** | Two active levels: macro (L1 — dots + physics), micro (L3 — full notes grid). L2 meso not navigable; silhouettes reserved for opening-screen art. | `DepthController`, `activeLevels: [1, 3]` |
+| **Inspector** | Single-note focus popup (optional on L3 click). | `ArtifactInspector` |
 
 ## Working guidelines
 

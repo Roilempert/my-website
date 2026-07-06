@@ -35,9 +35,9 @@ Double-click (or right-click Open, first time only):
 
 Wait until you see:
 
-  Site is ready: http://127.0.0.1:8080/
+  Site is ready: http://127.0.0.1:8080/opening.html
 
-Then Chrome opens automatically. Leave Terminal open.
+Then Chrome opens automatically (opening screen). Leave Terminal open.
 
 
 Alternative: double-click  Start Site.app  (does the same thing)
@@ -73,6 +73,17 @@ TO STOP
 Close the Terminal window that opened.
 
 
+DEV NOTE (not for exhibition iMac)
+----------------------------------
+Exhibition opens: http://127.0.0.1:8080/  (redirects to opening.html)
+
+Skip opening during dev (one visit):
+  http://127.0.0.1:8080/opening.html?skipOpening=1
+
+Main site directly:
+  http://127.0.0.1:8080/experience.html
+
+
 NEED TO COPY AGAIN?
 -------------------
 If you copied the folder before these files existed, copy the whole
@@ -82,5 +93,8 @@ my-website folder again from the USB / other Mac. You need:
   Start Local Server.command
   data/main.csv
   data/tags.csv
-  index.html
+  data/opening-palette.json
+  opening.html
+  experience.html
+  index.html          (redirect → opening)
   js/  vendor/  styles.css  assets/

@@ -13,6 +13,20 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     try {
+        if (typeof OpeningBackground !== 'undefined') {
+            OpeningBackground.mountSiteBackground();
+        }
+    } catch (err) {
+        console.error('Site background init failed:', err);
+    }
+
+    try {
+        if (typeof NoteCensor !== 'undefined') NoteCensor.init();
+    } catch (err) {
+        console.error('NoteCensor.init failed:', err);
+    }
+
+    try {
         DepthController.init();
     } catch (err) {
         console.error('DepthController.init failed:', err);
@@ -52,6 +66,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const safetyMs = CONFIG.boot.safetyRevealMs ?? 5000;
     const safetyTimer = setTimeout(() => {
         console.warn('Boot safety reveal — data pipeline did not finish in time');
+        if (typeof AppState.prepareBoot === 'function') AppState.prepareBoot();
         AppState.revealApp();
         try {
             if (typeof NavigationMap !== 'undefined') {

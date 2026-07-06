@@ -88,7 +88,7 @@
     --layer-nav-label-line: 1;
     --layer-nav-label-box-h: calc(var(--layer-nav-font-size) + var(--layer-nav-box-pad-y-top) + var(--layer-nav-box-pad-y-bottom));
     --layer-nav-row-step: calc(var(--layer-nav-label-box-h) + var(--layer-nav-row-gap));
-    --layer-nav-stack-h: calc(3 * var(--layer-nav-label-box-h) + 2 * var(--layer-nav-row-gap));
+    --layer-nav-stack-h: calc(2 * var(--layer-nav-label-box-h) + 1 * var(--layer-nav-row-gap));
     --layer-nav-font-size: var(--type-nav-size);
     --layer-nav-shell-row-step: calc(var(--site-grid-cell-h) + var(--site-grid-gap));
     --layer-nav-active-label-h: var(--layer-nav-label-box-h);
@@ -246,6 +246,60 @@ body.view-level-3 .site-grid-cross {
 }
 
 /* Full-viewport pan layer — sits beneath #app; receives clicks through transparent grid cells */
+#site-background {
+    position: fixed;
+    inset: 0;
+    z-index: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+/* L1/L3 — SVG displacement grain (pixel warp, no color tint) */
+#site-background-wash {
+    position: absolute;
+    width: 0;
+    height: 0;
+    overflow: hidden;
+    pointer-events: none;
+}
+
+:root {
+    --site-grain-displace-filter: url(#site-grain-displace);
+}
+
+body.has-site-grain-displace.view-level-1 #app,
+body.has-site-grain-displace.view-level-1 .warehouse-shell,
+body.has-site-grain-displace.view-level-1 .site-navigation-layers,
+body.has-site-grain-displace.view-level-1 .link-canvas,
+body.has-site-grain-displace.view-level-1 .depth-block-bar,
+body.has-site-grain-displace.view-level-1 .molecule-hover-title.is-visible,
+body.has-site-grain-displace.view-level-3 #app,
+body.has-site-grain-displace.view-level-3 .warehouse-shell,
+body.has-site-grain-displace.view-level-3 .site-navigation-layers,
+body.has-site-grain-displace.view-level-3 .link-canvas,
+body.has-site-grain-displace.view-level-3 .depth-block-bar,
+body.has-site-grain-displace.view-level-3 .molecule-hover-title.is-visible {
+    filter: var(--site-grain-displace-filter);
+}
+
+body.has-site-grain-displace.is-depth-transition.view-level-1 #app,
+body.has-site-grain-displace.is-depth-transition.view-level-3 #app {
+    filter: var(--site-grain-displace-filter) blur(var(--depth-transition-blur, 0px));
+}
+
+body.has-site-grain-displace.is-presentation.is-depth-transition.view-level-1 #app,
+body.has-site-grain-displace.is-presentation.is-depth-transition.view-level-3 #app {
+    filter: var(--site-grain-displace-filter) blur(calc(var(--depth-transition-blur, 0px) * 0.45));
+}
+
+body.has-site-grain-displace.is-meso-to-micro.view-level-3 #app {
+    filter: var(--site-grain-displace-filter) blur(calc(var(--micro-atmosphere, 0) * 2px));
+}
+
+body.has-site-grain-displace.is-presentation.is-meso-to-micro.view-level-3 #app {
+    filter: var(--site-grain-displace-filter) blur(calc(var(--micro-atmosphere, 0) * 0.8px));
+}
+
 #nav-surface {
     position: fixed;
     inset: 0;
@@ -313,13 +367,19 @@ body::before {
     height: 100vh;
     pointer-events: none;
     z-index: 50;
-    opacity: 1.0; 
-    filter: grayscale(100%) contrast(300%) brightness(120%);
-    mix-blend-mode: multiply; 
+    opacity: 0.5;
+    filter: grayscale(100%) contrast(220%) brightness(125%);
+    mix-blend-mode: multiply;
     background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noiseFilter'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='3.0' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noiseFilter)'/%3E%3C/svg%3E");
 }
 
 body.is-presentation::before {
+    display: none;
+}
+
+/* L1/L3 displacement grain — hide legacy multiply film-grain layer */
+body.has-site-grain-displace.view-level-1::before,
+body.has-site-grain-displace.view-level-3::before {
     display: none;
 }
 
@@ -573,8 +633,8 @@ body.is-macro-to-meso.is-meso-in-place:not(.is-meso-zoom-out) .note-wrapper.is-m
 body.is-meso-zoom-out.is-meso-in-place .note-wrapper.is-meso-anchored .layer-dot {
     left: 50%;
     top: 50%;
-    margin-left: calc(var(--dot-size, 10px) / -2);
-    margin-top: calc(var(--dot-size, 10px) / -2);
+    margin-left: calc(var(--dot-render-size, var(--dot-size, 10px)) / -2);
+    margin-top: calc(var(--dot-render-size, var(--dot-size, 10px)) / -2);
     opacity: calc(1 - var(--macro-meso-reveal, 0)) !important;
     visibility: visible !important;
     transform: scale(1) translate(var(--phys-x, 0px), var(--phys-y, 0px)) !important;
@@ -859,10 +919,12 @@ body.is-meso-to-micro #app {
 }
 
 body.view-level-1 .layer-dot {
+    width: var(--dot-render-size, var(--dot-size, 10px));
+    height: var(--dot-render-size, var(--dot-size, 10px));
     left: 50%;
     top: 50%;
-    margin-left: calc(var(--dot-size, 10px) / -2);
-    margin-top: calc(var(--dot-size, 10px) / -2);
+    margin-left: calc(var(--dot-render-size, var(--dot-size, 10px)) / -2);
+    margin-top: calc(var(--dot-render-size, var(--dot-size, 10px)) / -2);
     opacity: 1;
     pointer-events: auto;
     transition: opacity 0.4s cubic-bezier(0.25, 1, 0.5, 1),
@@ -1218,12 +1280,22 @@ body.view-level-3 .layer-dot {
 }
 
 .type-body,
-.note-body,
-.note-t {
+.note-body {
     font-family: var(--type-family-body);
     font-size: var(--type-body-size);
     font-weight: var(--type-body-weight);
     line-height: var(--type-body-line);
+    max-width: var(--type-body-max-ch);
+    padding: 0 0.5rem;
+    white-space: pre-wrap;
+}
+
+.note-body.note-t,
+.note-t.note-body {
+    font-family: var(--type-family-body);
+    font-size: var(--type-body-size);
+    font-weight: var(--type-body-weight);
+    line-height: 1.2;
     max-width: var(--type-body-max-ch);
     padding: 0 0.5rem;
     white-space: pre-wrap;
@@ -1814,6 +1886,7 @@ body.site-grid .artifact-inspector-panel.is-open {
     white-space: pre-wrap;
     margin: 0;
     padding: 0;
+    line-height: 1.2;
 }
 
 .artifact-inspector-panel .note-title + .note-body {
@@ -2851,6 +2924,13 @@ body.view-level-3 .action-block--frame.is-drop-target {
     border-radius: 50%;
     background: transparent;
     box-sizing: border-box;
+}
+
+/* L1 — deployed block stays visible in tray as a non-interactive reserve pill */
+.block-slot .action-block.is-dock-reserve {
+    pointer-events: none;
+    cursor: default;
+    box-shadow: none;
 }
 
 .block-slot--frame.is-empty {
@@ -3991,7 +4071,7 @@ body.is-depth-v2.view-level-2 .depth-v2-glyph--meso {
     display: none;
 }
 
-/* p5 mandala — baked morph shader; slice per line (same as shader) */
+/* p5 mandala — baked blob field; slice per line (same as shader) */
 .meso-mock__frame[data-gradient-mode="p5"] {
     position: relative;
     overflow: hidden;
@@ -4250,6 +4330,7 @@ body.is-depth-v2.view-level-3 .micro-mock__card .note-body {
     overflow-wrap: anywhere;
     margin: 0;
     padding: 0;
+    line-height: 1.2;
 }
 
 body.is-depth-v2.view-level-3 .micro-mock__card .note-title + .note-body {
@@ -4419,4 +4500,511 @@ body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .note-wrapper:has(.micro
 
 body.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-grid-column:has(.micro-mock__card.note-card:hover) {
     overflow: visible;
+}
+
+/* ==========================================================================
+   Opening screen — ceremonial threshold
+   ========================================================================== */
+
+body.opening-page {
+    overflow: hidden;
+    min-height: 100vh;
+}
+
+body.opening-page::before {
+    display: none;
+}
+
+body.opening-page #opening-screen {
+    opacity: 1;
+    pointer-events: auto;
+}
+
+#opening-screen {
+    position: fixed;
+    inset: 0;
+    z-index: 11000;
+    display: grid;
+    grid-template-rows: 1fr auto;
+    align-items: center;
+    justify-items: center;
+    background: var(--color-5);
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transition: none;
+}
+
+#opening-screen.is-visible {
+    opacity: 1;
+    pointer-events: auto;
+    transition: none;
+}
+
+#opening-screen.is-exiting {
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity var(--opening-exit-duration, 600ms) ease;
+}
+
+#opening-screen.is-art-pending .opening-screen__art {
+    opacity: 0;
+}
+
+#opening-screen.is-art-ready .opening-screen__art {
+    opacity: 1;
+    transition: opacity var(--opening-art-fade-duration, 600ms) ease;
+}
+
+#opening-screen.is-art-pending .opening-screen__corners {
+    opacity: 0;
+}
+
+#opening-screen.is-art-ready .opening-screen__corners {
+    opacity: 1;
+    transition: opacity 500ms ease 180ms;
+}
+
+.opening-screen__corners {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 3;
+}
+
+.opening-screen__corner {
+    position: absolute;
+    width: 0.375rem;
+    height: 0.375rem;
+    background: center / contain no-repeat url("assets/ui/decoration-corner-tr.svg");
+}
+
+.opening-screen__corner--tl {
+    top: 0;
+    left: 0;
+    transform: scaleX(-1);
+}
+
+.opening-screen__corner--tr {
+    top: 0;
+    right: 0;
+}
+
+.opening-screen__corner--bl {
+    bottom: 0;
+    left: 0;
+    transform: scale(-1, 1);
+}
+
+.opening-screen__corner--br {
+    bottom: 0;
+    right: 0;
+    transform: scaleY(-1);
+}
+
+.opening-screen__art {
+    position: absolute;
+    inset: 0;
+    overflow: hidden;
+    pointer-events: none;
+    z-index: 2;
+    background: transparent;
+}
+
+.site-background__canvas,
+.opening-screen__bg-canvas {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    display: block;
+    z-index: 0;
+    pointer-events: none;
+}
+
+.opening-screen__content {
+    position: relative;
+    z-index: 3;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: var(--space-20);
+    width: min(42rem, calc(100% - var(--space-40)));
+    text-align: center;
+    direction: rtl;
+    padding: var(--space-40);
+    pointer-events: none;
+}
+
+#opening-screen .opening-screen__content {
+    z-index: 3;
+}
+
+#opening-screen .opening-screen__art {
+    z-index: 2;
+}
+
+.opening-screen__content .opening-screen__continue {
+    pointer-events: auto;
+}
+
+.opening-screen__title {
+    margin: 0;
+    color: var(--color-4);
+    opacity: 1;
+    min-height: 1.15em;
+    unicode-bidi: plaintext;
+}
+
+.opening-screen__title.is-cursor-wait::after,
+.opening-screen__title.is-typing::after {
+    content: '';
+    display: inline-block;
+    width: 0.1rem;
+    height: 0.82em;
+    margin-inline-start: 0.12em;
+    background: currentColor;
+    vertical-align: baseline;
+    animation: opening-title-cursor 1.6s step-end infinite;
+}
+
+#opening-screen.is-art-ready .opening-screen__title {
+    animation: none;
+}
+
+.opening-screen__subtitle {
+    margin: 0;
+    color: var(--color-4);
+    max-width: 36rem;
+    opacity: 1;
+    transform: none;
+}
+
+#opening-screen.is-art-pending .opening-screen__continue {
+    visibility: visible;
+    opacity: 0.35;
+}
+
+#opening-screen.is-art-ready .opening-screen__continue {
+    visibility: visible;
+}
+
+.opening-screen__continue {
+    margin-top: var(--space-10);
+    padding: var(--space-10) var(--space-30);
+    border: none;
+    border-radius: var(--space-5);
+    background: var(--color-3);
+    color: var(--color-1);
+    cursor: pointer;
+    opacity: 0;
+    transform: translateY(0.5rem);
+    transition: background 0.2s ease;
+}
+
+.opening-screen__continue.is-ready:not(:disabled) {
+    opacity: 1;
+    transform: none;
+    animation: none;
+}
+
+.opening-screen__continue:disabled {
+    cursor: default;
+    opacity: 0.35;
+}
+
+.opening-screen__continue:not(:disabled):hover {
+    background: var(--color-4);
+}
+
+@keyframes opening-copy-in {
+    from {
+        opacity: 0;
+        transform: translateY(0.75rem);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+@keyframes opening-title-cursor {
+    0%, 100% {
+        opacity: 1;
+    }
+    50% {
+        opacity: 0;
+    }
+}
+
+body.opening-active {
+    overflow: hidden;
+}
+
+body.opening-active #app,
+body.opening-active #nav-surface,
+body.opening-active .link-canvas,
+body.opening-active .warehouse-shell,
+body.opening-active .site-navigation-layers,
+body.opening-active .filter-fringe-zone {
+    visibility: hidden !important;
+    pointer-events: none !important;
+}
+
+/* ==========================================================================
+   Censored theme — white note cards, black redaction bars, no tags
+   ========================================================================== */
+
+.note-redact {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    width: 100%;
+    min-width: 0;
+}
+
+/* Bar line boxes match .note-h / .note-t metrics (font-size × line-height per row) */
+.note-title.note-h .note-redact {
+    gap: 0;
+}
+
+.note-title.note-h .note-redact__bar {
+    height: calc(1em * 0.9);
+}
+
+.note-body.note-t .note-redact {
+    gap: 0;
+    padding: 0;
+    max-width: none;
+    white-space: normal;
+    line-height: 1.2;
+}
+
+.note-body.note-t .note-redact__bar {
+    height: 1.2em;
+}
+
+.note-redact__bar {
+    display: block;
+    background: var(--color-4);
+    border-radius: 2px;
+    flex-shrink: 0;
+    max-width: 100%;
+}
+
+.note-idcode .note-redact {
+    gap: 0;
+}
+
+.note-idcode .note-redact__bar {
+    height: 1em;
+}
+
+/* Censored L3 — word tokens: black mask per word, reveal one word on hover */
+.note-redact--words {
+    display: inline;
+    width: auto;
+    min-width: 0;
+    white-space: normal;
+}
+
+.note-body.note-t .note-redact--words,
+.note-title.note-h .note-redact--words {
+    display: inline;
+    line-height: 1.2;
+}
+
+.note-redact__break {
+    display: block;
+    height: 0.35em;
+    line-height: 0;
+}
+
+.note-body.note-t .note-redact__break {
+    height: 0.35em;
+}
+
+body.view-level-3.is-theme-censored .note-redact__word {
+    display: inline;
+    position: relative;
+    vertical-align: baseline;
+    pointer-events: auto !important;
+    touch-action: auto !important;
+    cursor: default;
+    color: transparent;
+    border-radius: 2px;
+    line-height: 1.2;
+}
+
+body.view-level-3.is-theme-censored.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-mock__card.note-card .note-redact__word {
+    pointer-events: auto !important;
+    touch-action: auto !important;
+}
+
+body.view-level-3.is-theme-censored .note-redact__word::after {
+    content: '';
+    position: absolute;
+    inset: 0.02em 0;
+    background: var(--word-cover-color, var(--color-4));
+    border-radius: 2px;
+    pointer-events: none;
+}
+
+body.view-level-3.is-theme-censored .note-redact__word:hover,
+body.view-level-3.is-theme-censored .note-redact__word.is-revealed,
+body.view-level-3.is-theme-censored .note-redact__word:focus-visible {
+    color: var(--color-4) !important;
+}
+
+body.view-level-3.is-theme-censored .note-redact__word:hover::after,
+body.view-level-3.is-theme-censored .note-redact__word.is-revealed::after,
+body.view-level-3.is-theme-censored .note-redact__word:focus-visible::after {
+    opacity: 0;
+}
+
+body.view-level-3.is-theme-censored .note-idcode .note-redact__word::after {
+    inset: 0.04em 0;
+}
+
+/* Censored L3 — word match lines from hovered token to identical words */
+.note-censor-word-links {
+    position: fixed;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    pointer-events: none;
+    z-index: 32;
+    overflow: visible;
+    display: none;
+}
+
+body.view-level-3.is-theme-censored .note-censor-word-links.is-active {
+    display: block;
+}
+
+body.view-level-3.is-theme-censored .note-censor-word-links .note-censor-word-links__trail {
+    stroke: var(--color-4);
+    stroke-width: 2.5;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    opacity: 0.82;
+    vector-effect: non-scaling-stroke;
+    fill: none;
+}
+
+/* Censored L3 — same card floor + fluid body as original; no attached blocks */
+body.view-level-3.is-theme-censored.is-depth-v2.view-level-3 .micro-mock__card .note-body {
+    flex: 1 1 auto;
+}
+
+body.view-level-3.is-theme-censored.is-depth-v2.view-level-3 #app.is-micro-grid-layout .micro-mock__card.note-card {
+    min-height: var(--site-micro-note-min-height, calc(6 * var(--site-grid-cell-h) + 5 * var(--site-grid-gap))) !important;
+}
+
+body.view-level-3.is-theme-censored .micro-mock__tags,
+body.view-level-3.is-theme-censored .artifact-inspector-metadata__tags,
+body.view-level-3.is-theme-censored .artifact-inspector-flyer .micro-mock__tags,
+body.view-level-3.is-theme-censored .artifact-inspector-related__pill,
+body.view-level-3.is-theme-censored .artifact-inspector-related__plus {
+    display: none !important;
+}
+
+body.view-level-3.is-theme-censored .micro-mock__card .note-title,
+body.view-level-3.is-theme-censored .micro-mock__card .note-body {
+    color: transparent;
+    user-select: none;
+}
+
+body.view-level-3.is-theme-censored .micro-mock__card .note-idcode {
+    color: var(--color-4);
+    user-select: text;
+}
+
+body.view-level-3.is-theme-censored .artifact-inspector-metadata__id {
+    color: transparent;
+}
+
+body.view-level-3.is-theme-censored .artifact-inspector-metadata__details dd {
+    color: transparent;
+}
+
+body.view-level-3.is-theme-censored .artifact-inspector-metadata__details dt {
+    opacity: 0.35;
+}
+
+body.view-level-3.is-theme-censored.is-depth-v2.view-level-3 .micro-mock__card .note-title + .note-body {
+    margin-top: var(--space-10);
+}
+
+body.view-level-3.is-theme-censored #app.is-micro-grid-layout .micro-mock__card.note-card:hover,
+body.view-level-3.is-theme-censored #app.is-micro-grid-layout .note-wrapper:has(.micro-mock__card.note-card:hover) {
+    z-index: auto;
+    overflow-x: clip !important;
+}
+
+body.view-level-3.is-theme-censored #app.is-micro-grid-layout .note-wrapper:has(.micro-mock__card.note-card:hover) .note-stage,
+body.view-level-3.is-theme-censored #app.is-micro-grid-layout .note-wrapper:has(.micro-mock__card.note-card:hover) .depth-v2-glyph--micro,
+body.view-level-3.is-theme-censored #app.is-micro-grid-layout .micro-grid-column:has(.micro-mock__card.note-card:hover) {
+    overflow-x: clip !important;
+    overflow: clip;
+}
+
+/* Censored L3 — study unlock affordance (committed word on note) */
+body.view-level-3.is-theme-censored .note-wrapper.is-study-unlocked .micro-mock__card.note-card {
+    outline: var(--outline-weight) solid var(--color-3);
+    outline-offset: 2px;
+}
+
+body.view-level-3.is-theme-censored .note-wrapper.is-study-unlocked {
+    cursor: pointer;
+}
+
+/* Censored L3 — word panel replaces block tray (L1 keeps blocks) */
+body.is-word-panel-mode .warehouse-tray-section--frames,
+body.is-word-panel-mode .warehouse-tray-divider,
+body.is-word-panel-mode .warehouse-tray-section--blocks .block-slot {
+    display: none !important;
+}
+
+body.is-word-panel-mode .warehouse-tray-section--blocks.word-panel {
+    flex-wrap: wrap;
+    align-content: flex-start;
+    row-gap: 0.625rem;
+    column-gap: var(--space-10);
+}
+
+body.is-word-panel-mode .word-panel__chip {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    max-width: 100%;
+    height: var(--block-height, 26px);
+    padding: 0 0.85rem;
+    border: var(--outline-weight) solid var(--color-3);
+    border-radius: calc(var(--block-height, 26px) / 2);
+    background-color: var(--color-1);
+    color: var(--color-3);
+    box-sizing: border-box;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    animation: word-panel-chip-in 0.38s cubic-bezier(0.25, 1, 0.5, 1) both;
+}
+
+@keyframes word-panel-chip-in {
+    from {
+        opacity: 0;
+        transform: translateY(5px) scale(0.94);
+    }
+    to {
+        opacity: 1;
+        transform: none;
+    }
+}
+
+body.is-word-panel-mode .warehouse-shell.is-word-panel .warehouse-reset {
+    opacity: 1;
+    pointer-events: auto;
 }

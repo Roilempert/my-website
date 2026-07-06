@@ -56,7 +56,8 @@ const RenderEngine = {
             </div>
         `;
         
-        const layerSmall = `
+        const useV2SilhouetteSkip = typeof DepthV2 !== 'undefined' && DepthV2.isActive();
+        const layerSmall = useV2SilhouetteSkip ? '' : `
             <div class="layer-item layer-small">
                 <div class="meso-silhouette" aria-hidden="true" data-silhouette-state="pending">
                     <svg class="meso-silhouette__svg" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
@@ -105,11 +106,7 @@ const RenderEngine = {
                 if (noteIndex < 0) return;
 
                 if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
-                    if (ArtifactInspector.isActive) {
-                        ArtifactInspector.close();
-                    } else {
-                        ArtifactInspector.open(wrapper);
-                    }
+                    DepthController.changeLevel(3);
                     return;
                 }
 
@@ -119,6 +116,10 @@ const RenderEngine = {
                 return;
             }
 
+            if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+                if (!NoteCensor.isNoteStudyUnlocked(wrapper)) return;
+            }
+
             if (ArtifactInspector.isActive) {
                 ArtifactInspector.close();
             } else {
@@ -126,7 +127,9 @@ const RenderEngine = {
             }
         });
         
-        SilhouetteEngine.registerWrapper(wrapper, item);
+        if (!useV2SilhouetteSkip) {
+            SilhouetteEngine.registerWrapper(wrapper, item);
+        }
         if (typeof TextDirection !== 'undefined') {
             TextDirection.applyToWrapper(wrapper, item.textDirection);
         }

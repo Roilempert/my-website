@@ -33,11 +33,7 @@ const DepthController = {
     isWheelLocked() {
         return this._levelChangeActive ||
             this.isAnyTransitionActive() ||
-            Date.now() < this._wheelLockUntil ||
-            (this.currentLevel === 2 &&
-                typeof DepthV2 !== 'undefined' &&
-                DepthV2.isActive() &&
-                !!DepthV2._prepareMesoPromise);
+            Date.now() < this._wheelLockUntil;
     },
 
     lockWheelAfterTransition() {
@@ -111,11 +107,11 @@ const DepthController = {
     },
 
     zoomIn() {
-        if (this.currentLevel >= this.maxLevel || this.isWheelLocked()) return false;
+        const next = getDepthAdjacentLevel(this.currentLevel, 1);
+        if (next === this.currentLevel || this.isWheelLocked()) return false;
         if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
             ArtifactInspector.close();
         }
-        const next = this.currentLevel + 1;
         if (typeof DepthTransitionOrchestrator !== 'undefined' &&
             DepthTransitionOrchestrator.runWheelZoom(next)) {
             return false;
@@ -124,11 +120,11 @@ const DepthController = {
     },
 
     zoomOut() {
-        if (this.currentLevel <= this.minLevel || this.isWheelLocked()) return false;
+        const next = getDepthAdjacentLevel(this.currentLevel, -1);
+        if (next === this.currentLevel || this.isWheelLocked()) return false;
         if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
             ArtifactInspector.close();
         }
-        const next = this.currentLevel - 1;
         if (typeof DepthTransitionOrchestrator !== 'undefined' &&
             DepthTransitionOrchestrator.runWheelZoom(next)) {
             return false;
@@ -138,6 +134,7 @@ const DepthController = {
 
     changeLevel(newLevel) {
         if (this.currentLevel === newLevel) return false;
+        if (!isDepthLevelActive(newLevel)) return false;
 
         const prevLevel = this.currentLevel;
         const isMacroMesoTransition =
@@ -367,12 +364,9 @@ const DepthController = {
             'is-macro-grid-settle'
         );
 
-        if (newLevel >= 2 && prevLevel === 1) {
+        if (newLevel === 3 && prevLevel === 1) {
             if (MacroMesoBridge.isAnimating()) {
                 MacroMesoBridge.cancelAnimation();
-            }
-            if (typeof MesoSpatialLayout !== 'undefined') {
-                MesoSpatialLayout.captureAndStoreSnapshot();
             }
             if (typeof DepthV2 !== 'undefined') {
                 DepthV2.ensureShell();
@@ -394,51 +388,16 @@ const DepthController = {
                     if (typeof SpatialNavigation !== 'undefined') {
                         SpatialNavigation.resume();
                     }
-                    const pending = typeof MesoMock !== 'undefined' && MesoMock.hasPendingTextureBakes();
-                    if (!pending) {
-                        AppState.centerCanvasOnLayerEnter();
-                    }
+                    AppState.centerCanvasOnLayerEnter();
                 });
             });
             return true;
         }
 
-        if (prevLevel === 2 && newLevel === 3) {
-            this.currentLevel = newLevel;
-            this.syncViewLevelClass(newLevel);
-            ActionWarehouse.updateScrollReserve();
-            ActionWarehouse.syncDeployedBlocksForDepth?.();
-            ActionWarehouse.updateDotFocusFilter();
-            requestAnimationFrame(() => {
-                AppState.centerCanvasOnLayerEnter();
-                if (typeof SpatialNavigation !== 'undefined') {
-                    SpatialNavigation.resume();
-                }
-                this.endLevelChange();
-            });
-            return true;
-        }
-
-        if (prevLevel === 3 && newLevel === 2) {
+        if (newLevel === 1 && prevLevel === 3) {
             if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
                 ArtifactInspector.close();
             }
-            this.currentLevel = newLevel;
-            this.syncViewLevelClass(newLevel);
-            ActionWarehouse.updateScrollReserve();
-            ActionWarehouse.syncDeployedBlocksForDepth?.();
-            ActionWarehouse.updateDotFocusFilter();
-            requestAnimationFrame(() => {
-                AppState.centerCanvasOnLayerEnter();
-                if (typeof SpatialNavigation !== 'undefined') {
-                    SpatialNavigation.resume();
-                }
-                this.endLevelChange();
-            });
-            return true;
-        }
-
-        if (newLevel === 1 && prevLevel >= 2) {
             // קודם L1 ב-DOM — רק אז סנכרון פיזיקה (לא buildWorld)
             this.currentLevel = newLevel;
             this.syncViewLevelClass(newLevel);

@@ -111,6 +111,151 @@ const CONFIG = {
         idleRefreshMs: 0 // 0 = disabled; set e.g. 3 * 60 * 1000 for kiosk idle reload
     },
 
+    /* --- Visual theme --- */
+    theme: {
+        mode: 'censored',           // 'default' | 'censored' — L3 only: redaction bars, word panel
+        dwellMs: 700,               // hover this long to commit word + add to panel
+        wordPanelMessage: 'החזיקו על מילה לגילוי',
+        wordLinks: {
+            duration: 1650,
+            stagger: 175,
+            revertDuration: 920,
+            strokeWidthStart: 0.9,
+            strokeWidthEnd: 2.5,
+            opacityMax: 0.82
+        }
+    },
+
+    /*
+     * --- Site background (ink-blot fold mirror) ---
+     * Shared by opening.html (.opening-screen__art) and experience.html (#site-background).
+     */
+    siteBackground: {
+        enabled: true,
+        mode: 'grain',
+        washOverContent: true,
+        showBlobs: false,
+        grainMode: 'displace',
+        grainDisplacementScale: 2.5,
+        grainDisplacementFrequency: 0.75,
+        grainDisplacementOctaves: 3,
+        grainDisplacementAnimate: true,
+        grainDisplacementSeedRate: 0.4,
+        bgColor: '#F2F0EE',
+        blobCount: 16,
+        mirrorFolds: 2,
+        foldCreaseAlpha: 10,
+        foldCreaseWidth: 0.75,
+        scatterSpread: 0.28,
+        scatterCenterX: 0.5,
+        scatterCenterY: 0.5,
+        radiusMin: 0.05,
+        radiusMax: 0.13,
+        dotCountMin: 1,
+        dotCountMax: 5,
+        dotRadiusRatio: 0.4,
+        hullPaddingRatio: 0.25,
+        clusterBaseRatio: 0.38,
+        clusterPerDotRatio: 0.004,
+        spawnJitterRatio: 0.12,
+        pillCount: 0,
+        pillHeightMin: 0.024,
+        pillHeightMax: 0.04,
+        pillWidthMinRatio: 1.35,
+        pillWidthMaxRatio: 3.2,
+        pillRotationMax: 0.45,
+        pillPadX: 10,
+        pillBorderWidth: 2,
+        pillBorderAlpha: 0.9,
+        pillFillColor: 'var(--color-3)',
+        grainAlpha: 18,
+        grainWashAlpha: 18,
+        grainTilePx: 64,
+        grainSpread: 40,
+        grainMid: 128,
+        grainBlurPx: 0.3,
+        blurScale: 0.12,
+        seed: 'random',
+        maxDpr: 1.5,
+        mouseFollow: false,
+        mouseHoverRadiusScale: 1.1,
+        mouseHoverPadding: 10,
+        mouseHoverMaxShift: 0.017,
+        mouseHoverSmoothing: 0.1,
+        mouseReturnOnLeave: false
+    },
+
+    /*
+     * --- Opening screen (ceremonial threshold) ---
+     * Exhibition entry: opening.html (lightweight bundle).
+     * Main site: experience.html — no opening layer.
+     * Root index.html redirects to opening.html.
+     * Dev bypass: opening.html?skipOpening=1 (session only, no localStorage).
+     */
+    opening: {
+        enabled: true,
+        entryTarget: 'experience.html',
+        dataUrl: 'data/opening-palette.json',
+        minDisplayMs: 600,
+        artRevealAfterTitleMs: 500,
+        artFadeDurationMs: 1000,
+        titleTypewriterMsPerChar: 320,
+        titleCursorWaitMs: 1800,
+        exitDurationMs: 600,
+        background: {
+            mode: 'full',
+            showBlobs: true,
+            moleculeStyle: 'l1',
+            blurSource: 'content',
+            glowOverlay: false,
+            glowBlendMode: 'multiply',
+            blobBlendMode: 'source-over',
+            blobLayerAlpha: 0.58,
+            bgColor: 'var(--color-5)',
+            blurScale: 0.028,
+            contentBlurPx: 3.5,
+            glowAlpha: 0.07,
+            pillGlowAlpha: 0.42,
+            dotVisualScale: 0.85,
+            hullStrokeWidth: 0.27,
+            hullStrokeAlpha: 0.62,
+            hullPaddingPx: 7,
+            linkAlpha: 0.48,
+            dotCountMin: 2,
+            dotCountMax: 5,
+            blobCount: 8,
+            pillCount: 4,
+            maxDpr: 1,
+            repaintThrottleMs: 48,
+            dotMotion: false,
+            dotPointerRepel: false,
+            grainAlpha: 17,
+            grainBlendMode: 'soft-light',
+            grainSpread: 54,
+            grainBlurPx: 0.2,
+            grainTilePx: 40,
+            mouseFollow: true,
+            mouseHoverMaxShift: 0.017,
+            mouseHoverSmoothing: 0.1,
+            mouseReturnOnLeave: false,
+            foldCreaseAlpha: 0
+        },
+        devSkipStorageKey: 'opening.skip',
+        preloadAssets: [
+            'assets/ui/layer-nav-marker.svg',
+            'assets/ui/decoration-corner-tr.svg',
+            'assets/fonts/NarkissYair-Bold-TRIAL.woff2',
+            'assets/fonts/NarkissYair-BoldMono-TRIAL.woff2',
+            'assets/fonts/TheBasics-Dots.woff2',
+            'assets/fonts/FrankRuhl_Universal-Mono.woff2'
+        ],
+        labels: {
+            title: 'עקבות',
+            subtitle: 'מבט אל תוך מילים שנכתבו בטלפון — הזמנה להתעניין, לשוטט, לחקור.',
+            continue: 'כניסה'
+        }
+    },
+
     /* --- Exhibition / low-end profile (auto on localhost and weak hardware) --- */
     presentation: {
         enabled: 'auto',            // true | false | 'auto' — auto: localhost or ≤8 GB / ≤4 cores
@@ -163,6 +308,7 @@ const CONFIG = {
         initialLevel: 1,            // level shown on load (1 = macro / physics view)
         minLevel: 1,
         maxLevel: 3,
+        activeLevels: [1, 3],       // L2 meso removed — macro ↔ micro only
         cooldownDelay: 1200,        // ms lock after level change (blocks wheel pan during transitions)
         cameraLockDuration: 650,
         macroMesoRevealDuration: 640,
@@ -184,7 +330,7 @@ const CONFIG = {
         microNoteHoverRotation: { negativeMin: -10, negativeMax: -5, positiveMin: 5, positiveMax: 10 },
         depthEngine: 'v2',              // 'v2' = גרידים פשוטים חדשים | 'legacy' = מנוע קטלוג/מעברים
         layoutMode: 'legacy-grid',       // פעיל רק כש-depthEngine === 'legacy'
-        noteClickPath: 'direct-l3',      // 'direct-l3' | 'l2-preview-then-l3'
+        noteClickPath: 'direct-l3',      // L1 note click → L3 micro grid
         clickDragThreshold: 6,           // px — below = click navigate, above = drag
         moleculeClickPadding: 16,        // px — extra hit area around hull for L1 note click
         moleculeHoverMaxWords: 10,       // L1 hover label — first line, whole words only
@@ -231,35 +377,25 @@ const CONFIG = {
                 mockGradientMinWidth: 52,
                 mockSingleLineGradientBoost: 1.7,
                 mockTitleBodyGap: 10,
-                /* Unified L2 fill — p5 mandala bake + per-line slice (see depth-v2.md) */
+                /* Unified L2 fill — p5 organic blob bake + per-line slice (see depth-v2.md) */
                 mockGradientMode: 'p5',
-                mockP5Scale: 0.85,
-                mockP5MandalaFit: 1.0,
-                mockP5TagFit: 3.2,
-                mockP5SymmetricLayout: 1,
-                mockP5SymmetryCount: 8,
-                mockP5ShapeBreak: 0.35,
-                mockP5RingDistJitter: 0.04,
-                mockP5RingAngleJitter: 0.02,
-                mockP5CircleSquash: 0.12,
-                mockP5BlendFactor: 0.35,
-                mockP5Falloff: 4.0,
-                mockP5ColorEdgeSoft: 0.008,
-                mockP5ColorEdgeCore: 0.055,
-                mockP5ColorSharpness: 2.0,
-                mockP5ColorSatBoost: 1.8,
+                mockP5BgColor: '#f4f1ea',
+                mockP5BlobCount: 200,
+                mockP5RadiusMinScale: 0.04,
+                mockP5RadiusMaxScale: 0.32,
+                mockP5BlendMode: 'source-over',
+                mockP5VerticesMin: 15,
+                mockP5VerticesMax: 60,
+                mockP5DistortionMin: 0.2,
+                mockP5DistortionMax: 2.0,
+                mockP5BlurScale: 0.12,
+                mockP5GrainAlpha: 18,
+                mockP5EdgeDarken: 0.35,
                 mockP5ColorEnrich: 0.28,
                 mockFocusMutedColor: '#d6d6d6',
                 mockFocusMutedGrayMin: 196,
                 mockFocusMutedGrayMax: 232,
                 mockFocusMutedDesat: 0.94,
-                mockP5BoundaryGlow: 0.35,
-                mockP5MaskSoft: 0.2,
-                mockP5SharpChance: 0.25,
-                mockP5SharpFalloff: 6.5,
-                mockP5SharpBlendK: 0.24,
-                mockP5SeamChance: 0.32,
-                mockP5SeamStrength: 1.4,
                 mockP5TextureOverscale: 2.2,
                 mockP5GrainOpacity: 0,
                 mockShaderPreset: 'sdf-cosine-v1',
@@ -418,9 +554,9 @@ const CONFIG = {
         }
     },
 
-    /* --- Layer navigation — depth labels (מאקרו / מזו / מיקרו), top-right --- */
+    /* --- Layer navigation — depth labels (מאקרו / מיקרו), top-right --- */
     layerNavigation: {
-        labels: { 1: 'מאקרו', 2: 'מזו', 3: 'מיקרו' },
+        labels: { 1: 'מאקרו', 3: 'מיקרו' },
         rightInset: { value: 2.5, unit: 'rem' },
         boxGap: { value: 0.625, unit: 'rem' },
         boxPadding: { value: 0.625, unit: 'rem' },
@@ -432,7 +568,7 @@ const CONFIG = {
         slotMoveEasing: 'cubic-bezier(0.9, 0, 0.02, 1)',
         centerOnViewport: false,
         hitAreaPadding: { value: 0, unit: 'rem' },
-        slotCount: 3
+        slotCount: 2
     },
 
     /* --- Navigation minimap — spatial overview canvas, bottom-right (not layer labels) --- */
@@ -781,7 +917,9 @@ const CONFIG = {
     /* --- Note molecule outlines --- */
     outlines: {
         mode: 'hull',
-        padding: scale(7),         // px between a dot's edge and the outline membrane
+        padding: scale(7),         // physics hull shell + molecule extent (unchanged)
+        renderScale: 1,            // L1 dot visual diameter = 10px × renderScale (original)
+        renderPadding: scale(3),   // visual hull gap only — tighter than physics padding (7px)
         width: 0.2 * (96 / 72),
         hoverWidth: 0.55 * (96 / 72)
     }
@@ -845,6 +983,31 @@ function getDepthUnitScales() {
         ? unit.mesoRef
         : macro + (micro - macro) * (unit.mesoBias ?? 0.72);
     return { macro, meso, micro, cellW, moleculePx };
+}
+
+function getDepthActiveLevels() {
+    return CONFIG.depth.activeLevels || [1, 3];
+}
+
+function isDepthLevelActive(level) {
+    return getDepthActiveLevels().includes(level);
+}
+
+function getDepthAdjacentLevel(current, direction) {
+    const levels = getDepthActiveLevels();
+    const idx = levels.indexOf(current);
+    if (idx < 0) return current;
+    const nextIdx = idx + direction;
+    if (nextIdx < 0 || nextIdx >= levels.length) return current;
+    return levels[nextIdx];
+}
+
+function getDepthSlotIndex(level, activeLevel) {
+    const levels = getDepthActiveLevels();
+    const activeIdx = levels.indexOf(activeLevel);
+    const levelIdx = levels.indexOf(level);
+    if (activeIdx < 0 || levelIdx < 0) return level - activeLevel;
+    return levelIdx - activeIdx;
 }
 
 function getMesoRevealCellSize() {
@@ -1458,6 +1621,8 @@ function applyVisualScaleTokens() {
     const mesoZoom = getNoteZoomMeso();
 
     root.style.setProperty('--dot-size', `${scale(10)}px`);
+    const dotRenderScale = CONFIG.outlines?.renderScale ?? 1;
+    root.style.setProperty('--dot-render-size', `${scale(10 * dotRenderScale)}px`);
     root.style.setProperty('--warehouse-block-dot', '10px');
     root.style.setProperty('--tag-dot-size', `${scale(8)}px`);
     root.style.setProperty('--meso-tag-gap', `${mesoTags.gap}px`);
@@ -1575,6 +1740,21 @@ function applyPresentationProfile() {
         if (p.macroRefreshMsBlock) navMap.macroRefreshMsBlock = p.macroRefreshMsBlock;
         if (p.macroDotStride) navMap.macroDotStride = p.macroDotStride;
         if (p.depthMapMaxCollect) navMap.depthMapMaxCollect = p.depthMapMaxCollect;
+    }
+
+    const openingBg = CONFIG.opening?.background;
+    if (openingBg) {
+        openingBg.dotMotion = false;
+        openingBg.maxDpr = 1;
+        if (typeof openingBg.blobCount === 'number') {
+            openingBg.blobCount = Math.min(openingBg.blobCount, 8);
+        }
+        if (typeof openingBg.pillCount === 'number') {
+            openingBg.pillCount = Math.min(openingBg.pillCount, 4);
+        }
+        if (!openingBg.repaintThrottleMs) {
+            openingBg.repaintThrottleMs = 56;
+        }
     }
 
     document.documentElement.classList.add('is-presentation');

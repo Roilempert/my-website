@@ -50,6 +50,68 @@ const ActionWarehouse = {
     statisticsAnimationFrame: null,
     statisticsAnimationStartedAt: 0,
     statisticsAnimationDurationMs: 520,
+    _wordPanelWords: null,
+
+    isWordPanelTheme() {
+        return (CONFIG.theme?.mode || 'default') === 'censored';
+    },
+
+    isWordPanelLevelActive(level) {
+        const resolved = level ?? (typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1);
+        return this.isWordPanelTheme() && resolved === 3;
+    },
+
+    ensureWordPanel() {
+        if (!this.trayBlocksElement) return;
+        if (!this._wordPanelWords) this._wordPanelWords = new Set();
+    },
+
+    syncWordPanelMode(level) {
+        const active = this.isWordPanelLevelActive(level);
+        document.body.classList.toggle('is-word-panel-mode', active);
+        this.shellElement?.classList.toggle('is-word-panel', active);
+        this.trayBlocksElement?.classList.toggle('word-panel', active);
+        if (active) {
+            this.ensureWordPanel();
+            this.updateWordPanelMessage();
+        } else if (this.messagePortElement) {
+            const text = CONFIG.warehouse?.dock?.messageText || 'גררו להפעלה';
+            this.messagePortElement.textContent = text;
+        }
+    },
+
+    updateWordPanelMessage() {
+        if (!this.messagePortElement) return;
+        const text = CONFIG.theme?.wordPanelMessage
+            || CONFIG.warehouse?.dock?.messageText
+            || 'החזיקו על מילה לגילוי';
+        this.messagePortElement.textContent = text;
+    },
+
+    addCommittedWord(text) {
+        const key = String(text || '').trim();
+        if (!key || !this.isWordPanelTheme()) return;
+
+        this.ensureWordPanel();
+        if (this._wordPanelWords.has(key)) return;
+
+        this._wordPanelWords.add(key);
+
+        const chip = document.createElement('div');
+        chip.className = 'word-panel__chip general-t';
+        chip.dataset.wordKey = key;
+        chip.textContent = key;
+        chip.setAttribute('dir', 'auto');
+        this.trayBlocksElement.appendChild(chip);
+
+        requestAnimationFrame(() => this.updateScrollReserve());
+    },
+
+    clearWordPanel() {
+        if (!this.trayBlocksElement) return;
+        this.trayBlocksElement.querySelectorAll('.word-panel__chip').forEach((el) => el.remove());
+        if (this._wordPanelWords) this._wordPanelWords.clear();
+    },
 
     init() {
         this.ensurePhysicsMaps();
@@ -265,9 +327,51 @@ const ActionWarehouse = {
         this.shellElement?.classList.remove('is-depth-drop-active', 'is-depth-drop-fading');
     },
 
-    markSlotEmpty(block) {
+    shouldLeaveEmptyDockSlot() {
+        return typeof DepthController !== 'undefined' && DepthController.currentLevel === 3;
+    },
+
+    markSlotDockReserve(block) {
         const slot = block?.slotElement;
         if (!slot || block.nestedIn) return;
+
+        this.clearSlotReserve(block);
+
+        const { width, height } = this.blockMetrics(block);
+        slot.style.width = `${Math.ceil(width)}px`;
+        slot.style.height = `${Math.ceil(height)}px`;
+
+        const reserve = block.element.cloneNode(true);
+        reserve.classList.remove(
+            'is-dragging', 'is-deployed', 'is-selected', 'is-removable',
+            'is-returning', 'is-nested', 'is-depth-ui-mounted', 'is-deploying-to-bar',
+            'is-macro-indication', 'is-dock-irrelevant'
+        );
+        reserve.classList.add('is-dock-reserve');
+        reserve.removeAttribute('id');
+        reserve.setAttribute('aria-hidden', 'true');
+        reserve.style.transform = '';
+        reserve.querySelector('.block-remove-mark')?.remove();
+
+        slot.appendChild(reserve);
+        block._dockReserveEl = reserve;
+        this.restoreDockTrayOrder();
+    },
+
+    clearSlotReserve(block) {
+        block?._dockReserveEl?.remove();
+        delete block?._dockReserveEl;
+    },
+
+    markSlotEmpty(block) {
+        if (!this.shouldLeaveEmptyDockSlot()) {
+            this.markSlotDockReserve(block);
+            return;
+        }
+
+        const slot = block?.slotElement;
+        if (!slot || block.nestedIn) return;
+        this.clearSlotReserve(block);
         const { width, height } = this.blockMetrics(block);
         slot.style.width = `${Math.ceil(width)}px`;
         slot.style.height = `${Math.ceil(height)}px`;
@@ -285,6 +389,7 @@ const ActionWarehouse = {
     clearSlotEmpty(block) {
         const slot = block?.slotElement;
         if (!slot) return;
+        this.clearSlotReserve(block);
         slot.classList.remove('is-empty');
         slot.querySelector('.block-slot__ghost')?.remove();
         slot.style.removeProperty('width');
@@ -348,9 +453,17 @@ const ActionWarehouse = {
         tray.scrollTop += e.deltaY;
     },
 
-    // Returns every active block to its dock slot
+    // Returns every active block to its dock slot (or clears word panel in censored theme)
     resetAll() {
         if (this.dragState) return;
+
+        if (this.isWordPanelLevelActive()) {
+            this.clearWordPanel();
+            if (typeof NoteCensor !== 'undefined' && NoteCensor._clearAllHoverState) {
+                NoteCensor._clearAllHoverState();
+            }
+            return;
+        }
 
         this.clearMacroIndicationGhost();
         this.ensurePhysicsMaps();
@@ -414,6 +527,8 @@ const ActionWarehouse = {
             this.createBlock({ type: 'author', author: author });
         });
 
+        const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+        this.syncWordPanelMode(level);
         requestAnimationFrame(() => this.updateScrollReserve());
         this.captureDockTrayBaseOrder();
         this.updateWarehouseCapacityUI();
@@ -446,10 +561,11 @@ const ActionWarehouse = {
         if (!this.trayBlocksElement) return;
         this.ensureDockTrayBaseOrder();
 
-        const hasReservedSlot = this._dockTrayBaseOrder.some(block =>
-            block.slotElement?.classList.contains('is-empty') &&
-            block.slotElement?.parentElement === this.trayBlocksElement
-        );
+        const hasReservedSlot = this._dockTrayBaseOrder.some(block => {
+            const slot = block.slotElement;
+            if (!slot || slot.parentElement !== this.trayBlocksElement) return false;
+            return slot.classList.contains('is-empty') || !!block._dockReserveEl;
+        });
         if (hasReservedSlot) {
             this.restoreDockTrayOrder();
             return;
@@ -2051,7 +2167,7 @@ const ActionWarehouse = {
 
         document.body.classList.toggle(
             'is-block-focus',
-            focus && ((isV2Depth && level <= 3) || isMacro || isCatalogDepth)
+            focus && ((isV2Depth && level === 3) || isMacro || isCatalogDepth)
         );
         document.body.classList.toggle('is-block-filter', hasFilterCriteria);
         document.body.classList.toggle('is-catalog-lens', focus && (isCatalogDepth || (isV2Depth && level >= 2)));
@@ -2162,18 +2278,18 @@ const ActionWarehouse = {
             CatalogState.rebuildFromWarehouse();
         }
 
-        if (isV2Depth && level >= 2 && typeof DepthV2 !== 'undefined') {
+        if (isV2Depth && level === 3 && typeof DepthV2 !== 'undefined') {
             ActionWarehouse.syncDeployedBlocksForDepth?.();
             DepthV2.relayoutForFilterChange({ force: true });
-            if (level === 2 && typeof MesoMock !== 'undefined') {
-                MesoMock.refreshFocusLensTextures();
+            if (typeof MicroMock !== 'undefined') {
+                MicroMock.applyAll?.();
             }
         }
 
         this.updateWarehouseBlockRelevance();
         this.updateWarehouseCapacityUI();
 
-        if (typeof NavigationMap !== 'undefined' && level >= 2) {
+        if (typeof NavigationMap !== 'undefined' && level === 3) {
             NavigationMap.notifyMapRefreshTick(false);
         }
 

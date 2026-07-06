@@ -1096,9 +1096,20 @@ const PhysicsEngine = {
 
     /* --- Note molecule outlines --- */
 
+    getMacroDotRenderRadius() {
+        const factor = CONFIG.outlines?.renderScale ?? 1;
+        return scale(10 * factor) / 2;
+    },
+
+    getOutlineRenderPadding() {
+        const cfg = CONFIG.outlines;
+        return cfg.renderPadding ?? cfg.padding;
+    },
+
     collectNoteOutlineGroups() {
         const scrollX = window.pageXOffset;
         const scrollY = window.pageYOffset;
+        const dotR = this.getMacroDotRenderRadius();
 
         const groups = new Map();
         this.bodiesData.forEach(item => {
@@ -1109,7 +1120,7 @@ const PhysicsEngine = {
             groups.get(item.noteIndex).push({
                 x: pos.x - scrollX,
                 y: pos.y - scrollY,
-                r: item.body.circleRadius
+                r: dotR
             });
         });
 
@@ -1152,7 +1163,7 @@ const PhysicsEngine = {
             if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
             if (this.shouldCullOutlineGroup(pts)) return;
 
-            const R = pts[0].r + cfg.padding;
+            const R = pts[0].r + this.getOutlineRenderPadding();
             const useHull = cfg.mode === 'hull' ||
                            (cfg.mode === 'compare' && noteIndex % 2 === 0);
             if (useHull) {
@@ -1178,7 +1189,7 @@ const PhysicsEngine = {
 
             const isHover = noteIndex === this.hoveredNoteIndex;
             ctx.lineWidth = isHover ? (cfg.hoverWidth ?? cfg.width * 2.5) : cfg.width;
-            const R = pts[0].r + cfg.padding;
+            const R = pts[0].r + this.getOutlineRenderPadding();
             const useHull = cfg.mode === 'hull' ||
                            (cfg.mode === 'compare' && noteIndex % 2 === 0);
 
