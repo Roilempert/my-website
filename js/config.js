@@ -109,6 +109,7 @@ const CONFIG = {
     about: {
         label: 'על הפרויקט',
         bodyHtml: '',
+        logoSrc: 'assets/ui/Bezalel_academy_of_arts_and_design_new_logo.svg',
         panelCols: 12,
         openHeightVh: 65,
         openMaxPx: 640,
@@ -280,7 +281,7 @@ const CONFIG = {
     presentation: {
         enabled: 'auto',            // true | false | 'auto' — auto: localhost or ≤8 GB / ≤4 cores
         targetFps: 24,              // canvas throttle when displayInterp is off
-        physicsFps: 28,
+        physicsFps: 30,
         displayInterp: true,
         hullCollisionShellPasses: 1,
         hullCollisionDistanceCull: true,
@@ -288,23 +289,23 @@ const CONFIG = {
         outlineViewportCull: true,
         physicsPassCapAtBlocks: 4,
         navMapPhysicsThrottleMs: 280,
-        orbitRelaxScale: 0.55,
+        orbitRelaxScale: 0.72,
         stretchRelaxMinIterations: 10,
-        singleBlockLerp: 0.14,
-        multiBlockLerp: 0.12,
+        singleBlockLerp: 0.16,
+        multiBlockLerp: 0.11,
         stretchedLerp: 0.24,
-        captureChase: 0.24,
+        captureChase: 0.32,
         capturePullFloor: 0.5,
         captureSpawnBlend: 0.2,
-        captureTransitMaxSpeed: 4.8,
+        captureTransitMaxSpeed: 5.8,
         singleBlockCaptureDamping: 0.5,
-        multiBlockDamping: 0.52,
+        multiBlockDamping: 0.55,
         nearDamping: 0.3,
         bodyRestitution: 0.07,
-        bodyFrictionAir: 0.086,
+        bodyFrictionAir: 0.09,
         siblingDamping: 0.18,
-        dragBlockLerp: 0.21,
-        blockAttractionScale: 0.62,
+        dragBlockLerp: 0.25,
+        blockAttractionScale: 0.78,
         kinematicStretchLerp: 0.15,
         kinematicStretchLerpDrag: 0.21,
         cooldownDelayMs: 550,
@@ -321,6 +322,21 @@ const CONFIG = {
         macroDotStride: 3,
         depthMapMaxCollect: 160,
         wanderScale: 0.85
+    },
+
+    /* --- Exhibition show reel (idle attract + scripted demo) --- */
+    showReel: {
+        enabled: false,             // off while developing — set true | 'auto' for exhibition; test: ?showReel=autostart
+        idleMs: 90_000,             // ms before attract/demo; separate from boot.idleRefreshMs
+        loopPauseMs: 4_000,
+        endBehavior: 'loop',        // 'loop' | 'opening' | 'hold'
+        ghostCursor: true,
+        openingAutoEnter: true,     // idle on opening.html → dismiss + navigate
+        userExitTarget: 'opening',  // 'opening' | 'experience' — where real input sends the visitor
+        script: 'default',
+        labels: {
+            hint: ''
+        }
     },
 
     /* --- Depth Controller (Z-axis zoom levels) --- */
@@ -711,7 +727,7 @@ const CONFIG = {
         // Per-body properties
         body: {
             radius: scale(8),       // collider (px); slightly larger than visual dot for separation
-            frictionAir: 0.1,
+            frictionAir: 0.09,
             friction: 0.35,
             restitution: 0,
             density: 0.005
@@ -728,8 +744,8 @@ const CONFIG = {
         forces: {
             attraction: 0.00015,
             blockAttraction: 0.00032,
-            blockAttractionSingle: 0.0002,
-            blockAttractionMulti: 0.00012,
+            blockAttractionSingle: 0.00024,
+            blockAttractionMulti: 0.00014,
             blockAttractionStretch: 0.00042,
             workspaceBankAttraction: 0.00055,
             captureSettleRadius: scale(40),
@@ -767,11 +783,11 @@ const CONFIG = {
 
         motion: {
             transitRadius: scale(48),
-            transitMaxSpeed: 7.5,
+            transitMaxSpeed: 8.2,
             nearJitterSpeed: 0.35,
             nearDamping: 0.35,
             multiBlockDamping: 0.58,
-            singleBlockCaptureDamping: 0.5, // damp captured dots when one block is active
+            singleBlockCaptureDamping: 0.56, // damp captured dots when one block is active
             workspaceBankDamping: 0.38,   // grid-side molecules when workspace is active
             workspaceBankHullScale: 0.25,   // softer hull resolve between bank-only molecules
             workspaceBankDriftRadius: scale(28),
@@ -781,17 +797,17 @@ const CONFIG = {
         },
 
         targetSmoothing: {
-            singleBlock: 0.18,
+            singleBlock: 0.21,
             multiBlock: 0.1,
-            dragBlock: 0.28,
+            dragBlock: 0.31,
             stretched: 0.22,
-            captureChase: 0.38,
+            captureChase: 0.43,
             stretchJumpReset: scale(55)
         },
 
         // Reserved — crowded taper disabled; 1–N blocks share the same physics path
         crowdedBlock: {
-            forceScale: [1, 1, 1, 1, 0.9, 0.82, 0.76],
+            forceScale: [1, 1, 1, 1, 0.94, 0.82, 0.76],
             targetLerp: [0.028, 0.024, 0.02],
             captureDamping: [0.52, 0.48, 0.44],
             transitMaxSpeed: 5.5,
@@ -948,10 +964,10 @@ const CONFIG = {
         },
 
         linkage: {
-            siblingStiffness: 0.004,
+            siblingStiffness: 0.0045,
             stretchStiffnessFactor: 0.45,   // softer internal springs while stretched — cluster elongates naturally
             stretchLengthSlack: 1.10,       // constraint rest length multiplier while stretched
-            siblingDamping: 0.22,
+            siblingDamping: 0.20,
             siblingLength: scale(24),
             maxLinksPerDot: 3,
             homeFactorWhenCaptured: 0,
@@ -1869,6 +1885,26 @@ function applyVisualScaleTokens() {
     root.style.setProperty('--note-zoom-micro', String(CONFIG.depth.noteZoomMicro ?? 1));
     applyCatalogCellTokens(root);
     applyMesoAnchorTokens(root);
+}
+
+function isShowReelEnabled() {
+    const params = new URLSearchParams(location.search);
+    if (params.has('showReel')) {
+        const val = params.get('showReel');
+        if (val === '0' || val === 'false') return false;
+        return true;
+    }
+
+    const cfg = CONFIG.showReel?.enabled;
+    if (cfg === true) return true;
+    if (cfg === false) return false;
+
+    return isPresentationMode();
+}
+
+function isShowReelAutostart() {
+    const params = new URLSearchParams(location.search);
+    return params.get('showReel') === 'autostart';
 }
 
 function isPresentationMode() {

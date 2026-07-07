@@ -322,7 +322,11 @@ const OpeningScreen = {
         if (this.bootFlushed) return;
         this.bootFlushed = true;
 
-        const target = this.cfg().entryTarget || 'experience.html';
+        let target = this.cfg().entryTarget || 'experience.html';
+        if (typeof ShowReel !== 'undefined' && ShowReel.consumeAutoEnterFlag()) {
+            const sep = target.includes('?') ? '&' : '?';
+            target += `${sep}showReel=autostart`;
+        }
         window.location.assign(target);
     }
 };

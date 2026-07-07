@@ -691,7 +691,9 @@ const ActionWarehouse = {
         this.launcherElement.addEventListener('click', (e) => {
             e.stopPropagation();
             if (expandDrag) {
-                if (this.launcherStripPinned && !this.launcherExpandDragState) {
+                if (this.isLauncherExpandDismissBlocked()) return;
+                if (this.launcherExpandDragState) return;
+                if (this.launcherStripPinned) {
                     this.unpinLauncherStrip(true);
                 }
                 return;
@@ -933,10 +935,11 @@ const ActionWarehouse = {
             }
 
             if (this.isLauncherExpandCollapsedTap(drag)) {
-                this.applyLauncherExpandSize(0, false);
+                this.lockLauncherExpandDismiss();
+                this.suppressLauncherExpandClickBurst();
+                this.syncLauncherStripPin(true);
                 const pt = this._launcherPointerXY || { x: e.clientX, y: e.clientY };
                 this.updateLauncherGlyphRotation(pt.x, pt.y);
-                this.tryPlayLauncherExpandTeaserFromTap();
                 return;
             }
 
@@ -2686,7 +2689,25 @@ const ActionWarehouse = {
         // Convert viewport coords to page coords so the block scrolls with the canvas.
         block.x += window.pageXOffset;
         block.y += window.pageYOffset;
+        this.deployBlockAtPageCoords(block, block.x, block.y);
+    },
+
+    deployBlockAtPageCoords(block, pageX, pageY) {
+        if (!block || this.dragState) return false;
+        if (block.nestedIn) return false;
+        if (typeof DepthController !== 'undefined' && DepthController.currentLevel !== 1) return false;
+
+        const docked = block.state === 'docked' ||
+            block.element.parentElement === block.slotElement;
+        if (docked) {
+            this.markSlotEmpty(block);
+            document.body.appendChild(block.element);
+            block.element.classList.remove('is-deployed', 'is-nested', 'is-depth-ui-mounted', 'is-dragging');
+        }
+
         const { width, height } = this.blockMetrics(block);
+        block.x = pageX;
+        block.y = pageY;
         block.collisionW = width;
         block.collisionH = height;
         block.bodyX = block.x + width / 2;
@@ -2694,6 +2715,9 @@ const ActionWarehouse = {
         if (!block.body) this.attachBody(block);
         Matter.Body.setPosition(block.body, { x: block.bodyX, y: block.bodyY });
 
+        block.state = 'active';
+        block.isDragging = false;
+        block.carryOrbitWhileDragging = false;
         block.element.classList.remove('is-dragging');
         block.element.classList.add('is-deployed');
         this.applyTransform(block, 0);
@@ -2704,6 +2728,7 @@ const ActionWarehouse = {
         if (typeof NavigationMap !== 'undefined') {
             NavigationMap.flushPendingBlockLayoutRender();
         }
+        return true;
     },
 
     prepareBlockReturnAnimation(block) {

@@ -1,4 +1,4 @@
-/* app build 20260707150518 */
+/* app build 20260707162843 */
 /* ==========================================================================
    01. SYSTEM BOOTSTRAP
    ========================================================================== */
@@ -5541,7 +5541,7 @@ const RenderEngine = {
         const color = this.resolveSheetColor(tag.color) ||
             CONFIG.data.fallbackTagColor ||
             '#898989';
-        return `<div class="layer-item layer-dot" data-index="${index}" data-tag="${tag.name}" style="--dot-bg:${color};background-color:${color};"></div>`;
+        return `<div class="layer-item layer-dot" data-index="${index}" data-tag="${tag.name}" style="--dot-bg:${color};"></div>`;
     },
 
     createNoteDOM(item, noteIndex = -1) {
@@ -5592,7 +5592,7 @@ const RenderEngine = {
             });
         } else {
             const fallback = this.resolveSheetColor('var(--color-3)') || '#2D2D2D';
-            dotsHTML = `<div class="layer-item layer-dot" style="--dot-bg:${fallback};background-color:${fallback};"></div>`;
+            dotsHTML = `<div class="layer-item layer-dot" style="--dot-bg:${fallback};"></div>`;
         }
 
         wrapper.innerHTML = `
@@ -13825,6 +13825,10 @@ const SiteAbout = {
 
         const label = this.cfg().label || 'על הפרויקט';
         const bodyHtml = this.cfg().bodyHtml || '';
+        const logoSrc = this.cfg().logoSrc || '';
+        const logoHtml = logoSrc
+            ? `<div class="site-about__brand"><img class="site-about__logo" src="${logoSrc}" alt="בצלאל אקדמיה לאמנות ועיצוב"></div>`
+            : '';
 
         this.root = document.createElement('div');
         this.root.className = 'site-about';
@@ -13859,6 +13863,7 @@ const SiteAbout = {
                     <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
                 </div>
                 <div class="site-about__body general-t" dir="rtl">${bodyHtml}</div>
+                ${logoHtml}
             </section>
         `;
 
@@ -16753,7 +16758,9 @@ const ActionWarehouse = {
         this.launcherElement.addEventListener('click', (e) => {
             e.stopPropagation();
             if (expandDrag) {
-                if (this.launcherStripPinned && !this.launcherExpandDragState) {
+                if (this.isLauncherExpandDismissBlocked()) return;
+                if (this.launcherExpandDragState) return;
+                if (this.launcherStripPinned) {
                     this.unpinLauncherStrip(true);
                 }
                 return;
@@ -16995,10 +17002,11 @@ const ActionWarehouse = {
             }
 
             if (this.isLauncherExpandCollapsedTap(drag)) {
-                this.applyLauncherExpandSize(0, false);
+                this.lockLauncherExpandDismiss();
+                this.suppressLauncherExpandClickBurst();
+                this.syncLauncherStripPin(true);
                 const pt = this._launcherPointerXY || { x: e.clientX, y: e.clientY };
                 this.updateLauncherGlyphRotation(pt.x, pt.y);
-                this.tryPlayLauncherExpandTeaserFromTap();
                 return;
             }
 
@@ -18748,7 +18756,25 @@ const ActionWarehouse = {
         // Convert viewport coords to page coords so the block scrolls with the canvas.
         block.x += window.pageXOffset;
         block.y += window.pageYOffset;
+        this.deployBlockAtPageCoords(block, block.x, block.y);
+    },
+
+    deployBlockAtPageCoords(block, pageX, pageY) {
+        if (!block || this.dragState) return false;
+        if (block.nestedIn) return false;
+        if (typeof DepthController !== 'undefined' && DepthController.currentLevel !== 1) return false;
+
+        const docked = block.state === 'docked' ||
+            block.element.parentElement === block.slotElement;
+        if (docked) {
+            this.markSlotEmpty(block);
+            document.body.appendChild(block.element);
+            block.element.classList.remove('is-deployed', 'is-nested', 'is-depth-ui-mounted', 'is-dragging');
+        }
+
         const { width, height } = this.blockMetrics(block);
+        block.x = pageX;
+        block.y = pageY;
         block.collisionW = width;
         block.collisionH = height;
         block.bodyX = block.x + width / 2;
@@ -18756,6 +18782,9 @@ const ActionWarehouse = {
         if (!block.body) this.attachBody(block);
         Matter.Body.setPosition(block.body, { x: block.bodyX, y: block.bodyY });
 
+        block.state = 'active';
+        block.isDragging = false;
+        block.carryOrbitWhileDragging = false;
         block.element.classList.remove('is-dragging');
         block.element.classList.add('is-deployed');
         this.applyTransform(block, 0);
@@ -18766,6 +18795,7 @@ const ActionWarehouse = {
         if (typeof NavigationMap !== 'undefined') {
             NavigationMap.flushPendingBlockLayoutRender();
         }
+        return true;
     },
 
     prepareBlockReturnAnimation(block) {
@@ -24206,6 +24236,503 @@ const OpeningBackground = {
         this._pointerActive = false;
     }
 };
+/* ==========================================================================
+   Show Reel — scripted demo sequences
+   ========================================================================== */
+const ShowReelScripts = {
+    default(ctx) {
+        const vw = () => window.innerWidth;
+        const vh = () => window.innerHeight;
+
+        return [
+            {
+                id: 'reset',
+                run: async () => {
+                    ctx.resetBoard();
+                    await ctx.delay(400);
+                    await ctx.goToL1();
+                    await ctx.centerCanvas();
+                }
+            },
+            {
+                id: 'roam-1',
+                cursor: () => ({ x: vw() * 0.62, y: vh() * 0.42 }),
+                run: async () => {
+                    await ctx.scrollTo(320, 140, 4000);
+                }
+            },
+            {
+                id: 'roam-2',
+                cursor: () => ({ x: vw() * 0.38, y: vh() * 0.48 }),
+                run: async () => {
+                    await ctx.scrollTo(-260, 90, 4000);
+                }
+            },
+            {
+                id: 'roam-3',
+                cursor: () => ({ x: vw() * 0.55, y: vh() * 0.36 }),
+                run: async () => {
+                    await ctx.scrollTo(180, -110, 4000);
+                }
+            },
+            {
+                id: 'warehouse',
+                cursor: () => {
+                    const launcher = document.querySelector('.warehouse-launcher');
+                    if (launcher) {
+                        const r = launcher.getBoundingClientRect();
+                        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+                    }
+                    return { x: vw() * 0.92, y: vh() * 0.92 };
+                },
+                run: async () => {
+                    ctx.openWarehouse();
+                    await ctx.delay(1200);
+                    ctx.closeWarehouse();
+                    await ctx.delay(600);
+                }
+            },
+            {
+                id: 'capture',
+                cursor: () => ({ x: vw() * 0.5, y: vh() * 0.38 }),
+                run: async () => {
+                    const block = ctx.pickTagBlock();
+                    if (!block) return;
+                    const { width, height } = ActionWarehouse.blockMetrics(block);
+                    const pageX = window.pageXOffset + vw() * 0.5 - width / 2;
+                    const pageY = window.pageYOffset + vh() * 0.38 - height / 2;
+                    ctx.placeBlock(block, pageX, pageY);
+                    await ctx.waitCaptureSettle(5500);
+                }
+            },
+            {
+                id: 'l2-peek',
+                cursor: () => ({ x: vw() * 0.5, y: vh() * 0.45 }),
+                run: async () => {
+                    await ctx.goToL2();
+                    await ctx.delay(800);
+                    await ctx.scrollTo(0, 220, 2800);
+                    await ctx.delay(600);
+                    await ctx.goToL1();
+                    await ctx.centerCanvas();
+                }
+            }
+        ];
+    }
+};
+/* ==========================================================================
+   Show Reel — exhibition attract mode + scripted demo driver
+   ========================================================================== */
+const ShowReel = {
+    state: 'off',
+    page: null,
+    onAutoEnter: null,
+    _autoEnterTriggered: false,
+    _abortDemo: false,
+    _demoGen: 0,
+    idleTimerId: null,
+    _watching: false,
+    cursorEl: null,
+    hintEl: null,
+    _cursorRAF: null,
+    _cursorX: 0,
+    _cursorY: 0,
+    _cursorTargetX: 0,
+    _cursorTargetY: 0,
+    _userListenersBound: false,
+
+    cfg() {
+        return CONFIG.showReel || {};
+    },
+
+    isEnabled() {
+        return typeof isShowReelEnabled === 'function' && isShowReelEnabled();
+    },
+
+    isActive() {
+        return this.state === 'demo';
+    },
+
+    consumeAutoEnterFlag() {
+        const was = this._autoEnterTriggered;
+        this._autoEnterTriggered = false;
+        return was;
+    },
+
+    init(options = {}) {
+        if (!this.isEnabled()) return;
+
+        this.page = options.page || 'experience';
+        this.onAutoEnter = options.onAutoEnter || null;
+
+        this._bindUserStopListeners();
+
+        if (this.page === 'opening') {
+            if (this.cfg().openingAutoEnter !== false) {
+                this.startWatching();
+            }
+            return;
+        }
+
+        if (typeof isShowReelAutostart === 'function' && isShowReelAutostart()) {
+            this._waitForExperienceReady(() => this.start({ reason: 'autostart' }));
+        } else {
+            this._waitForExperienceReady(() => this.startWatching());
+        }
+    },
+
+    _waitForExperienceReady(cb) {
+        const tryReady = () => {
+            const app = document.getElementById('app');
+            if (!app || app.getAttribute('aria-hidden') === 'true') {
+                requestAnimationFrame(tryReady);
+                return;
+            }
+            if (typeof DepthController === 'undefined') {
+                requestAnimationFrame(tryReady);
+                return;
+            }
+            cb();
+        };
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', tryReady, { once: true });
+        } else {
+            tryReady();
+        }
+    },
+
+    _bindUserStopListeners() {
+        if (this._userListenersBound) return;
+        this._userListenersBound = true;
+
+        const onUserActivity = (e) => {
+            if (this._isInternalEvent(e)) return;
+
+            if (this.state === 'demo') {
+                this._exitDemo({ reason: 'user', eventType: e.type });
+                return;
+            }
+
+            if (this._watching) {
+                this._resetIdleTimer();
+            }
+        };
+
+        ['pointerdown', 'keydown', 'wheel', 'pointermove', 'mousemove'].forEach((ev) => {
+            window.addEventListener(ev, onUserActivity, { passive: true, capture: true });
+        });
+    },
+
+    _exitDemo(options = {}) {
+        const target = this.cfg().userExitTarget || 'opening';
+        this.stop({ reason: options.reason || 'user', skipResumeWatch: target === 'opening' });
+
+        if (target === 'opening') {
+            window.location.assign('opening.html');
+        }
+    },
+
+    _isInternalEvent() {
+        return false;
+    },
+
+    startWatching() {
+        if (!this.isEnabled() || this.state === 'demo') return;
+        this._watching = true;
+        this.state = 'watching';
+        this._resetIdleTimer();
+    },
+
+    stopWatching() {
+        this._watching = false;
+        clearTimeout(this.idleTimerId);
+        this.idleTimerId = null;
+        if (this.state === 'watching') this.state = 'off';
+    },
+
+    _resetIdleTimer() {
+        clearTimeout(this.idleTimerId);
+        const ms = this.cfg().idleMs ?? 90_000;
+        if (!ms || ms <= 0) return;
+
+        this.idleTimerId = setTimeout(() => this._onIdleTimeout(), ms);
+    },
+
+    _onIdleTimeout() {
+        if (this.state === 'demo') return;
+
+        if (this.page === 'opening') {
+            this._autoEnterTriggered = true;
+            if (typeof this.onAutoEnter === 'function') {
+                this.onAutoEnter();
+            }
+            return;
+        }
+
+        this.start({ reason: 'idle' });
+    },
+
+    start(options = {}) {
+        if (!this.isEnabled()) return;
+        this.stopWatching();
+        this._abortDemo = false;
+        this._demoGen += 1;
+        const gen = this._demoGen;
+        this.state = 'demo';
+
+        document.body.classList.add('is-show-reel');
+        this._mountChrome();
+        this._runDemo(gen, options.reason || 'manual');
+    },
+
+    stop(options = {}) {
+        this._abortDemo = true;
+        this._demoGen += 1;
+        this.state = 'off';
+
+        document.body.classList.remove('is-show-reel');
+        this._unmountChrome();
+
+        if (this.page === 'experience' && options.reason === 'user' && !options.skipResumeWatch) {
+            this.startWatching();
+        }
+    },
+
+    async _runDemo(gen, reason) {
+        const ctx = this._createContext(gen);
+        const scriptKey = this.cfg().script || 'default';
+        const factory = ShowReelScripts?.[scriptKey];
+        if (typeof factory !== 'function') {
+            console.warn('ShowReel: unknown script', scriptKey);
+            this.stop();
+            return;
+        }
+
+        const steps = factory(ctx);
+        try {
+            for (const step of steps) {
+                if (gen !== this._demoGen || this._abortDemo) break;
+                this._setCursorTarget(step.cursor);
+                if (typeof step.run === 'function') {
+                    await step.run(ctx);
+                } else if (step.durationMs) {
+                    await ctx.delay(step.durationMs);
+                }
+            }
+        } catch (err) {
+            console.error('ShowReel demo failed:', err);
+        }
+
+        if (gen !== this._demoGen || this._abortDemo) return;
+
+        await this._handleEnd(gen);
+    },
+
+    async _handleEnd(gen) {
+        const behavior = this.cfg().endBehavior || 'loop';
+
+        if (behavior === 'opening') {
+            window.location.assign('opening.html');
+            return;
+        }
+
+        if (behavior === 'hold') {
+            this.state = 'demo';
+            return;
+        }
+
+        const pauseMs = this.cfg().loopPauseMs ?? 4000;
+        await this._delay(pauseMs, gen);
+        if (gen !== this._demoGen || this._abortDemo) return;
+
+        this.start({ reason: 'loop' });
+    },
+
+    _createContext(gen) {
+        const self = this;
+        return {
+            delay(ms) {
+                return self._delay(ms, gen);
+            },
+
+            scrollTo(dx, dy, ms) {
+                return self._scrollTo(dx, dy, ms, gen);
+            },
+
+            centerCanvas() {
+                if (typeof AppState !== 'undefined' && AppState.centerViewport) {
+                    AppState.centerViewport({ smooth: true });
+                }
+                return self._delay(900, gen);
+            },
+
+            openWarehouse() {
+                if (typeof ActionWarehouse !== 'undefined') {
+                    ActionWarehouse.openPopup();
+                }
+            },
+
+            closeWarehouse() {
+                if (typeof ActionWarehouse !== 'undefined') {
+                    ActionWarehouse.closePopup(true);
+                }
+            },
+
+            pickTagBlock() {
+                if (typeof ActionWarehouse === 'undefined') return null;
+                const blocks = ActionWarehouse.blocks || [];
+                return blocks.find((b) =>
+                    b.state === 'docked' &&
+                    !b.nestedIn &&
+                    b.type !== 'frame' &&
+                    ActionWarehouse.isActiveCaptureBlock(b)
+                ) || blocks.find((b) =>
+                    b.state === 'docked' && !b.nestedIn && b.type !== 'frame'
+                ) || null;
+            },
+
+            placeBlock(block, pageX, pageY) {
+                if (typeof ActionWarehouse !== 'undefined') {
+                    ActionWarehouse.deployBlockAtPageCoords(block, pageX, pageY);
+                }
+            },
+
+            waitCaptureSettle(ms) {
+                return self._delay(ms, gen);
+            },
+
+            goToL2() {
+                if (typeof DepthController !== 'undefined' &&
+                    DepthController.currentLevel === 1) {
+                    DepthController.changeLevel(3);
+                }
+                return self._delay(600, gen);
+            },
+
+            goToL1() {
+                if (typeof DepthController !== 'undefined' &&
+                    DepthController.currentLevel !== 1) {
+                    DepthController.changeLevel(1);
+                }
+                return self._delay(600, gen);
+            },
+
+            resetBoard() {
+                if (typeof ActionWarehouse !== 'undefined') {
+                    ActionWarehouse.resetAll();
+                }
+            }
+        };
+    },
+
+    _delay(ms, gen) {
+        return new Promise((resolve) => {
+            setTimeout(() => {
+                if (gen !== this._demoGen || this._abortDemo) resolve();
+                else resolve();
+            }, ms);
+        });
+    },
+
+    _scrollTo(dx, dy, ms, gen) {
+        return new Promise((resolve) => {
+            if (typeof SpatialNavigation !== 'undefined') {
+                SpatialNavigation.bypassScrollClamp(ms + 120);
+            }
+            const start = performance.now();
+            const startX = window.pageXOffset;
+            const startY = window.pageYOffset;
+
+            const tick = (now) => {
+                if (gen !== this._demoGen || this._abortDemo) {
+                    resolve();
+                    return;
+                }
+                const t = Math.min(1, (now - start) / ms);
+                const ease = t < 0.5
+                    ? 2 * t * t
+                    : 1 - Math.pow(-2 * t + 2, 2) / 2;
+                window.scrollTo(startX + dx * ease, startY + dy * ease);
+                if (t < 1) {
+                    requestAnimationFrame(tick);
+                } else {
+                    resolve();
+                }
+            };
+            requestAnimationFrame(tick);
+        });
+    },
+
+    _mountChrome() {
+        const cfg = this.cfg();
+        if (cfg.ghostCursor !== false) {
+            this._mountCursor();
+        }
+        const hint = cfg.labels?.hint;
+        if (hint) {
+            this._mountHint(hint);
+        }
+    },
+
+    _unmountChrome() {
+        if (this._cursorRAF) {
+            cancelAnimationFrame(this._cursorRAF);
+            this._cursorRAF = null;
+        }
+        this.cursorEl?.remove();
+        this.cursorEl = null;
+        this.hintEl?.remove();
+        this.hintEl = null;
+    },
+
+    _mountCursor() {
+        if (this.cursorEl) return;
+        const el = document.createElement('div');
+        el.id = 'show-reel-cursor';
+        el.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(el);
+        this.cursorEl = el;
+        this._cursorX = window.innerWidth * 0.5;
+        this._cursorY = window.innerHeight * 0.5;
+        this._cursorTargetX = this._cursorX;
+        this._cursorTargetY = this._cursorY;
+        this._applyCursorTransform();
+        this._tickCursor();
+    },
+
+    _mountHint(text) {
+        if (this.hintEl) return;
+        const el = document.createElement('p');
+        el.className = 'show-reel-hint general-t';
+        el.textContent = text;
+        el.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(el);
+        this.hintEl = el;
+    },
+
+    _setCursorTarget(cursor) {
+        if (!this.cursorEl || typeof cursor !== 'function') return;
+        const pos = cursor();
+        if (!pos) return;
+        this._cursorTargetX = pos.x;
+        this._cursorTargetY = pos.y;
+    },
+
+    _tickCursor() {
+        if (!this.cursorEl) return;
+        const lerp = 0.14;
+        this._cursorX += (this._cursorTargetX - this._cursorX) * lerp;
+        this._cursorY += (this._cursorTargetY - this._cursorY) * lerp;
+        this._applyCursorTransform();
+        this._cursorRAF = requestAnimationFrame(() => this._tickCursor());
+    },
+
+    _applyCursorTransform() {
+        if (!this.cursorEl) return;
+        this.cursorEl.style.transform =
+            `translate3d(${this._cursorX}px, ${this._cursorY}px, 0) translate(-50%, -50%)`;
+    }
+};
 document.addEventListener('DOMContentLoaded', () => {
     try {
         if (typeof applyPresentationProfile === 'function') applyPresentationProfile();
@@ -24276,6 +24803,14 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     IdleRefresh.init();
+
+    try {
+        if (typeof ShowReel !== 'undefined') {
+            ShowReel.init({ page: 'experience' });
+        }
+    } catch (err) {
+        console.error('ShowReel.init failed:', err);
+    }
 
     const safetyMs = CONFIG.boot.safetyRevealMs ?? 5000;
     const safetyTimer = setTimeout(() => {

@@ -26,6 +26,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     OpeningScreen.mount();
 
+    try {
+        if (typeof ShowReel !== 'undefined') {
+            ShowReel.init({
+                page: 'opening',
+                onAutoEnter: () => OpeningScreen.dismiss()
+            });
+        }
+    } catch (err) {
+        console.error('ShowReel.init failed:', err);
+    }
+
     OpeningData.init()
         .then(() => {
             OpeningScreen.onDataReady();

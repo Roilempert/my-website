@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none" aria-hidden="true">
+  <g id="icon" transform="translate(40 40) scale(0.9) translate(-40 -40)">
+    <path
+      id="hull-outline"
+      d="M9.21,50.09A28.90,28.90 0 0,1 50.09,9.21L70.79,29.91A28.90,28.90 0 0,1 29.91,70.79Z"
+      stroke="#2D2D2D"
+      stroke-width="2.8"
+      fill="none"
+      vector-effect="non-scaling-stroke"
+    />
+    <circle id="dot-left" cx="29.65" cy="29.65" r="15.9" fill="#2D2D2D"/>
+    <circle id="dot-right" cx="50.35" cy="50.35" r="15.9" fill="#2D2D2D"/>
+  </g>
+</svg>

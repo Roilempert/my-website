@@ -97,6 +97,14 @@ Experience 1 keeps two complementary ways to use the spatial laboratory:
 
 Both modes share the same canvas, two depth levels (**L1** macro / **L2** micro), and data pipeline. Blocks and capture tilt the visitor toward focus; roaming without blocks keeps the field open.
 
+### Exhibition attract mode (show reel)
+
+**Status:** `active` — base implementation (2026-07-07).
+
+When nobody interacts with the exhibition iMac for ~90 seconds, a **scripted demo** runs Experience 1 automatically: L1 roam, warehouse peek, single-block capture, L2 peek. Touch anywhere to take over. Idle on `opening.html` auto-enters experience and starts the demo.
+
+Config: `CONFIG.showReel`. Modules: `js/show-reel.js`, `js/show-reel-script.js`. See [`docs/visual-language.md`](../visual-language.md) — Show reel section.
+
 ### Depth and silhouettes
 
 Legacy meso typographic silhouettes are **not** a navigable depth level; geometry is built for **opening-screen art** only. **L2** micro grid is the deep readable layer. See [`depth-v2.md`](depth-v2.md).

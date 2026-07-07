@@ -69,6 +69,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     IdleRefresh.init();
 
+    try {
+        if (typeof ShowReel !== 'undefined') {
+            ShowReel.init({ page: 'experience' });
+        }
+    } catch (err) {
+        console.error('ShowReel.init failed:', err);
+    }
+
     const safetyMs = CONFIG.boot.safetyRevealMs ?? 5000;
     const safetyTimer = setTimeout(() => {
         console.warn('Boot safety reveal — data pipeline did not finish in time');

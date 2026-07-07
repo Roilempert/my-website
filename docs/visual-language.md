@@ -114,6 +114,21 @@ Ceremonial onboarding threshold before Experience 1. Single **כניסה** conti
 
 Config: `CONFIG.opening` in `js/config.js`. Module: `js/opening-screen.js`.
 
+### Show reel (exhibition attract)
+
+Screensaver-style **scripted demo** when the exhibition iMac is idle (~90s). An automatic user roams L1, opens the warehouse, places one capture block, and peeks at L2. Any real visitor input stops the demo immediately.
+
+| Property | Value |
+|----------|--------|
+| Body class | `body.is-show-reel` while demo runs |
+| Ghost cursor | `#show-reel-cursor` — fixed circle, `z-index: 10500`, `--color-3` fill, `--color-1` ring, `pointer-events: none` |
+| Hint | `.show-reel-hint` — optional `.general-t` label (`CONFIG.showReel.labels.hint`; empty = hidden) |
+| Idle | `CONFIG.showReel.idleMs` — separate from `boot.idleRefreshMs` |
+| Dev | `?showReel=1` enable, `?showReel=0` disable, `?showReel=autostart` skip idle |
+| User exit | Any pointer move / click / key during demo → `opening.html` (`userExitTarget: 'opening'`) |
+
+Config: `CONFIG.showReel` in `js/config.js`. Modules: `js/show-reel.js`, `js/show-reel-script.js`.
+
 ### Warehouse (rows 11–12)
 
 **Popup mode (default):** The full dock is **hidden during roaming**. A bottom-right square launcher (`.warehouse-launcher`, color **6**, **5px** radius, **2×** scale) opens the warehouse as a slide-up panel — **40px** from right/bottom; **`arrow.svg`** glyph (color **3**, tracks pointer) centered inside. Active/open: square fill **3**, arrow **1**. Accessible label **כלים** via `aria-label`. Minimap lives inside the popup only — full canvas height when closed. **No screen dimming** when open — transparent backdrop for click-outside dismiss only. **נקה לוח** and L2 deployed block pills stay visible above the launcher when active. Popup stays open while dragging blocks. Close: launcher toggle, Escape, or click outside the panel. Config: `CONFIG.warehouse.popup`.
@@ -122,9 +137,9 @@ Config: `CONFIG.opening` in `js/config.js`. Module: `js/opening-screen.js`.
 - **Default:** same **80×40** outer shell (color **6**); inner pill (`.warehouse-launcher__pill`, color **3**) with arrow glyph (color **6**); arrow tracks pointer
 - **Hover:** arrow points along the expand **rail** (tilt derived from 9×3 growth ratio)
 - **Open:** drag the color-3 pill along the expand rail until **9 cols × 3 rows**, then snap; handle rests **top-left**; blocks fill to the right edge; arrow points **bottom-right** (retract)
+- **Open:** drag the pill along the diagonal rail past the snap threshold, or **click** the arrow button while collapsed
 - **While dragging:** map + blocks clip-reveal inside the growing panel; blocks muted until fully snapped
 - **Close:** drag the pill back along the rail, **click** the arrow button, click outside, or Escape
-- **First press (until full open):** collapsed tap plays a short expand teaser along the rail (~72px), then two damped upward bounces before resting closed; repeats on each collapsed click until the panel is fully dragged open (`firstPressTeaser`; `persist: 'session'` marks seen only after full pin)
 - Full panel: minimap (left, below handle) + tag blocks (scroll, full width right) + launcher handle (top-left when open)
 
 **Legacy launcher strip** (`expandDrag: false`): hover peek + click pin — see changelog.
@@ -278,6 +293,8 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 | `layer-nav-molecule-2.svg` | L1 molecule — 2-dot variant | asset only | Static |
 | `layer-nav-molecule-6.svg` | L1 layer nav symbol (6-dot molecule) | toggle destination when on L2 | Static |
 | `layer-nav-blocks.svg` | L2 micro layer nav symbol | `.site-navigation-layers__label-symbol[data-layer-symbol="3"]` | Static |
+| `layer-nav-l1.svg` | L1 2-dot molecule (hull + dots) | Layer nav toggle destination symbol | Static |
+| `site-icon.svg` | L1 2-dot molecule — extended hull (R 28.9 vs 23.9) | **Site favicon** (`rel="icon"` on all pages) | Static |
 | `layer-nav-marker.svg` | `layer navigation final` (638:12) | `navigation-map.js` | Fixed curved skeleton; selection dot moves between marker cells |
 | `decoration-corner-tr.svg` | One shell corner group (exported **top-right** orientation) | `.warehouse-shell` × 4 (mirror/rotate per corner) | Static |
 | — | — | Map viewport marker | **Not SVG** — fixed DOM/canvas frame; map pans behind |
@@ -288,6 +305,10 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-07 | `site-icon.svg`: icon scaled to **0.9** within viewBox for favicon margin |
+| 2026-07-07 | Site favicon: dedicated `site-icon.svg` (2-dot molecule, hull R +5 vs `layer-nav-l1.svg`) |
+| 2026-07-07 | **Show reel** — exhibition attract mode: `#show-reel-cursor`, `body.is-show-reel`, optional `.show-reel-hint`; `CONFIG.showReel` |
+| 2026-07-07 | Warehouse launcher: collapsed click now fully opens the strip (same as drag snap); first-press teaser no longer blocks open |
 | 2026-07-07 | Layer nav toggle icon scale: L1 molecule **1**; L2 blocks **0.9** (−10% vs molecule) |
 | 2026-07-07 | L1 layer nav icon (`layer-nav-l1.svg`) hull stroke **3.5 → 2.8** (`vector-effect: non-scaling-stroke`) |
 | 2026-07-07 | L1 molecule hover fill restored to **color 6** (`hoverFillMode: 'token'`) |

@@ -28,6 +28,10 @@ const SiteAbout = {
 
         const label = this.cfg().label || 'על הפרויקט';
         const bodyHtml = this.cfg().bodyHtml || '';
+        const logoSrc = this.cfg().logoSrc || '';
+        const logoHtml = logoSrc
+            ? `<div class="site-about__brand"><img class="site-about__logo" src="${logoSrc}" alt="בצלאל אקדמיה לאמנות ועיצוב"></div>`
+            : '';
 
         this.root = document.createElement('div');
         this.root.className = 'site-about';
@@ -62,6 +66,7 @@ const SiteAbout = {
                     <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
                 </div>
                 <div class="site-about__body general-t" dir="rtl">${bodyHtml}</div>
+                ${logoHtml}
             </section>
         `;
 

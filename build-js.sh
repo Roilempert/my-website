@@ -39,6 +39,8 @@ cd "$ROOT/js"
     warehouse-filter.js \
     warehouse-orbit.js \
     opening-background.js \
+    show-reel-script.js \
+    show-reel.js \
     bootstrap.js
 } > app.js
 echo "Built js/app.js ($(wc -l < app.js | tr -d ' ') lines)"

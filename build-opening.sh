@@ -10,6 +10,7 @@ cd "$ROOT/js"
     opening-background.js \
     opening-data.js \
     opening-screen.js \
+    show-reel.js \
     site-about.js \
     opening-bootstrap.js
 } > opening-app.js

@@ -46,7 +46,7 @@ const RenderEngine = {
         const color = this.resolveSheetColor(tag.color) ||
             CONFIG.data.fallbackTagColor ||
             '#898989';
-        return `<div class="layer-item layer-dot" data-index="${index}" data-tag="${tag.name}" style="--dot-bg:${color};background-color:${color};"></div>`;
+        return `<div class="layer-item layer-dot" data-index="${index}" data-tag="${tag.name}" style="--dot-bg:${color};"></div>`;
     },
 
     createNoteDOM(item, noteIndex = -1) {
@@ -97,7 +97,7 @@ const RenderEngine = {
             });
         } else {
             const fallback = this.resolveSheetColor('var(--color-3)') || '#2D2D2D';
-            dotsHTML = `<div class="layer-item layer-dot" style="--dot-bg:${fallback};background-color:${fallback};"></div>`;
+            dotsHTML = `<div class="layer-item layer-dot" style="--dot-bg:${fallback};"></div>`;
         }
 
         wrapper.innerHTML = `

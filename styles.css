@@ -2106,6 +2106,23 @@ body.opening-page .site-about {
     color: var(--color-3);
 }
 
+.site-about__brand {
+    display: flex;
+    justify-content: center;
+    padding:
+        0
+        var(--inspector-metadata-pad-x)
+        var(--space-20);
+}
+
+.site-about__logo {
+    display: block;
+    width: min(100%, calc(10 * var(--site-grid-cell-w)));
+    height: auto;
+    max-height: var(--space-40);
+    object-fit: contain;
+}
+
 /* ==========================================================================
    06b. LAYER NAVIGATION — depth labels (top-right)
    ========================================================================== */
@@ -5825,4 +5842,47 @@ body.is-word-panel-mode .word-panel__chip {
 body.is-word-panel-mode .warehouse-shell.is-word-panel .warehouse-reset {
     opacity: 1;
     pointer-events: auto;
+}
+
+/* ==========================================================================
+   Show reel — exhibition attract / scripted demo
+   ========================================================================== */
+
+body.is-show-reel {
+    cursor: none;
+}
+
+body.is-show-reel .warehouse-launcher {
+    pointer-events: none;
+}
+
+#show-reel-cursor {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 10500;
+    width: var(--space-15);
+    height: var(--space-15);
+    border-radius: 50%;
+    background: var(--color-3);
+    border: 2px solid var(--color-1);
+    box-shadow: 0 0 0 1px var(--color-3);
+    pointer-events: none;
+    opacity: 0.92;
+    will-change: transform;
+}
+
+.show-reel-hint {
+    position: fixed;
+    bottom: calc(var(--site-grid-padding) + var(--space-40));
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 10500;
+    margin: 0;
+    padding: var(--space-5) var(--space-15);
+    color: var(--color-3);
+    background: color-mix(in srgb, var(--color-5) 88%, transparent);
+    border-radius: var(--space-5);
+    pointer-events: none;
+    opacity: 0.72;
 }

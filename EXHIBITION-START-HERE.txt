@@ -73,12 +73,24 @@ TO STOP
 Close the Terminal window that opened.
 
 
+ATTRACT MODE (exhibition)
+-------------------------
+After about 90 seconds with no touch, the site runs a short automatic
+demonstration. Touch anywhere to take over.
+
+
 DEV NOTE (not for exhibition iMac)
 ----------------------------------
 Exhibition opens: http://127.0.0.1:8080/  (redirects to opening.html)
 
 Skip opening during dev (one visit):
   http://127.0.0.1:8080/opening.html?skipOpening=1
+
+Test show reel (skip idle, start demo on load):
+  http://127.0.0.1:8080/experience.html?showReel=autostart
+
+Disable show reel:
+  ?showReel=0
 
 Main site directly:
   http://127.0.0.1:8080/experience.html
