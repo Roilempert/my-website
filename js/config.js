@@ -32,6 +32,7 @@ const CONFIG = {
         padding: { value: 1.25, unit: 'rem' },  // exhibition: 20px @ 16px root
         gap: { value: 1.25, unit: 'rem' },
         crossStep: 4,                           // decoration at every 4th row/column crossing
+        showGridMarks: false,                   // L1 crosses, L2 diagonals, L3 dots on canvas background
         macroGridColStep: 2,                    // L1: every second shell column (12 slots — gaps on grid lines)
         macroGridRowStep: 2,                    // L1: every second shell row (fewer rows than columns)
         debug: false,
@@ -47,7 +48,8 @@ const CONFIG = {
             inspector:    { colStart: 8, colEnd: 19, rowStart: 6, rowEnd: 11 },
             filterFringe: { colStart: 23, colEnd: 25, rowStart: 1, rowEnd: 11 },
             navigationLayers: { colStart: 23, colEnd: 25, rowStart: 1, rowEnd: 7  },
-            navigationMaps:   { colStart: 21, colEnd: 25, rowStart: 11, rowEnd: 13 } // alias: warehouseMap
+            navigationMaps:   { colStart: 21, colEnd: 25, rowStart: 11, rowEnd: 13 }, // alias: warehouseMap
+            about:            { colStart: 4, colEnd: 5, rowStart: 1, rowEnd: 3 }
             // reset button: centered above warehouse shell — not a grid region
         },
         regionsByLevel: {
@@ -101,6 +103,12 @@ const CONFIG = {
         },
         typologyOrder: ['Block', 'List', 'Fragment', 'Stanza'],
         retiredTypologies: ['Quote', 'quote']
+    },
+
+    /* --- About panel (top-left hover chrome) --- */
+    about: {
+        label: 'על הפרויקט',
+        bodyHtml: ''
     },
 
     /* --- Boot Sequence --- */
@@ -248,6 +256,11 @@ const CONFIG = {
         devSkipStorageKey: 'opening.skip',
         preloadAssets: [
             'assets/ui/layer-nav-marker.svg',
+            'assets/ui/layer-nav-molecule.svg',
+            'assets/ui/layer-nav-molecule-2.svg',
+            'assets/ui/layer-nav-l1.svg',
+            'assets/ui/layer-nav-molecule-6.svg',
+            'assets/ui/layer-nav-blocks.svg',
             'assets/ui/decoration-corner-tr.svg',
             'assets/fonts/NarkissYair-Bold-TRIAL.woff2',
             'assets/fonts/NarkissYair-BoldMono-TRIAL.woff2',
@@ -313,7 +326,7 @@ const CONFIG = {
         initialLevel: 1,            // level shown on load (1 = macro / physics view)
         minLevel: 1,
         maxLevel: 3,
-        activeLevels: [1, 3],       // L2 meso removed — macro ↔ micro only
+        activeLevels: [1, 3],       // Doc/UI: L1 + L2 — micro is code level 3
         cooldownDelay: 1200,        // ms lock after level change (blocks wheel pan during transitions)
         cameraLockDuration: 650,
         macroMesoRevealDuration: 640,
@@ -338,7 +351,9 @@ const CONFIG = {
         noteClickPath: 'direct-l3',      // L1 note click → L3 micro grid
         clickDragThreshold: 6,           // px — below = click navigate, above = drag
         moleculeClickPadding: 16,        // px — extra hit area around hull for L1 note click
-        moleculeHoverMaxWords: 10,       // L1 hover label — first line, whole words only
+        moleculeHoverMaxWords: 8,        // phrase window — soft ceiling before pixel fit
+        moleculeHoverMaxWidthVw: 42,     // L1 hover label max width (vw leg of min())
+        moleculeHoverMaxWidthRem: 28,    // L1 hover label max width (rem leg of min())
         moleculeHoverMode: 'title',      // 'title' | 'blocks' | 'mixed' — L1 hover label mode
         moleculeHoverBlocksPercent: 50,  // mixed: stable hash % of notes → attached-block row
         moleculeHoverBlocksPerRow: 5,    // blocks-row hover: max pills per row before wrapping
@@ -559,9 +574,18 @@ const CONFIG = {
         }
     },
 
-    /* --- Layer navigation — depth labels (מאקרו / מיקרו), top-right --- */
+    /* --- Layer navigation — depth symbols (L1 / L2), top-right --- */
     layerNavigation: {
-        labels: { 1: 'מאקרו', 3: 'מיקרו' },
+        labels: { 1: 'L1', 3: 'L2' },
+        symbols: {
+            1: 'assets/ui/layer-nav-molecule.svg',
+            2: 'assets/ui/layer-nav-molecule-2.svg',
+            l1: 'assets/ui/layer-nav-l1.svg',
+            6: 'assets/ui/layer-nav-molecule-6.svg',
+            3: 'assets/ui/layer-nav-blocks.svg'
+        },
+        symbolSizeActive: { value: 4.5, unit: 'rem' },
+        symbolSizeInactive: { value: 3.25, unit: 'rem' },
         rightInset: { value: 2.5, unit: 'rem' },
         boxGap: { value: 0.625, unit: 'rem' },
         boxPadding: { value: 0.625, unit: 'rem' },
@@ -573,7 +597,15 @@ const CONFIG = {
         slotMoveEasing: 'cubic-bezier(0.9, 0, 0.02, 1)',
         centerOnViewport: false,
         hitAreaPadding: { value: 0, unit: 'rem' },
-        slotCount: 2
+        toggleMode: true,
+        slotCount: 1,
+        toggleTopInset: { value: 2.5, unit: 'rem' },
+        toggleBoxSize: { value: 80, unit: 'px' },
+        toggleBoxPadding: { value: 5, unit: 'px' },
+        moleculeSymbolRotateDeg: 0,
+        moleculeSymbolScale: 0.9,
+        blocksSymbolScale: 0.9,
+        moleculeSymbolNudgeY: { value: 0, unit: 'px' }
     },
 
     /* --- Navigation minimap — spatial overview canvas, bottom-right (not layer labels) --- */
@@ -679,7 +711,7 @@ const CONFIG = {
 
         // Per-body properties
         body: {
-            radius: scale(11),      // collider (px); slightly larger than visual dot for separation
+            radius: scale(8),       // collider (px); slightly larger than visual dot for separation
             frictionAir: 0.1,
             friction: 0.35,
             restitution: 0,
@@ -806,6 +838,18 @@ const CONFIG = {
             blockTrayGap: { value: 3.75, unit: 'rem' }
         },
 
+        // Collapsed by default — full dock slides up as a popup; minimap lives inside.
+        popup: {
+            enabled: true,
+            defaultOpen: false,
+            launcherLabel: 'כלים',
+            launcherArrowSrc: 'assets/ui/arrow.svg',
+            launcherArrowBaseDeg: -90,
+            stayOpenWhileDragging: true,
+            closeOnOutsideClick: true,
+            closeOnEscape: true
+        },
+
         drag: {
             followFactor: 0.22,     // 0-1; how fast the block catches up to the cursor (lower = heavier feel)
             maxTilt: 12             // deg; max rotation while dragging, derived from velocity
@@ -923,8 +967,8 @@ const CONFIG = {
     outlines: {
         mode: 'hull',
         padding: scale(7),         // physics hull shell + molecule extent (unchanged)
-        renderScale: 1,            // L1 dot visual diameter = 10px × renderScale (original)
-        renderPadding: scale(3),   // visual hull gap only — tighter than physics padding (7px)
+        renderScale: 2,            // L1 dot visual diameter = 10px × renderScale → 20px (10px radius); physics unchanged
+        renderPadding: scale(5),   // visual hull gap only — effective corner radius = dotR(10) + 5 = 15px
         width: 0.2 * (96 / 72),
         hoverWidth: 0.55 * (96 / 72)
     }
@@ -1119,6 +1163,11 @@ function measureSiteGridTokenPx(tokenName, property = 'height') {
 
 /** L1 viewport chrome below the canvas region — aligned to warehouse shell top. */
 function getSiteL1BottomChromePx() {
+    if (typeof ActionWarehouse !== 'undefined' &&
+        ActionWarehouse.isPopupMode?.() &&
+        !ActionWarehouse.isPopupOpen?.()) {
+        return 0;
+    }
     const wh = document.querySelector('.warehouse-shell');
     if (wh) {
         return Math.max(0, Math.ceil(window.innerHeight - wh.getBoundingClientRect().top));
@@ -1128,6 +1177,11 @@ function getSiteL1BottomChromePx() {
 
 /** Visible canvas height on L1 — viewport minus warehouse shell chrome. */
 function getSiteL1VisibleViewportHeightPx() {
+    if (typeof ActionWarehouse !== 'undefined' &&
+        ActionWarehouse.isPopupMode?.() &&
+        !ActionWarehouse.isPopupOpen?.()) {
+        return window.innerHeight;
+    }
     const wh = document.querySelector('.warehouse-shell');
     if (wh) {
         return Math.max(0, wh.getBoundingClientRect().top);
@@ -1442,6 +1496,59 @@ function isPointOverSiteNavigationUI(clientX, clientY) {
         }
     }
 
+    const aboutRoot = document.querySelector('.site-about');
+    if (aboutRoot) {
+        const style = window.getComputedStyle(aboutRoot);
+        if (style.pointerEvents !== 'none' || aboutRoot.classList.contains('is-open')) {
+            const rect = aboutRoot.getBoundingClientRect();
+            if (
+                clientX >= rect.left - pad &&
+                clientX <= rect.right + pad &&
+                clientY >= rect.top - pad &&
+                clientY <= rect.bottom + pad
+            ) {
+                return true;
+            }
+        }
+    }
+
+    return false;
+}
+
+/** Warehouse popup chrome — block canvas note hits through launcher / reset / deployed bar. */
+function isPointOverWarehouseChrome(clientX, clientY) {
+    if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return false;
+
+    const pad = 4;
+    const selectors = [
+        '.warehouse-launcher',
+        '.warehouse-popup-backdrop',
+        '.warehouse-reset',
+        '.depth-block-bar.has-blocks'
+    ];
+
+    if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.isPopupOpen?.()) {
+        selectors.push('.warehouse-shell.is-popup-open');
+    }
+
+    for (const sel of selectors) {
+        for (const el of document.querySelectorAll(sel)) {
+            const style = window.getComputedStyle(el);
+            if (style.pointerEvents === 'none' || style.visibility === 'hidden') continue;
+            if (el.classList.contains('warehouse-reset') && parseFloat(style.opacity) < 0.05) continue;
+            const rect = el.getBoundingClientRect();
+            if (rect.width <= 0 || rect.height <= 0) continue;
+            if (
+                clientX >= rect.left - pad &&
+                clientX <= rect.right + pad &&
+                clientY >= rect.top - pad &&
+                clientY <= rect.bottom + pad
+            ) {
+                return true;
+            }
+        }
+    }
+
     return false;
 }
 
@@ -1471,6 +1578,13 @@ function updateSiteGridCrosses(options = {}) {
     const app = document.getElementById('app');
     const layer = ensureSiteGridCrossesLayer();
     if (!layer || !app) return;
+
+    if (g.showGridMarks === false) {
+        layer.replaceChildren();
+        layer.style.display = 'none';
+        return;
+    }
+    layer.style.removeProperty('display');
 
     bindCrossLayerResize(app);
 

@@ -77,8 +77,8 @@ Visual tokens: [`docs/visual-language.md`](../visual-language.md) — Opening sc
 | Capability | Glossary / code |
 |------------|-----------------|
 | L1 macro — physics dots, molecules, hulls | `.layer-dot`, `bodiesData`, `strokeHullOutline` |
-| L3 micro — full readable notes grid | `MicroMock`, `.micro-grid-column`, `DepthController` |
-| Depth zoom — macro ↔ micro (L2 meso skipped) | `DepthController`, `activeLevels: [1, 3]`, `depth-v2.js` |
+| L2 micro — full readable notes grid | `MicroMock`, `.micro-grid-column`, `DepthController` |
+| Depth zoom — L1 ↔ L2 | `DepthController`, `activeLevels: [1, 3]` (micro = code level 3), `depth-v2.js` |
 | Silhouette engine (opening-screen art only) | `SilhouetteEngine`, `meso-silhouette-cache.js` |
 | Blocks, warehouse, surface capture | `ActionWarehouse`, `noteAnchors`, `updateOrbits` |
 | Inspector — single-note focus popup | `ArtifactInspector` |
@@ -95,11 +95,11 @@ Experience 1 keeps two complementary ways to use the spatial laboratory:
 | **Roaming** | Discovery | Curiosity-driven snooping — notes surface through motion, proximity, and aimless roaming |
 | **Focus** | Study | Intentional investigation — blocks, tags, capture, and depth zoom toward specific topics |
 
-Both modes share the same canvas, two depth levels (L1 macro / L3 micro), and data pipeline. Blocks and capture tilt the visitor toward focus; roaming without blocks keeps the field open.
+Both modes share the same canvas, two depth levels (**L1** macro / **L2** micro), and data pipeline. Blocks and capture tilt the visitor toward focus; roaming without blocks keeps the field open.
 
 ### Depth and silhouettes
 
-L2 typographic silhouettes are **not** a navigable depth level; geometry is built for **opening-screen art** only. L3 micro grid is the deep readable layer. See [`depth-v2.md`](depth-v2.md).
+Legacy meso typographic silhouettes are **not** a navigable depth level; geometry is built for **opening-screen art** only. **L2** micro grid is the deep readable layer. See [`depth-v2.md`](depth-v2.md).
 
 ---
 
@@ -115,7 +115,7 @@ A **second, different way** to roam the same note archive — complementary to E
 
 - What is the primary navigation metaphor? (timeline, stream, index, map variant, typology lanes, etc.)
 - How does filtering differ from blocks/tags in Experience 1?
-- Does Experience 2 share L2 meso depth, or stay at a single presentation layer?
+- Does Experience 2 share L2 micro depth, or stay at a single presentation layer?
 - Entry/exit: return to opening screen, or cross-link from Experience 1?
 - Ceremonial tone: same threshold rules, or a different "room" in the laboratory?
 
@@ -128,6 +128,6 @@ Start a work session from [`docs/work/session-template.md`](../work/session-temp
 | Doc | Link |
 |-----|------|
 | Project goal, glossary | [`AGENTS.md`](../../AGENTS.md) |
-| L2 meso grid, silhouette Phase 3 | [`depth-v2.md`](depth-v2.md) |
+| L2 micro grid, silhouette legacy | [`depth-v2.md`](depth-v2.md) |
 | Exhibition chrome, planned opening tokens | [`visual-language.md`](../visual-language.md) |
 | Physics stability (Experience 1) | [`CHECKPOINT.md`](../CHECKPOINT.md) |

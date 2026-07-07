@@ -1,6 +1,14 @@
-# Depth V2 — L3 micro (active)
+# Depth V2 — L2 micro (active)
 
-Two **navigable** depth levels: **L1 macro** (physics dots) and **L3 micro** (full notes grid). **L2 meso** (silhouettes / MesoMock) removed from navigation (2026-07-05); `SilhouetteEngine` kept for opening-screen art only.
+Two **navigable** depth levels: **L1 macro** (physics dots) and **L2 micro** (full notes grid).
+
+**Depth naming:** Docs and UI use **L1** / **L2**. Internal code still indexes micro as level **`3`** (`activeLevels: [1, 3]`, `view-level-3`, `DepthController.currentLevel === 3`). **Legacy meso** (silhouettes / MesoMock, code level `2`) is not navigable — removed from navigation (2026-07-05); `SilhouetteEngine` kept for opening-screen art only.
+
+| Doc / UI | Role | Code level | CSS / config |
+|----------|------|------------|--------------|
+| **L1** | Macro — physics dots | `1` | `view-level-1` |
+| **L2** | Micro — full notes grid | `3` | `view-level-3` |
+| Legacy meso | Silhouette art only | `2` | `view-level-2` (dead path) |
 
 ## Current state
 
@@ -21,7 +29,7 @@ js/depth-v2.js
 | Grid | Scope | Canonical size |
 |------|-------|----------------|
 | **Site shell** | Viewport reference — padding, UI anchors, proportional tokens | **24 columns × 12 rows** (`CONFIG.siteGrid`) — see [`site-grid.md`](site-grid.md) |
-| **Canvas (L2/L3)** | Scrollable `#app` workspace — note layout at meso/micro | `CONFIG.depth.v2.meso` / `.micro` (wider than viewport) |
+| **Canvas (L2 micro)** | Scrollable `#app` workspace — note layout at micro | `CONFIG.depth.v2.micro` (wider than viewport) |
 
 Do not change canvas column counts when adjusting the 24×12 shell.
 
@@ -29,29 +37,30 @@ Do not change canvas column counts when adjusting the 24×12 shell.
 
 | Phase | Status | Description |
 |-----|--------|--------|
-| 1 | **active** | Separate L2/L3 canvas grids + **interim** L2 placeholder (`MesoMock` gradients) |
+| 1 | **active** | L2 micro canvas grid + legacy meso code retained for art paths |
 | 2 | pending | Layer transitions (scroll → FX → reveal) |
-| 3 | **target** | **Typographic silhouettes** at L2 via `SilhouetteEngine` (project goal in `AGENTS.md`); same path geometry also feeds **opening-screen silhouette art** — see [`experience-model.md`](experience-model.md) |
+| 3 | **target** | **Typographic silhouettes** for opening-screen art via `SilhouetteEngine` (project goal in `AGENTS.md`) — see [`experience-model.md`](experience-model.md) |
 
-MesoMock is a **stand-in**, not the intended exhibition look. Phase 3 replaces gradient mocks with measured title/body silhouettes.
+MesoMock is a **legacy stand-in**, not the intended exhibition look for silhouettes.
 
 ## Canvas grids (current `config.js`)
 
 | Layer | Canvas width | Columns | Notes |
 |------|-------------|---------|--------|
-| L2 meso | `175vw` | 9 | ~5–6 cols in viewport; rest scrolls off-screen (stable 2026-06-22) |
-| L3 micro | (viewport-driven) | 12 | `viewportCols: 3` in frame |
+| L2 micro | (viewport-driven) | 12 | `viewportCols: 3` in frame |
+
+Legacy meso grid (`CONFIG.depth.v2.meso`) remains in config for silhouette/meso code paths — not user-navigable.
 
 Values in:
 
 ```
-CONFIG.depth.v2.meso
-CONFIG.depth.v2.micro
+CONFIG.depth.v2.meso   // legacy — opening art / MesoMock only
+CONFIG.depth.v2.micro  // L2 micro grid
 ```
 
-## Interim L2 placeholder (MesoMock)
+## Legacy meso placeholder (MesoMock)
 
-Until Phase 3, V2 L2 shows a **gradient mock** — not `SilhouetteEngine`:
+Not navigable. Until silhouette art is fully wired, meso-related modules may still run for opening-screen geometry:
 
 ```
 js/meso-mock.js
@@ -88,23 +97,15 @@ CONFIG.depth.v2.meso.mockColorEnrich
 
 Grid preparation clears texture bake cache.
 
-### Manual check (layer 2)
-
-1. Silhouettes visible, right-aligned, no white rectangle, no grid overlap
-2. Note with multiple tags — rich color collision
-3. Note with one tag — dark base layer and strong blob
-4. L1→L2 twice — cache (no significant flash)
-5. Switch mode to blobs — immediate fallback
-
-## L1 → L2/L3 filtering (implemented)
+## L1 → L2 filtering (implemented)
 
 **Modes:**
 
-- **Focus** (block on surface): `is-block-focus` / `is-catalog-lens` — muted/focused at L1/L2/L3
+- **Focus** (block on surface): `is-block-focus` / `is-catalog-lens` — muted/focused at L1/L2
 - **Filter** (filter frame): `filteredNoteIndices` + `is-molecule-filtered-out`
   - L1: peel animation + physics suspend
-  - L2/L3: `#filter-fringe-zone` at canvas edges; central grid for visible only
-- **Spatial snapshot:** `MesoSpatialLayout.captureAndStoreSnapshot()` on L1→L2; column sort by `macroRank`
+  - L2: `#filter-fringe-zone` at canvas edges; central grid for visible only
+- **Spatial snapshot:** `MesoSpatialLayout.captureAndStoreSnapshot()` on L1→L2 transition; column sort by `macroRank`
 
 **Modules:**
 
@@ -112,7 +113,7 @@ Grid preparation clears texture bake cache.
 js/meso-spatial-layout.js
 js/catalog-state.js          // visibleNoteIndices, macroRank, lastMesoAnchors
 js/depth-v2.js               // layoutMesoColumns, layoutMicroGrid, fringe zone
-js/warehouse-core.js         // updateDotFocusFilter — peel at L1, instant at L2/L3
+js/warehouse-core.js         // updateDotFocusFilter — peel at L1, instant at L2
 ```
 
 **Parameters:**
@@ -127,10 +128,9 @@ CONFIG.depth.v2.fringe.cellScale
 
 1. L1: peel + filter frame
 2. L2: fringe at edges, grid without holes
-3. L3: same subset + focus on glyphs
-4. Remove filter block at L2 → return to grid
-5. RESET → clear fringe
-6. L1→L2→L3→L1: consistent state
+3. Remove filter block at L2 → return to grid
+4. RESET → clear fringe
+5. L1↔L2: consistent state
 
 **legacy (not V2):** `CatalogLayoutEngine` uses `visibleNoteIndices` + `macroRank` when present.
 

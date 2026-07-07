@@ -2,7 +2,9 @@
 
 **Living document.** Update whenever colors, typography, spacing, grid marks, SVG chrome, or component styling changes. Agents: see `.cursor/rules/visual-language.mdc`.
 
-**Status:** Spec locked (2026-07-03). **Code:** exhibition redesign implemented in `styles.css`, `js/config.js`, warehouse, navigation, inspector, L3 cards. **Deferred:** L2 `SilhouetteEngine` (MesoMock interim), physics tuning at `VISUAL_SCALE 1.0`.
+**Status:** Spec locked (2026-07-03). **Code:** exhibition redesign implemented in `styles.css`, `js/config.js`, warehouse, navigation, inspector, L2 cards. **Deferred:** legacy meso `SilhouetteEngine` (MesoMock interim), physics tuning at `VISUAL_SCALE 1.0`.
+
+**Depth naming:** Two navigable levels — **L1** (macro) and **L2** (micro). Code still uses level index `3` for micro (`view-level-3`, `activeLevels: [1, 3]`).
 
 **Hardware target:** 21.5″ iMac, **1920×1080** fullscreen (`AGENTS.md`, `EXHIBITION-START-HERE.txt`).
 
@@ -28,7 +30,7 @@ CSS tokens in `:root` (`styles.css`):
 |-------|-----|------|
 | `--color-1` | `#FFFFFF` | Note card background, block text, tag fill |
 | `--color-2` | `#898989` | L1 cross marks, L2 diagonal grid marks |
-| `--color-3` | `#2D2D2D` | Action blocks, L3 grid dots, map objects, metadata panel, related-notes section title, SVG chrome |
+| `--color-3` | `#2D2D2D` | Action blocks, L2 grid dots, map objects, metadata panel, related-notes section title, SVG chrome |
 | `--color-4` | `#000000` | Note text, tag border/text, metadata text, **1pt note borders** |
 | `--color-5` | `#F2F0EE` | Canvas / note field background |
 | `--color-6` | `#E6E0DA` | Warehouse + map panel bg, layer nav label boxes, clear control (`נקה לוח`) |
@@ -76,15 +78,15 @@ Four classes replace legacy `--type-*` / ratzif22 / NarkissTam body.
 |----------|--------|
 | Grid | **24 columns × 12 rows** (`CONFIG.siteGrid`) |
 | Viewport padding | **20px** → `1.25rem` (all sides) |
-| Grid marks | Every third row/column crossing (`crossStep: 3`) |
+| Grid marks | **Off** (`showGridMarks: false`). When enabled: every 4th row/column crossing (`crossStep: 4`) |
 
-### Grid marks by depth level
+### Grid marks by depth level *(disabled — `CONFIG.siteGrid.showGridMarks: false`)*
 
 | Level | Mark | Size | Color |
 |-------|------|------|-------|
 | L1 macro | Cross (+), behind macro molecule backing | 10×10 | color 2 |
-| L2 meso | Diagonal 45° | 10px length | color 2 |
-| L3 micro | Dot | 5px | color 3 |
+| Legacy meso | Diagonal 45° | 10px length | color 2 |
+| L2 micro | Dot | 5px | color 3 |
 
 **Do not add:** L2 extra fringe glyph, focus connector from old Figma audit.
 
@@ -114,6 +116,10 @@ Config: `CONFIG.opening` in `js/config.js`. Module: `js/opening-screen.js`.
 
 ### Warehouse (rows 11–12)
 
+**Popup mode (default):** The full dock is **hidden during roaming**. A bottom-right square launcher (`.warehouse-launcher`, color **6**, **5px** radius, **2×** scale) opens the warehouse as a slide-up panel — **40px** from right/bottom; **`arrow.svg`** glyph (color **3**, tracks pointer) centered inside. Active/open: square fill **3**, arrow **1**. Accessible label **כלים** via `aria-label`. Minimap lives inside the popup only — full canvas height when closed. **No screen dimming** when open — transparent backdrop for click-outside dismiss only. **נקה לוח** and L2 deployed block pills stay visible above the launcher when active. Popup stays open while dragging blocks. Close: launcher toggle, Escape, or click outside the panel. Config: `CONFIG.warehouse.popup`.
+
+**Always-visible layout (legacy):** Set `CONFIG.warehouse.popup.enabled: false` to restore the fixed bottom dock.
+
 - **Shell:** **2 rows** high, cols 1–24 inside padding; transparent outer wrapper with **4 corner decorations** (5×5, color 3, static).
 - **Action dock** (20 cols): separate bg color 6 panel, radius 5px, **left side** of the shell.
   - Inner corner decorations: two marks on the dock right edge, paired with two marks on the map left edge around the dock/map gap
@@ -129,7 +135,7 @@ Config: `CONFIG.opening` in `js/config.js`. Module: `js/opening-screen.js`.
   - between statistics and dock content: vertical divider ends 5px from dock top/bottom
   - between hover port and system message: vertical divider at message-band midpoint — 5px top inset, extends to the block-tray hairline (T join with horizontal divider)
   - above the block tray / under the message band: horizontal divider starts at the statistics divider and ends 5px from the dock right edge, creating a joined rotated T shape
-- **Viewport marker:** compact, **fixed** at center of map frame — does **not** move; map **content** pans behind it, clipped to panel bounds. Marker proportions follow the raw browser viewport; L1 uses live macro dots, and L2 uses stable meso frame rectangles with original line silhouettes drawn inside them.
+- **Viewport marker:** compact, **fixed** at center of map frame — does **not** move; map **content** pans behind it, clipped to panel bounds. Marker proportions follow the raw browser viewport; L1 uses live macro dots; L2 uses micro grid glyph/card rects.
 - **Remove:** English `ACTION REPOSITORY` label.
 
 ### Action blocks (dock panel)
@@ -141,7 +147,7 @@ All block/tag pills share dimensions site-wide; chrome varies by **context/state
 | **Default** | Dock, deployed, depth bar | color 3 | color 1 | none | sheet tag color (tags only) |
 | **Default hover** | Dock tag pills | color 3 | color 1 | **2px** sheet tag color | sheet tag color |
 | **Remove hover** | Selected/deployed removable blocks | color 3 | color 1 | none | **×** — tag color (tags) or color 1 (author/typology); click returns to dock |
-| **Attached to note** | L3 / inspector pills below cards | color 1 | color 4 | none | sheet tag color — not clickable |
+| **Attached to note** | L2 / inspector pills below cards | color 1 | color 4 | none | sheet tag color — not clickable |
 | **Irrelevant / muted** | Capture-full + co-occurrence dock mute | color 2 | color 5 | none | color 5 filled circle (tags only) |
 | **Empty slot** | Reserved dock ghost after deploy | color 6 | color 2 | **2px** color 2 | hollow ring color 2 |
 
@@ -167,41 +173,44 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 
 ### Deployed block
 
-- **10px** above dock top (`var(--space-10)`); clear **`נקה לוח`** left edge aligned with **message band** left (after statistics column) — same on L1/L2/L3
+- **10px** above dock top (`var(--space-10)`); clear **`נקה לוח`** left edge aligned with **message band** left (after statistics column) — same on L1/L2
 - Clear: fill color 6 (= RESET)
 - Block counter appears inside the live statistics panel
 
 ### L1 dock block click (macro)
 
 - Tap a docked block (no drag): **muted ghost** clone (`is-macro-indication` — irrelevant/muted variant: fill color 2, text color 5, tag dot color 5) arcs from tray to the visible L1 canvas center; **tray slot keeps the real block in default dock chrome** during the animation; real block stays in tray until dragged
-- Same arc easing as L2/L3 click-deploy (`macroIndicationDuration` 720ms / shared arc lift)
+- Same arc easing as L2 click-deploy (`macroIndicationDuration` 720ms / shared arc lift)
 
 ### L1 molecule hover
 
 - Hull outline thickens on hover (`body.is-molecule-hover`)
-- **Title mode** (`moleculeHoverMode: 'title'` — current default): floating `.molecule-hover-title` pinned on hover start; **Y** snaps to the shell row top at/above the molecule hull (`measureSiteGridTokenPx`); **X** stays on the hull edge (RTL `maxX` / LTR `minX`); first title line (or body fallback), `.note-h` scale, transparent background; word cap 10; RTL top-right / LTR top-left
+- **Title mode** (`moleculeHoverMode: 'title'` — current default): floating `.molecule-hover-title` pinned on hover start at fixed viewport coords; **10px** (`var(--space-10)`) above/outside the hull top corner (RTL `maxX` / LTR `minX`); does not track molecule motion after pin; **truncation rule** (no ellipsis): first title line only (body fallback) → phrase clip within **8 words** (prefer sentence `.!?…`, else clause `,;:—`) → pixel-fit to `.note-h` at `min(28rem, 42vw)` whole words only; `.note-h` scale, transparent background
 - **Blocks / mixed modes** (optional): same floating label with attached-block pill row via `MicroMock.buildTagsRowHTML`; config: `moleculeHoverMode`, `moleculeHoverBlocksPercent`, `moleculeHoverBlocksPerRow`, `moleculeHoverBlocksSingleRowMax`
 - Warehouse hover port (`.warehouse-hover-port`) remains in the message band but is unused for L1 hover
 - Code path: `PhysicsEngine.updateMoleculeHoverState()`
 
 ### Layer navigation (right)
 
-| State | Box | Type | Marker |
-|-------|-----|------|--------|
-| Active | color 3 fill, color 6 text, 10px pad (all sides), 5px radius | `.general-h` at `calc(3.625rem + 10pt)` | selection vector SVG |
-| Inactive | color 6 fill, color 3 text, 10px pad (all sides), 5px radius | `.general-h` at `calc(3.625rem + 10pt)` | none |
+Single **destination toggle** — one button shows the *other* depth level (not the current one). On **L1** → blocks icon (go to L2); on **L2** → 2-dot molecule icon (go to L1). No spine marker in toggle mode.
 
-- Label stack height follows content: `3 × label box + 2 × inter-label gap`, where each label box is `font-size + 2 × box padding` (line-height 1)
+| State | Box | Symbol shown |
+|-------|-----|----------------|
+| On L1 | color 3 fill, color 6 symbol, 10px pad, 5px radius | **L2** text blocks · **4.5rem** |
+| On L2 | same | **L1** 6-dot molecule (`layer-nav-molecule-6.svg`) · **4.5rem** |
+
 - **40px** from viewport right edge → `2.5rem`
-- Active label aligns to the 75% point of shell row 4; inactive labels follow inside the 2.5-row stack
-- Inactive hover only: move label left by 20px (`var(--space-20)`); active label does not hover-shift
-- **Selection marker:** one fixed SVG on the right side of the layer stack — curved top/bottom skeleton and two interior dividers stay static; only the `X` and its vertical-line gap move smoothly between top/middle/bottom cells for macro/meso/micro
+- Anchored to shell row 4 at 75% vertical guide
+- Hover: label shifts left 20px (`var(--space-20)`)
+- `CONFIG.layerNavigation.toggleMode: true` — legacy two-stack + spine marker when `false`
 
-### L2 meso silhouettes
+SVG assets: `layer-nav-molecule-2.svg`, `layer-nav-blocks.svg`, `layer-nav-molecule.svg` (3-dot, unused in toggle)
 
-- Interim MesoMock silhouettes have no outline; keep the gradient line silhouettes un-stroked.
+### Legacy meso silhouettes
 
-### L3 note cards
+- Interim MesoMock silhouettes have no outline; keep the gradient line silhouettes un-stroked. Not navigable — opening-screen art only.
+
+### L2 note cards
 
 | Property | Value |
 |----------|--------|
@@ -219,7 +228,7 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 
 **Text direction:** Default RTL (Hebrew). English-only notes auto-detect to LTR from title+body (Latin letters, no Hebrew/Arabic script). Optional sheet column `direction` (`ltr` / `rtl` / `en` / `he`) overrides auto-detect. LTR cards mirror the ID lane to the right (`6.25rem` right padding, ID at `var(--space-10)` from right). Tag/author pills stay RTL Hebrew.
 
-### L2 meso silhouettes (direction)
+### Legacy meso silhouettes (direction)
 
 | Property | RTL (default) | LTR (English-only) |
 |----------|---------------|---------------------|
@@ -232,9 +241,9 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 ### Focus popup (inspector, all levels)
 
 - Backdrop: color 3 @ 20% opacity
-- Note scales **6 cols → 8 cols** proportionally via `--focus-card-scale` (`8/6`); inspector width is measured from the clicked card (`sourceWidth × 8/6`), not the site token alone; card interior keeps L3 proportions; tag/author/typology blocks stay grid pill size
+- Note scales **6 cols → 8 cols** proportionally via `--focus-card-scale` (`8/6`); inspector width is measured from the clicked card (`sourceWidth × 8/6`), not the site token alone; card interior keeps L2 proportions; tag/author/typology blocks stay grid pill size
 - **Panel scaler:** `transform: scale(var(--focus-card-scale))` with measured `margin-bottom` lift — same scale path as the flyer; reserves height for tags/metadata
-- **Open motion:** the clicked L3 card DOM moves into a fixed `.artifact-inspector-flyer` shell (no HTML rebuild); top-left FLIP on the scaler from source rect → shell row 2; one element, one proportional scale path; shadow only after landing; source `.note-wrapper` hidden (`visibility: hidden` on wrapper + descendants). **L1 macro:** molecule click builds a synthetic L3 card (no visible grid card at macro); FLIP starts from molecule hull center at L3 width; tap on hull or dot via `openMacroNoteAt` (physics hit test + nav-surface tap)
+- **Open motion:** the clicked L2 card DOM moves into a fixed `.artifact-inspector-flyer` shell (no HTML rebuild); top-left FLIP on the scaler from source rect → shell row 2; one element, one proportional scale path; shadow only after landing; source `.note-wrapper` hidden (`visibility: hidden` on wrapper + descendants). **L1 macro:** molecule click builds a synthetic L2 card (no visible grid card at macro); FLIP starts from molecule hull center at L2 width; tap on hull or dot via `openMacroNoteAt` (physics hit test + nav-surface tap)
 - Popup scrollport spans the full viewport height; focused/related content can scroll to the top and bottom viewport edges
 - Focused note starts at the beginning of shell row 2 when the popup opens
 - Metadata panel below focus card: bg color 6, text color 3, radius 5px; **details block** (`.artifact-inspector-metadata__details`) bottom aligns to **shell row 10** (last content row above warehouse) on short notes; long notes keep `metadataMinGap` (60px) below the focus card
@@ -251,7 +260,12 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | File | Figma source | In code | Motion |
 |------|--------------|---------|--------|
-| `layer-nav-marker.svg` | `layer navigation final` (638:12) | `navigation-map.js` | Fixed curved skeleton; `X` and vertical-line gap move between marker cells |
+| `arrow.svg` | Warehouse launcher glyph | `.warehouse-launcher__glyph` | Static |
+| `layer-nav-molecule.svg` | L1 macro layer nav symbol (3 dots) | `.site-navigation-layers__label-symbol[data-layer-symbol="1"]` | Static |
+| `layer-nav-molecule-2.svg` | L1 molecule — 2-dot variant | asset only | Static |
+| `layer-nav-molecule-6.svg` | L1 layer nav symbol (6-dot molecule) | toggle destination when on L2 | Static |
+| `layer-nav-blocks.svg` | L2 micro layer nav symbol | `.site-navigation-layers__label-symbol[data-layer-symbol="3"]` | Static |
+| `layer-nav-marker.svg` | `layer navigation final` (638:12) | `navigation-map.js` | Fixed curved skeleton; selection dot moves between marker cells |
 | `decoration-corner-tr.svg` | One shell corner group (exported **top-right** orientation) | `.warehouse-shell` × 4 (mirror/rotate per corner) | Static |
 | — | — | Map viewport marker | **Not SVG** — fixed DOM/canvas frame; map pans behind |
 
@@ -261,6 +275,31 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-07 | Layer nav L1 destination icon uses `layer-nav-molecule-6.svg` (loaded from assets) |
+| 2026-07-07 | Added `layer-nav-molecule-6.svg` — 6-dot molecule paste template with reference guide layer |
+| 2026-07-07 | Layer navigation: single destination toggle — on L1 show L2 blocks icon, on L2 show L1 molecule icon; spine marker hidden |
+| 2026-07-07 | Added `layer-nav-molecule-2.svg` — 2-dot L1 molecule variant (same hull algorithm as 3-dot icon) |
+| 2026-07-07 | L1 layer nav molecule icon hull: arcs + straight tangents (matches `traceHullOutlinePath`, not arc-only chain) |
+| 2026-07-07 | L1 layer nav molecule icon: 3-dot cluster + convex hull from live proportions (dotR 10, renderPadding 5, clusterR 9) |
+| 2026-07-07 | Depth naming: two navigable levels documented as **L1** (macro) and **L2** (micro); code still uses level index `3` for micro |
+| 2026-07-07 | Layer navigation: Hebrew labels replaced with symbols — molecule (L1) and text blocks (L2); active 4.5rem / inactive 3.25rem icon toggle stack |
+| 2026-07-07 | Warehouse launcher pill width set to 1.5× block unit |
+| 2026-07-07 | Warehouse launcher: pill width ×3; `arrow.svg` tracks pointer (rotate toward mouse) |
+| 2026-07-07 | Warehouse launcher shell: hugs pill with 5px padding (no forced square) |
+| 2026-07-07 | Warehouse launcher glyph: `assets/ui/arrow.svg` replaces ^ character (color-1 mask on block pill) |
+| 2026-07-07 | L1 hover truncation: phrase-boundary clip (8-word window) + `.note-h` pixel-fit; no char cap, no ellipsis |
+| 2026-07-07 | L1 hover label length rule: first line, max **5 words** + **42 chars**, append **…**; CSS cap `min(28rem, 42vw)` |
+| 2026-07-07 | Physics dot collider radius **12px → 8px** (`CONFIG.physics.body.radius`) |
+| 2026-07-07 | L1 hover label: **10px** from hull top corner (no shell-grid Y snap); pinned on hover start, does not follow molecule |
+| 2026-07-07 | L1 macro dot visual render **5px → 10px radius** (`renderScale` 1→2, 20px diameter); visual only |
+| 2026-07-07 | L1 bottom canvas reserve: **0** when warehouse popup collapsed; full `--site-l1-bottom-chrome` when popup open |
+| 2026-07-07 | L1 molecule hull visual padding **3px → 5px** (`renderPadding`) — corner radius **8px → 10px** (dotR 5 + pad 5) |
+| 2026-07-07 | Canvas background grid marks disabled (`showGridMarks: false`) — L1 crosses, L2 diagonals, L3 dots hidden |
+| 2026-07-07 | Warehouse launcher pill: standard action-block width + inspector metadata ^ glyph (general-h, rotated) |
+| 2026-07-07 | Warehouse launcher: bottom-right square (color 6, 5px radius) with inner color-3 block pill; 40px inset |
+| 2026-07-07 | Warehouse popup collapsed: hide all shell/panel decorative corners until panel opens |
+| 2026-07-07 | Warehouse popup: removed screen dimming — backdrop is transparent (click-outside dismiss only) |
+| 2026-07-07 | Warehouse popup mode: dock hidden by default; bottom **כלים** launcher opens slide-up panel; minimap inside popup; clear + deployed blocks float when closed |
 | 2026-07-06 | Opening fix: defer canvas mount until palette loaded; transparent art canvas so text stays visible behind molecules |
 | 2026-07-06 | Opening sequence: blank → slow cursor → slow typewriter → molecules fade over text; `contentBlurPx: 5`; text z-index behind art |
 | 2026-07-06 | Opening title: typewriter on load (RTL logical chars + blink cursor); subtle breathe after typing until art fades in |

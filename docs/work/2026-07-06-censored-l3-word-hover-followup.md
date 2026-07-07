@@ -2,7 +2,7 @@
 
 **Date:** 2026-07-06
 
-**Status:** open
+**Status:** superseded — study loop + polish by [`2026-07-07-censored-l3-study-loop-followup.md`](2026-07-07-censored-l3-study-loop-followup.md)
 
 **Prior sessions:**
 - Base censored L3: [`2026-07-06-censored-l3-followup.md`](2026-07-06-censored-l3-followup.md)

@@ -59,13 +59,14 @@ Tokens are applied at boot and on every depth level change via `applySiteGridTok
 
 ## Content column scale (per depth level)
 
-`contentColumns` sets how many **site shell columns** one content column is wide (a size reference). Total scrollable columns still come from `CONFIG.depth.v2.meso.colCount` (L2) and `micro.colCount` (L3).
+`contentColumns` sets how many **site shell columns** one content column is wide (a size reference). Total scrollable columns come from `CONFIG.depth.v2.micro.colCount` (L2 micro). Legacy meso col count remains in config for art paths only.
 
 | Level | `contentColumns` | Column width | Viewport reference |
 |-------|------------------|--------------|-------------------|
 | L1 macro | `1` | 1 site col | 24 slots |
-| L2 meso | `4` | 4 site cols wide | ~6 cols visible in 24-col viewport |
-| L3 micro | `6` | 6 site cols wide | ~4 cols visible in viewport |
+| L2 micro | `6` | 6 site cols wide | ~4 cols visible in viewport |
+
+Legacy meso used `contentColumns[2] = 4` — not navigable.
 
 Tokens: `--site-meso-col-width`, `--site-micro-col-width`, `--site-meso-viewport-cols` (reference only).
 
@@ -79,9 +80,9 @@ Tokens: `--site-meso-col-width`, `--site-micro-col-width`, `--site-meso-viewport
 | `warehouseDock` | Action dock | `.warehouse-dock` | All | cols 1–20, rows 11–12 |
 | `warehouseMessageBand` | Message row (hover + system) | `.warehouse-message-band` | All | cols 5–20, row 11 (top half of dock) |
 | `warehouseMap` | Minimap panel | `.warehouse-map` | All | cols 21–24, rows 11–12 |
-| `blockBar` | Deployed blocks strip | `.depth-block-bar` | L2/L3 | cols 1–20, row 10 |
-| `inspector` | Focus note card | `.artifact-inspector-panel` | All (L2/L3 overrides) | See `regionsByLevel` |
-| `filterFringe` | Filtered notes edge strip | `#filter-fringe-zone` | L2/L3 | cols 23–24, rows 1–10 |
+| `blockBar` | Deployed blocks strip | `.depth-block-bar` | L2 | cols 1–20, row 10 |
+| `inspector` | Focus note card | `.artifact-inspector-panel` | All (L2 overrides) | See `regionsByLevel` |
+| `filterFringe` | Filtered notes edge strip | `#filter-fringe-zone` | L2 | cols 23–24, rows 1–10 |
 | `navigationLayers` | Depth layer titles | `#site-navigation-layers` | All | cols 23–24, rows 1–6 |
 | `navigationMaps` | Active-layer minimap | `#site-navigation-maps` | All | cols 21–24, rows 11–12 (4×2 cells) |
 | `resetButton` | Warehouse RESET (×) | `.warehouse-reset` | All | Fixed anchor when workspace active |
@@ -97,7 +98,7 @@ Tokens: `--site-meso-col-width`, `--site-micro-col-width`, `--site-meso-viewport
 | `--site-layer-{name}-left/top/width/height` | Region rect per `regions` entry |
 | `--scroll-breathing-room` | Set to `var(--site-layer-canvas-top)` when `canvas` region exists |
 | `--site-l1-bottom-chrome` | L1 only — `calc(100vh - var(--site-layer-warehouse-top))`; canvas padding + scroll clamp |
-| `--site-canvas-page-padding-x` | Set to `var(--site-grid-padding)` for L2/L3 page inset |
+| `--site-canvas-page-padding-x` | Set to `var(--site-grid-padding)` for L2 page inset |
 
 ## DOM labels
 
@@ -107,7 +108,7 @@ Tokens: `--site-meso-col-width`, `--site-micro-col-width`, `--site-meso-viewport
 
 1. Set `debug: true` in `config.js`, refresh.
 2. Adjust `regions` col/row spans until dashed outlines match intent.
-3. Add `regionsByLevel` entries only where L1/L2/L3 should differ.
+3. Add `regionsByLevel` entries only where L1/L2 should differ.
 
 ## What stays untouched
 

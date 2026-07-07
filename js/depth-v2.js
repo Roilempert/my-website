@@ -1006,12 +1006,11 @@ const DepthV2 = {
             if (typeof MicroMock !== 'undefined') {
                 MicroMock.applyAll();
             }
+            void document.getElementById('app')?.offsetHeight;
             if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
                 AppState.centerMicroFocusCluster({ smooth: true });
             } else if (typeof AppState !== 'undefined') {
-                requestAnimationFrame(() => {
-                    AppState.centerCanvasOnLayerEnter();
-                });
+                AppState.scheduleViewportCenter({ passes: 4 });
             }
         };
 

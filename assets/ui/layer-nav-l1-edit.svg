@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg id="Layer_1" xmlns="http://www.w3.org/2000/svg" version="1.1" viewBox="0 0 80 80">
+  <!-- Generator: Adobe Illustrator 30.6.0, SVG Export Plug-In . SVG Version: 2.1.4 Build 109)  -->
+  <defs>
+    <style>
+      .st0 {
+        stroke: #e6e0da;
+        stroke-width: .83px;
+      }
+
+      .st0, .st1, .st2, .st3 {
+        fill: none;
+        stroke-miterlimit: 6.67;
+      }
+
+      .st1 {
+        stroke: #2d2d2d;
+        stroke-width: 4.17px;
+      }
+
+      .st4 {
+        opacity: .35;
+      }
+
+      .st2 {
+        stroke-dasharray: 3.33 3.33;
+      }
+
+      .st2, .st3 {
+        stroke: #898989;
+        stroke-width: 1.67px;
+      }
+
+      .st5 {
+        fill: #2d2d2d;
+      }
+    </style>
+  </defs>
+  <g id="guides" class="st4">
+    <rect id="guide-artboard" class="st3" x=".83" y=".83" width="78.33" height="78.33" vector-effect="non-scaling-stroke"/>
+    <rect id="guide-safe-45deg" class="st2" x="11.72" y="11.72" width="56.57" height="56.57" vector-effect="non-scaling-stroke"/>
+    <line class="st0" x1="40" x2="40" y2="80"/>
+    <line class="st0" y1="40" x2="80" y2="40"/>
+  </g>
+  <g id="icon">
+    <g id="hull">
+      <path id="hull-outline" class="st1" d="M67.23,33.46c9.32,9.32,9.32,24.44,0,33.77s-24.44,9.32-33.77,0l-20.7-20.7c-9.32-9.32-9.32-24.44,0-33.77,9.32-9.32,24.44-9.32,33.77,0l20.7,20.7Z" vector-effect="non-scaling-stroke"/>
+    </g>
+    <g id="dots">
+      <circle id="dot-left" class="st5" cx="29.65" cy="29.65" r="15.9"/>
+      <circle id="dot-right" class="st5" cx="50.35" cy="50.35" r="15.9"/>
+    </g>
+  </g>
+</svg>

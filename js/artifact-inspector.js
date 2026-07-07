@@ -84,6 +84,10 @@ const ArtifactInspector = {
             isPointOverSiteNavigationUI(clientX, clientY)) {
             return false;
         }
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(clientX, clientY)) {
+            return false;
+        }
 
         const noteIndex = PhysicsEngine.hitTestMolecule(clientX, clientY);
         if (noteIndex < 0) return false;

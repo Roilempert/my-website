@@ -6,6 +6,8 @@ Agreed restore point after fixing RTL navigation, viewport centering, secondary 
 
 **Before physics/navigation changes:** read this file. If regressions appear — compare against the patterns below.
 
+**Depth naming (2026-07-07):** Docs use **L1** (macro) and **L2** (micro). Code still uses level index **`3`** for micro (`view-level-3`, `activeLevels: [1, 3]`). Legacy meso is code level `2` only.
+
 ## What works
 
 - Canvas centering (load, block placement, block return to warehouse)
@@ -110,12 +112,12 @@ navigation.contentPadding: scale(120)
 
 **Full reference:** `docs/REFERENCE-2026-06-28-navigation-map-scaling.md`
 
-- **Fixed marker:** `viewportMarkerMode: 'fixed'` — same marker size L1/L2/L3; map pans under center
-- **Scale:** marker-driven via `computeFixedMarkerScale`; L3 trim `levelMapScaleAdjust: { 3: 0.92 }`
+- **Fixed marker:** `viewportMarkerMode: 'fixed'` — same marker size at L1 and L2; map pans under center
+- **Scale:** marker-driven via `computeFixedMarkerScale`; L2 micro trim `levelMapScaleAdjust: { 3: 0.92 }` (code level 3)
 - **Viewport rect:** `getCatalogViewportPageRect()` stays unchanged for general catalog math; `getNavigationMapViewportPageRect()` is minimap-only and tracks the raw browser viewport
 - **L1 markers:** `macroMapUseLayerDots: true` — draw live `.layer-dot` positions so the marker visually matches dense macro rows
-- **L2 markers:** `mesoMapUseFrameRects: true` + `mesoMapViewportEcho: true` + `mesoMapSilhouetteDetail: true` — stable `.meso-mock__frame` rectangles remain the base; original `.meso-mock__line` fragments render inside each frame, not as standalone map markers
-- **L2/L3 bounds:** `getDepthMapMarkerBounds()` (drawn glyph/card rects + pad), not raw `#app` alone
+- **L2 markers:** micro grid uses drawn glyph/card rects via `getDepthMapMarkerBounds()` — not raw `#app` alone
+- **Legacy meso map code** (frame rects, silhouette detail) remains in bundle for art paths — not user-navigable
 - **Do not** drive fixed-mode scale from `levelMapOverscan` alone — causes edge slack / marker outside map
 
 ## Fixed bugs (do not reintroduce)

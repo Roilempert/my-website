@@ -13,6 +13,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     try {
+        if (typeof SiteAbout !== 'undefined') SiteAbout.init();
+    } catch (err) {
+        console.error('SiteAbout.init failed:', err);
+    }
+
+    try {
         if (typeof OpeningBackground !== 'undefined') {
             OpeningBackground.mountSiteBackground();
         }

@@ -2,14 +2,95 @@
    05b. SITE NAVIGATION — layer labels (top-right) + minimap (bottom-right)
    Two separate UI parts; see CONFIG.layerNavigation vs CONFIG.navigationMap.
    ========================================================================== */
-function createLayerLabelElement(labelText) {
+const LAYER_NAV_SYMBOL_INLINE = {
+    l1: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none" aria-hidden="true"><g id="icon"><path d="M67.23,33.46c9.32,9.32,9.32,24.44,0,33.77s-24.44,9.32-33.77,0l-20.7-20.7c-9.32-9.32-9.32-24.44,0-33.77,9.32-9.32,24.44-9.32,33.77,0l20.7,20.7Z" stroke="currentColor" stroke-width="4.17" fill="none" vector-effect="non-scaling-stroke"/><circle cx="29.65" cy="29.65" r="15.9" fill="currentColor"/><circle cx="50.35" cy="50.35" r="15.9" fill="currentColor"/></g></svg>`
+};
+
+const LAYER_NAV_SYMBOL_FETCH_CACHE = new Map();
+
+function getLayerNavToggleTarget(currentLevel) {
+    const levels = getDepthActiveLevels();
+    const other = levels.find((level) => level !== currentLevel);
+    return other ?? currentLevel;
+}
+
+function getLayerNavSymbolInlineKey(targetLevel) {
+    if (targetLevel === 1) return 'l1';
+    return targetLevel;
+}
+
+function normalizeLayerNavSymbolMarkup(svgText) {
+    if (!svgText) return '';
+    const sanitized = svgText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+    const doc = new DOMParser().parseFromString(sanitized, 'image/svg+xml');
+    const svg = doc.querySelector('svg');
+    if (!svg || doc.querySelector('parsererror')) return '';
+
+    svg.removeAttribute('id');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.querySelectorAll('#guides, [id="guides"]').forEach((node) => node.remove());
+    svg.querySelectorAll('style, defs, title, desc').forEach((node) => node.remove());
+    svg.querySelectorAll('[fill]').forEach((node) => {
+        const fill = node.getAttribute('fill');
+        if (fill && fill !== 'none') node.setAttribute('fill', 'currentColor');
+    });
+    svg.querySelectorAll('rect, path, circle, ellipse, polygon').forEach((node) => {
+        if (node.hasAttribute('fill')) return;
+        const stroke = node.getAttribute('stroke');
+        if (stroke && stroke !== 'none') return;
+        node.setAttribute('fill', 'currentColor');
+    });
+    svg.querySelectorAll('[stroke]').forEach((node) => {
+        const stroke = node.getAttribute('stroke');
+        if (stroke && stroke !== 'none') node.setAttribute('stroke', 'currentColor');
+    });
+
+    return svg.outerHTML;
+}
+
+async function ensureLayerNavSymbolMarkup(symbolKey) {
+    if (LAYER_NAV_SYMBOL_INLINE[symbolKey]) {
+        return LAYER_NAV_SYMBOL_INLINE[symbolKey];
+    }
+    if (LAYER_NAV_SYMBOL_FETCH_CACHE.has(symbolKey)) {
+        return LAYER_NAV_SYMBOL_FETCH_CACHE.get(symbolKey);
+    }
+
+    const src = CONFIG.layerNavigation?.symbols?.[symbolKey];
+    const fallback = '';
+    if (!src) return fallback;
+
+    const promise = fetch(src)
+        .then((res) => (res.ok ? res.text() : Promise.reject()))
+        .then((text) => {
+            const markup = normalizeLayerNavSymbolMarkup(text);
+            if (markup) LAYER_NAV_SYMBOL_INLINE[symbolKey] = markup;
+            return markup || fallback;
+        })
+        .catch(() => fallback);
+
+    LAYER_NAV_SYMBOL_FETCH_CACHE.set(symbolKey, promise);
+    return promise;
+}
+
+async function setLayerNavSymbolContent(symbolEl, symbolKey, targetLevel) {
+    if (!symbolEl) return;
+    symbolEl.dataset.layerSymbol = String(targetLevel ?? symbolKey);
+    const markup = await ensureLayerNavSymbolMarkup(symbolKey);
+    if (markup) symbolEl.innerHTML = markup;
+}
+
+function createLayerLabelElement(symbolKey, targetLevel) {
     const label = document.createElement('span');
     label.className = 'site-navigation-layers__label';
 
-    const text = document.createElement('span');
-    text.className = 'site-navigation-layers__label-text';
-    text.textContent = labelText;
-    label.appendChild(text);
+    const symbol = document.createElement('span');
+    symbol.className = 'site-navigation-layers__label-symbol';
+    symbol.dataset.layerSymbol = String(targetLevel ?? symbolKey);
+    symbol.setAttribute('aria-hidden', 'true');
+    label.appendChild(symbol);
+
+    void setLayerNavSymbolContent(symbol, symbolKey, targetLevel);
 
     return label;
 }
@@ -54,6 +135,7 @@ const NavigationMap = {
     _viewportEchoSettleTimer: null,
 
     layerMarker: null,
+    toggleButton: null,
     _layerMarkerLoaded: false,
 
     init() {
@@ -83,6 +165,12 @@ const NavigationMap = {
         if (layerCfg?.rowGap) {
             root.style.setProperty('--layer-nav-row-gap', siteGridCssLength(layerCfg.rowGap));
         }
+        if (layerCfg?.symbolSizeActive) {
+            root.style.setProperty('--layer-nav-symbol-size-active', siteGridCssLength(layerCfg.symbolSizeActive));
+        }
+        if (layerCfg?.symbolSizeInactive) {
+            root.style.setProperty('--layer-nav-symbol-size-inactive', siteGridCssLength(layerCfg.symbolSizeInactive));
+        }
         if (layerCfg?.slotMoveDuration != null) {
             root.style.setProperty('--layer-nav-slot-duration', `${layerCfg.slotMoveDuration}s`);
         }
@@ -94,6 +182,27 @@ const NavigationMap = {
                 '--layer-nav-slot-base-top',
                 'calc(50vh - 0.5 * var(--layer-nav-row-step))'
             );
+        }
+        if (layerCfg?.toggleMode && layerCfg?.toggleTopInset) {
+            root.style.setProperty('--layer-nav-toggle-top', siteGridCssLength(layerCfg.toggleTopInset));
+        }
+        if (layerCfg?.toggleMode && layerCfg?.toggleBoxSize) {
+            root.style.setProperty('--layer-nav-toggle-box-size', siteGridCssLength(layerCfg.toggleBoxSize));
+        }
+        if (layerCfg?.toggleMode && layerCfg?.toggleBoxPadding) {
+            root.style.setProperty('--layer-nav-toggle-pad', siteGridCssLength(layerCfg.toggleBoxPadding));
+        }
+        if (layerCfg?.moleculeSymbolRotateDeg != null) {
+            root.style.setProperty('--layer-nav-molecule-rotate', `${layerCfg.moleculeSymbolRotateDeg}deg`);
+        }
+        if (layerCfg?.moleculeSymbolScale != null) {
+            root.style.setProperty('--layer-nav-molecule-scale', String(layerCfg.moleculeSymbolScale));
+        }
+        if (layerCfg?.blocksSymbolScale != null) {
+            root.style.setProperty('--layer-nav-blocks-scale', String(layerCfg.blocksSymbolScale));
+        }
+        if (layerCfg?.moleculeSymbolNudgeY) {
+            root.style.setProperty('--layer-nav-molecule-nudge-y', siteGridCssLength(layerCfg.moleculeSymbolNudgeY));
         }
         if (layerCfg?.hitAreaPadding) {
             root.style.setProperty('--layer-nav-hit-pad', siteGridCssLength(layerCfg.hitAreaPadding));
@@ -156,31 +265,60 @@ const NavigationMap = {
         mapsPanel.appendChild(mapWrap);
 
         const layerLevels = getDepthActiveLevels();
-        layerLevels.forEach((level) => {
-            const title = document.createElement('button');
-            title.type = 'button';
-            title.className = 'site-navigation-layers__title';
-            title.dataset.level = String(level);
-            const label = createLayerLabelElement(layerCfg?.labels?.[level] || `L${level}`);
-            title.appendChild(label);
-            title.addEventListener('pointerdown', (e) => e.stopPropagation());
-            title.addEventListener('click', (e) => {
+        const toggleMode = CONFIG.layerNavigation?.toggleMode !== false;
+
+        if (toggleMode) {
+            layersPanel.classList.add('site-navigation-layers--toggle');
+            const toggleBtn = document.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.className = 'site-navigation-layers__title site-navigation-layers__toggle';
+            const currentLevel = DepthController.currentLevel || layerLevels[0] || 1;
+            const targetLevel = getLayerNavToggleTarget(currentLevel);
+            toggleBtn.dataset.targetLevel = String(targetLevel);
+            toggleBtn.setAttribute(
+                'aria-label',
+                layerCfg?.labels?.[targetLevel] || `L${targetLevel}`
+            );
+            toggleBtn.appendChild(
+                createLayerLabelElement(getLayerNavSymbolInlineKey(targetLevel), targetLevel)
+            );
+            toggleBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+            toggleBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.navigateToLayer(level);
+                const target = Number(toggleBtn.dataset.targetLevel);
+                this.navigateToLayer(target);
             });
-            layersPanel.appendChild(title);
-            this.titles.set(level, title);
-        });
+            layersPanel.appendChild(toggleBtn);
+            this.toggleButton = toggleBtn;
+        } else {
+            layerLevels.forEach((level) => {
+                const title = document.createElement('button');
+                title.type = 'button';
+                title.className = 'site-navigation-layers__title';
+                title.dataset.level = String(level);
+                title.setAttribute('aria-label', layerCfg?.labels?.[level] || `L${level}`);
+                title.appendChild(
+                    createLayerLabelElement(getLayerNavSymbolInlineKey(level), level)
+                );
+                title.addEventListener('pointerdown', (e) => e.stopPropagation());
+                title.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.navigateToLayer(level);
+                });
+                layersPanel.appendChild(title);
+                this.titles.set(level, title);
+            });
+
+            this.layerMarker = document.createElement('span');
+            this.layerMarker.className = 'site-navigation-layers__marker';
+            this.layerMarker.setAttribute('aria-hidden', 'true');
+            this.layerMarker.dataset.level = String(DepthController.currentLevel || 1);
+            this._loadLayerMarker(layerCfg?.markerSrc || 'assets/ui/layer-nav-marker.svg');
+            layersPanel.appendChild(this.layerMarker);
+        }
 
         mapWrap.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
         mapWrap.addEventListener('pointermove', (e) => this.handlePointerMove(e));
-
-        this.layerMarker = document.createElement('span');
-        this.layerMarker.className = 'site-navigation-layers__marker';
-        this.layerMarker.setAttribute('aria-hidden', 'true');
-        this.layerMarker.dataset.level = String(DepthController.currentLevel || 1);
-        this._loadLayerMarker(layerCfg?.markerSrc || 'assets/ui/layer-nav-marker.svg');
-        layersPanel.appendChild(this.layerMarker);
 
         document.body.appendChild(layersPanel);
 
@@ -1202,10 +1340,14 @@ const NavigationMap = {
 
     syncLayerNavMetrics() {
         const root = document.documentElement;
-        if (!this.titles?.size) return;
+        const layerCfg = CONFIG.layerNavigation;
+        const buttons = this.toggleButton
+            ? [this.toggleButton]
+            : [...(this.titles?.values() || [])];
+        if (!buttons.length) return;
 
         let maxLabelH = 0;
-        this.titles.forEach((title) => {
+        buttons.forEach((title) => {
             const label = title.querySelector('.site-navigation-layers__label');
             if (!label) return;
             maxLabelH = Math.max(maxLabelH, label.getBoundingClientRect().height);
@@ -1216,8 +1358,10 @@ const NavigationMap = {
 
         root.style.setProperty('--layer-nav-label-box-h', `${maxLabelH}px`);
         root.style.setProperty('--layer-nav-row-step', `${maxLabelH + rowGapPx}px`);
-        const slotCount = CONFIG.layerNavigation?.slotCount ?? 2;
-        root.style.setProperty('--layer-nav-stack-h', `${maxLabelH * slotCount + rowGapPx * (slotCount - 1)}px`);
+        const slotCount = layerCfg?.toggleMode !== false
+            ? 1
+            : (layerCfg?.slotCount ?? 2);
+        root.style.setProperty('--layer-nav-stack-h', `${maxLabelH * slotCount + rowGapPx * Math.max(0, slotCount - 1)}px`);
         this.syncLayerMarkerDot();
     },
 
@@ -1266,17 +1410,38 @@ const NavigationMap = {
         this.layersPanel?.classList.toggle('is-dimmed', layersDimmed);
         this.mapsPanel?.classList.toggle('is-inspector-dimmed', inspectorActive);
 
-        this.titles.forEach((title, rowLevel) => {
-            const isActive = rowLevel === level;
-            const slot = this.getSlotForLevel(rowLevel, level);
-            this.applyLayerSlot(title, slot);
-            title.classList.toggle('is-active', isActive);
-            title.classList.toggle('is-inactive', !isActive);
-            title.setAttribute('aria-current', isActive ? 'true' : 'false');
-            title.disabled = transitionActive;
-        });
-        if (this.layerMarker) {
-            this.layerMarker.dataset.level = String(level);
+        const layerCfg = CONFIG.layerNavigation;
+
+        if (this.toggleButton) {
+            const targetLevel = getLayerNavToggleTarget(level);
+            const symbolKey = getLayerNavSymbolInlineKey(targetLevel);
+            const symbol = this.toggleButton.querySelector('.site-navigation-layers__label-symbol');
+
+            this.toggleButton.dataset.targetLevel = String(targetLevel);
+            this.toggleButton.setAttribute(
+                'aria-label',
+                layerCfg?.labels?.[targetLevel] || `L${targetLevel}`
+            );
+            void setLayerNavSymbolContent(symbol, symbolKey, targetLevel);
+
+            this.applyLayerSlot(this.toggleButton, 0);
+            this.toggleButton.classList.add('is-active');
+            this.toggleButton.classList.remove('is-inactive');
+            this.toggleButton.removeAttribute('aria-current');
+            this.toggleButton.disabled = transitionActive;
+        } else {
+            this.titles.forEach((title, rowLevel) => {
+                const isActive = rowLevel === level;
+                const slot = this.getSlotForLevel(rowLevel, level);
+                this.applyLayerSlot(title, slot);
+                title.classList.toggle('is-active', isActive);
+                title.classList.toggle('is-inactive', !isActive);
+                title.setAttribute('aria-current', isActive ? 'true' : 'false');
+                title.disabled = transitionActive;
+            });
+            if (this.layerMarker) {
+                this.layerMarker.dataset.level = String(level);
+            }
         }
         requestAnimationFrame(() => this.syncLayerNavMetrics());
 

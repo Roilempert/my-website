@@ -83,7 +83,7 @@ const DepthTransitionOrchestrator = {
                     MicroMock.applyAll?.();
                 }
                 if (typeof AppState !== 'undefined') {
-                    AppState.centerCanvasOnLayerEnter();
+                    AppState.scheduleViewportCenter();
                 }
             });
         };

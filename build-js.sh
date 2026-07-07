@@ -32,6 +32,7 @@ cd "$ROOT/js"
     spatial-navigation.js \
     navigation-map.js \
     artifact-inspector.js \
+    site-about.js \
     physics-engine.js \
     warehouse-core.js \
     warehouse-grid.js \

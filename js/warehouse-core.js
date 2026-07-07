@@ -34,6 +34,14 @@ const ActionWarehouse = {
     filteredNoteIndices: new Set(),
     filterExitByNote: new Map(),   // noteIndex → { phase: 'hollow'|'peel', phaseStart }
     _navigationMapBlockCount: 0,
+    popupOpen: false,
+    launcherElement: null,
+    launcherGlyphElement: null,
+    backdropElement: null,
+    _popupOutsidePointerBound: null,
+    _launcherPointerBound: null,
+    _launcherPointerRaf: null,
+    _launcherPointerXY: null,
 
     statisticsElement: null,
     messagePortElement: null,
@@ -51,6 +59,7 @@ const ActionWarehouse = {
     statisticsAnimationStartedAt: 0,
     statisticsAnimationDurationMs: 520,
     _wordPanelWords: null,
+    resetElement: null,
 
     isWordPanelTheme() {
         return (CONFIG.theme?.mode || 'default') === 'censored';
@@ -78,6 +87,7 @@ const ActionWarehouse = {
             const text = CONFIG.warehouse?.dock?.messageText || 'גררו להפעלה';
             this.messagePortElement.textContent = text;
         }
+        this.syncClearControlVisibility();
     },
 
     updateWordPanelMessage() {
@@ -88,23 +98,25 @@ const ActionWarehouse = {
         this.messagePortElement.textContent = text;
     },
 
-    addCommittedWord(text) {
-        const key = String(text || '').trim();
-        if (!key || !this.isWordPanelTheme()) return;
+    addCommittedWord(_text) {
+        // Word commits stay on canvas only — no dock chips.
+    },
 
-        this.ensureWordPanel();
-        if (this._wordPanelWords.has(key)) return;
+    hasClearableSelection() {
+        if (this.isWordPanelLevelActive()) {
+            return typeof NoteCensor !== 'undefined'
+                && NoteCensor._committedKeys
+                && NoteCensor._committedKeys.size > 0;
+        }
+        return this.blocks.some(b =>
+            b.state === 'active' &&
+            b.element?.classList.contains('is-deployed') &&
+            !b.nestedIn
+        );
+    },
 
-        this._wordPanelWords.add(key);
-
-        const chip = document.createElement('div');
-        chip.className = 'word-panel__chip general-t';
-        chip.dataset.wordKey = key;
-        chip.textContent = key;
-        chip.setAttribute('dir', 'auto');
-        this.trayBlocksElement.appendChild(chip);
-
-        requestAnimationFrame(() => this.updateScrollReserve());
+    syncClearControlVisibility() {
+        document.body.classList.toggle('is-clear-visible', this.hasClearableSelection());
     },
 
     clearWordPanel() {
@@ -184,15 +196,191 @@ const ActionWarehouse = {
         this.trayFramesElement = this.shellElement.querySelector('.warehouse-tray-section--frames');
         this.trayBlocksElement = this.shellElement.querySelector('.warehouse-tray-section--blocks');
         this.trayScrollElement.addEventListener('wheel', (e) => this.onTrayWheel(e), { passive: false, capture: true });
-        this.shellElement.querySelector('.warehouse-reset')
-            .addEventListener('click', () => this.resetAll());
-        const resetBtn = this.shellElement.querySelector('.warehouse-reset');
+        this.resetElement = this.shellElement.querySelector('.warehouse-reset');
+        this.resetElement.addEventListener('click', () => this.resetAll());
         document.body.appendChild(this.shellElement);
+        this.initWarehousePopup();
+        this.syncClearControlVisibility();
 
         this.resizeObserver = new ResizeObserver(() => this.updateScrollReserve());
         this.resizeObserver.observe(this.shellElement);
         window.addEventListener('resize', () => this.updateScrollReserve());
         this.updateScrollReserve();
+    },
+
+    isPopupMode() {
+        return CONFIG.warehouse?.popup?.enabled === true;
+    },
+
+    isPopupOpen() {
+        return !this.isPopupMode() || this.popupOpen;
+    },
+
+    initWarehousePopup() {
+        const popupCfg = CONFIG.warehouse?.popup;
+        if (!popupCfg?.enabled) return;
+
+        document.body.classList.add('is-warehouse-popup-mode');
+
+        this.backdropElement = document.createElement('div');
+        this.backdropElement.className = 'warehouse-popup-backdrop';
+        this.backdropElement.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(this.backdropElement);
+
+        this.launcherElement = document.createElement('button');
+        this.launcherElement.type = 'button';
+        this.launcherElement.className = 'warehouse-launcher';
+        this.launcherElement.setAttribute('aria-expanded', 'false');
+        this.launcherElement.setAttribute('aria-controls', 'warehouse-popup-panel');
+        this.launcherElement.setAttribute('aria-label', popupCfg.launcherLabel || 'כלים');
+        this.launcherElement.innerHTML =
+            '<span class="warehouse-launcher__glyph" aria-hidden="true"></span>';
+        const arrowSrc = popupCfg.launcherArrowSrc || 'assets/ui/arrow.svg';
+        const glyph = this.launcherElement.querySelector('.warehouse-launcher__glyph');
+        if (glyph) glyph.style.webkitMaskImage = glyph.style.maskImage = `url("${arrowSrc}")`;
+        document.body.appendChild(this.launcherElement);
+        this.launcherGlyphElement = glyph;
+        this.initLauncherGlyphTracking();
+
+        if (this.resetElement) {
+            document.body.appendChild(this.resetElement);
+        }
+
+        this.shellElement.id = 'warehouse-popup-panel';
+        this.shellElement.setAttribute('role', 'dialog');
+        this.shellElement.setAttribute('aria-modal', 'true');
+        this.shellElement.setAttribute('aria-label', popupCfg.launcherLabel || 'כלים');
+
+        this.launcherElement.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.togglePopup();
+        });
+
+        this.launcherElement.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+        }, true);
+
+        this.launcherElement.addEventListener('pointerup', (e) => {
+            e.stopPropagation();
+        }, true);
+
+        if (popupCfg.closeOnOutsideClick) {
+            this.backdropElement.addEventListener('click', () => this.closePopup());
+            this._popupOutsidePointerBound = (e) => {
+                if (!this.popupOpen || this.dragState) return;
+                const target = e.target;
+                if (!(target instanceof Element)) return;
+                if (target.closest('.warehouse-shell, .warehouse-launcher, .action-block.is-dragging')) return;
+                this.closePopup();
+            };
+            document.addEventListener('pointerdown', this._popupOutsidePointerBound, true);
+        }
+
+        if (popupCfg.closeOnEscape) {
+            document.addEventListener('keydown', (e) => {
+                if (e.key !== 'Escape' || !this.popupOpen) return;
+                if (this.dragState && popupCfg.stayOpenWhileDragging) return;
+                this.closePopup();
+            });
+        }
+
+        this.syncPopupState(popupCfg.defaultOpen === true);
+    },
+
+    initLauncherGlyphTracking() {
+        if (!this.launcherGlyphElement) return;
+
+        this._launcherPointerBound = (e) => {
+            this._launcherPointerXY = { x: e.clientX, y: e.clientY };
+            if (this._launcherPointerRaf !== null) return;
+            this._launcherPointerRaf = requestAnimationFrame(() => {
+                this._launcherPointerRaf = null;
+                const pt = this._launcherPointerXY;
+                if (!pt) return;
+                this.updateLauncherGlyphRotation(pt.x, pt.y);
+            });
+        };
+
+        document.addEventListener('pointermove', this._launcherPointerBound, { passive: true });
+        this.updateLauncherGlyphRotation(window.innerWidth * 0.5, window.innerHeight * 0.5);
+    },
+
+    updateLauncherGlyphRotation(clientX, clientY) {
+        const glyph = this.launcherGlyphElement;
+        const anchor = this.launcherElement;
+        if (!glyph || !anchor) return;
+
+        const rect = anchor.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const aimDeg = Math.atan2(clientY - cy, clientX - cx) * (180 / Math.PI);
+        const baseDeg = CONFIG.warehouse?.popup?.launcherArrowBaseDeg ?? -90;
+        glyph.style.transform = `rotate(${aimDeg - baseDeg}deg)`;
+    },
+
+    syncPopupState(open) {
+        this.popupOpen = !!open;
+        document.body.classList.toggle('is-warehouse-popup-open', this.popupOpen);
+        this.shellElement?.classList.toggle('is-popup-open', this.popupOpen);
+        this.shellElement?.classList.toggle('is-popup-collapsed', this.isPopupMode() && !this.popupOpen);
+        this.launcherElement?.classList.toggle('is-active', this.popupOpen);
+        this.launcherElement?.setAttribute('aria-expanded', this.popupOpen ? 'true' : 'false');
+        this.backdropElement?.setAttribute('aria-hidden', this.popupOpen ? 'false' : 'true');
+        this.updateScrollReserve();
+    },
+
+    openPopup() {
+        if (!this.isPopupMode() || this.popupOpen) return;
+        this.syncPopupState(true);
+    },
+
+    closePopup(force = false) {
+        if (!this.isPopupMode() || !this.popupOpen) return;
+        const popupCfg = CONFIG.warehouse?.popup;
+        if (!force && this.dragState && popupCfg?.stayOpenWhileDragging) return;
+        this.syncPopupState(false);
+    },
+
+    togglePopup() {
+        if (this.popupOpen) this.closePopup(true);
+        else this.openPopup();
+    },
+
+    getCollapsedChromeReserve() {
+        const gap = scale(10);
+        let chromeTop = window.innerHeight;
+
+        if (this.launcherElement) {
+            chromeTop = Math.min(chromeTop, this.launcherElement.getBoundingClientRect().top);
+        }
+
+        const reset = this.resetElement;
+        if (reset && document.body.classList.contains('is-clear-visible')) {
+            const resetRect = reset.getBoundingClientRect();
+            if (resetRect.height > 0 && resetRect.width > 0) {
+                chromeTop = Math.min(chromeTop, resetRect.top);
+            }
+        }
+
+        const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+        if (level >= 2 && this.depthBlockBarElement?.childElementCount > 0) {
+            const barRect = this.depthBlockBarElement.getBoundingClientRect();
+            if (barRect.height > 0) {
+                chromeTop = Math.min(chromeTop, barRect.top);
+            }
+        }
+
+        if (chromeTop >= window.innerHeight) {
+            const inset = parseFloat(
+                getComputedStyle(document.documentElement).getPropertyValue('--space-40')
+            ) || 40;
+            const size = parseFloat(
+                getComputedStyle(document.documentElement).getPropertyValue('--warehouse-launcher-size')
+            ) || 72;
+            return Math.ceil(inset + size + gap);
+        }
+
+        return Math.ceil(window.innerHeight - chromeTop + gap);
     },
 
     cancelHoverTypewriter() {
@@ -292,6 +480,17 @@ const ActionWarehouse = {
             document.documentElement.style.setProperty('--warehouse-reserve', '0px');
             return;
         }
+
+        if (this.isPopupMode() && !this.popupOpen) {
+            const collapsedReserve = level === 1 ? 0 : this.getCollapsedChromeReserve();
+            document.documentElement.style.setProperty('--warehouse-reserve', `${collapsedReserve}px`);
+            if (this.launcherElement) {
+                const launcherH = Math.ceil(this.launcherElement.getBoundingClientRect().height);
+                document.documentElement.style.setProperty('--warehouse-launcher-reserve', `${launcherH}px`);
+            }
+            return;
+        }
+
         const rect = this.shellElement.getBoundingClientRect();
         const bottomOffset = parseFloat(
             getComputedStyle(document.documentElement).getPropertyValue('--warehouse-bottom-offset')
@@ -462,6 +661,7 @@ const ActionWarehouse = {
             if (typeof NoteCensor !== 'undefined' && NoteCensor._clearAllHoverState) {
                 NoteCensor._clearAllHoverState();
             }
+            this.syncClearControlVisibility();
             return;
         }
 
@@ -489,9 +689,11 @@ const ActionWarehouse = {
             if (block.state !== 'active' || block.nestedIn) return;
             this.returnToDock(block);
         });
+        this.syncClearControlVisibility();
     },
 
     isPointOverDock(x, y) {
+        if (this.isPopupMode() && !this.popupOpen) return false;
         const dock = this.shellElement?.querySelector('.warehouse-dock');
         if (!dock) return false;
         const rect = dock.getBoundingClientRect();
@@ -980,6 +1182,7 @@ const ActionWarehouse = {
         if (this.shellElement) {
             this.shellElement.classList.toggle('is-workspace-active', deployedCount > 0);
         }
+        this.syncClearControlVisibility();
         this.updateScrollReserve();
         this.updateDotFocusFilter();
     },
@@ -1363,6 +1566,9 @@ const ActionWarehouse = {
         if (typeof DepthTransitionOrchestrator !== 'undefined' &&
             DepthTransitionOrchestrator.isRunning()) {
             return;
+        }
+        if (block.state === 'docked' && !block.nestedIn) {
+            this.openPopup();
         }
         if (block.state === 'docked' && !block.nestedIn &&
             this.isActiveCaptureBlock(block) && this.isWarehouseCaptureFull()) {
@@ -1752,6 +1958,7 @@ const ActionWarehouse = {
                 ).length;
                 this.depthBlockBarElement?.classList.toggle('has-blocks', deployedCount > 0);
                 this.shellElement?.classList.toggle('is-workspace-active', deployedCount > 0);
+                this.syncClearControlVisibility();
                 this.updateScrollReserve();
                 this.updateDotFocusFilter();
             }
@@ -1969,6 +2176,7 @@ const ActionWarehouse = {
         if (this.shellElement) {
             this.shellElement.classList.toggle('is-workspace-active', anyActive);
         }
+        this.syncClearControlVisibility();
 
         this.updateWarehouseCapacityUI();
         this.updateDotFocusFilter();

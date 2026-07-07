@@ -88,7 +88,7 @@ Active work continues on **`main`**. The archive branch stays frozen unless you 
 | Doc | Purpose |
 |-----|---------|
 | [`REFERENCE-2026-06-25-layout-boot.md`](REFERENCE-2026-06-25-layout-boot.md) | Site loads, warehouse, data pipeline, boot order (25 Jun 2026) |
-| [`REFERENCE-2026-06-28-navigation-map-scaling.md`](REFERENCE-2026-06-28-navigation-map-scaling.md) | Minimap L1/L2/L3 scaling (28 Jun 2026) |
+| [`REFERENCE-2026-06-28-navigation-map-scaling.md`](REFERENCE-2026-06-28-navigation-map-scaling.md) | Minimap L1/L2 scaling (28 Jun 2026) |
 
 Pair layout-boot with `CHECKPOINT.md` for physics.
 
@@ -98,7 +98,7 @@ Pair layout-boot with `CHECKPOINT.md` for physics.
 
 | Doc | Purpose |
 |-----|---------|
-| [`architecture/depth-v2.md`](architecture/depth-v2.md) | Active V2 engine (L2/L3 grids, meso target) |
+| [`architecture/depth-v2.md`](architecture/depth-v2.md) | Active V2 engine (L2 micro grid; legacy meso for art) |
 | [`architecture/depth-legacy.md`](architecture/depth-legacy.md) | Legacy engine (frozen) |
 | [`architecture/meso-gradient-p5-baseline.md`](architecture/meso-gradient-p5-baseline.md) | Interim L2 p5 mandala baseline |
 | [`architecture/site-grid.md`](architecture/site-grid.md) | 24×12 shell grid |

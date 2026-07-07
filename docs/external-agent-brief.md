@@ -2,7 +2,7 @@
 
 **Purpose:** Onboard an external AI agent (outside Cursor) with project essence, history, current state, and technical facts that are easy to miss.
 
-**Last updated:** 2026-07-05
+**Last updated:** 2026-07-07
 
 **Canonical docs in repo:** [`AGENTS.md`](../AGENTS.md) · [`docs/DOC-INDEX.md`](DOC-INDEX.md) · [`docs/architecture/experience-model.md`](architecture/experience-model.md)
 
@@ -40,7 +40,7 @@ flowchart LR
 | Part | Status | Summary |
 |------|--------|---------|
 | **Opening screen** | **Planned** | Ceremonial entry; typographic **silhouette art**; choose Experience 1 or 2. No dedicated screen in production yet — today users land directly in Exp 1 or enter Exp 2 via switch/URL. |
-| **Experience 1 — Spatial laboratory** | **Active** | Matter.js physics (L1), full notes grid (L3), blocks/warehouse, capture, inspector. Default on load. |
+| **Experience 1 — Spatial laboratory** | **Active** | Matter.js physics (L1), full notes grid (L2), blocks/warehouse, capture, inspector. Default on load. |
 | **Experience 2 — Archive stream (זרם עקבות)** | **Rough sketch** | Vertical scroll stream + tag/author/typology filter dock. Separate canvas `#archive-roam`. Switchable without full reload. |
 
 ---
@@ -53,7 +53,8 @@ flowchart LR
 | **2026-06-25** | Layout/boot reference — blank-screen fixes, boot order, `VISUAL_SCALE` era |
 | **2026-07-03** | Exhibition visual redesign — 24×12 shell grid, warehouse dock/map, layer nav, typography tokens ([`docs/visual-language.md`](visual-language.md)) |
 | **2026-07-05** | **Product reframe:** study platform → mobile-notes **laboratory** + ceremonial/nosiness framing ([`AGENTS.md`](../AGENTS.md)) |
-| **2026-07-05** | **L2 meso removed** from navigation — only **L1 ↔ L3** zoom in Experience 1 (`activeLevels: [1, 3]`). L2 silhouette code kept for **opening-screen art** only |
+| **2026-07-05** | **Legacy meso removed** from navigation — only **L1 ↔ L2** zoom in Experience 1 (`activeLevels: [1, 3]` — micro = code level 3). Meso silhouette code kept for **opening-screen art** only |
+| **2026-07-07** | **Depth naming:** two navigable levels documented as **L1** (macro) and **L2** (micro); code still uses level index `3` for micro |
 | **2026-07-05** | Pre-redesign snapshot: Git branch `archive/2026-07-05-pre-redesign` + local `my-website-old` |
 | **2026-07-05** | **Experience 2 sketch:** `ExperienceRouter`, `ArchiveStream`, `ArchiveIndex`, `#archive-roam` in `index.html`, switch buttons (מעבדה מרחבית ↔ זרם עקבות) |
 
@@ -64,10 +65,10 @@ flowchart LR
 ### Experience 1 — Spatial laboratory
 
 - **L1 macro:** Tag dots, molecules, convex hulls, sibling links, edge scroll, minimap, warehouse blocks
-- **L3 micro:** Scrollable grid of readable notes (`MicroMock`, `.micro-grid-column`) — wheel zoom L1↔L3 only
+- **L2 micro:** Scrollable grid of readable notes (`MicroMock`, `.micro-grid-column`) — wheel zoom L1↔L2 only
 - **Blocks:** Drag from warehouse to surface; matching notes capture/orbit/stretch (max **5 blocks** on surface — [`docs/block-cap-policy.md`](block-cap-policy.md))
-- **Inspector:** Popup focus for a single note (`ArtifactInspector`) — optional on L3 click
-- **Layer nav:** Two buttons — **מאקרו** / **מיקרו** (levels 1 and 3)
+- **Inspector:** Popup focus for a single note (`ArtifactInspector`) — optional on L2 click
+- **Layer nav:** Two symbol buttons — **L1** (molecule) / **L2** (text blocks); code levels 1 and 3
 
 ### Experience 2 — Archive stream (sketch)
 
@@ -83,13 +84,15 @@ flowchart LR
 
 ### Depth levels (important)
 
-| Level | Name | Navigable? | Role today |
-|-------|------|------------|------------|
-| **L1** | Macro | Yes | Physics dots, spatial roaming |
-| **L2** | Meso | **No** | Legacy silhouettes / MesoMock — **dead path** in UX; geometry kept for opening art |
-| **L3** | Micro | Yes | Full note grid (Exp 1) or archive stream presentation (Exp 2 uses `view-level-3` class) |
+**Doc/UI naming:** **L1** (macro) and **L2** (micro). **Code naming:** micro is still level index **`3`**.
 
-Config: `CONFIG.depth.activeLevels: [1, 3]`, `maxLevel: 3`. Wheel zoom skips L2 via `getDepthAdjacentLevel()`.
+| Doc | Name | Navigable? | Code level | Role today |
+|-----|------|------------|------------|------------|
+| **L1** | Macro | Yes | `1` | Physics dots, spatial roaming |
+| **L2** | Micro | Yes | `3` | Full note grid (Exp 1) or archive stream (`view-level-3`) |
+| Legacy meso | Silhouettes | **No** | `2` | MesoMock / `SilhouetteEngine` — opening-screen art only |
+
+Config: `CONFIG.depth.activeLevels: [1, 3]`, `maxLevel: 3`. Wheel zoom skips legacy meso (code level 2) via `getDepthAdjacentLevel()`.
 
 ---
 
@@ -111,7 +114,7 @@ Config: `CONFIG.depth.activeLevels: [1, 3]`, `maxLevel: 3`. Wheel zoom skips L2 
 
 ```
 index.html          # #app (spatial) + #archive-roam (stream); loads config.js then app.js
-styles.css          # ~4.7k lines — exhibition chrome + L1/L2/L3/archive rules
+styles.css          # ~5k lines — exhibition chrome + L1/L2/archive rules (+ legacy meso CSS)
 js/config.js        # CONFIG, VISUAL_SCALE, site grid, depth, data URLs — EDIT DIRECTLY
 js/app.js           # BUNDLED — do not edit; run ./build-js.sh after js/*.js changes
 js/bootstrap.js     # DOMContentLoaded entry; ExperienceRouter branches spatial vs archive
@@ -122,7 +125,7 @@ js/depth-*.js       # controller, v2, transitions, focus links
 js/experience-router.js
 js/archive-stream.js / archive-index.js
 js/silhouette-engine.js / meso-silhouette-cache.js  # opening art + legacy L2 geometry
-js/micro-mock.js    # L3 note card DOM
+js/micro-mock.js    # L2 note card DOM
 docs/               # CHECKPOINT, visual-language, architecture, work sessions
 data/               # local CSV fallback
 vendor/matter.min.js
@@ -169,7 +172,7 @@ DOMContentLoaded
 | **Canvas** | `#app { direction: ltr }` — physics x/y and scroll math assume LTR canvas |
 | **Notes** | `.note-card { direction: rtl }` — readable Hebrew inside cards |
 | **Shell grid** | **24×12** viewport reference (`CONFIG.siteGrid`) — warehouse rows 11–12, canvas rows 1–10 |
-| **Canvas grids** | Wider than viewport (`#app` macro ~180vw+, L3 micro grid in `CONFIG.depth.v2.micro`) — **not** the 24×12 shell |
+| **Canvas grids** | Wider than viewport (`#app` macro ~180vw+, L2 micro grid in `CONFIG.depth.v2.micro`) — **not** the 24×12 shell |
 | **VISUAL_SCALE** | **`1.0`** on exhibition iMac (was `0.72` in older reference docs) — see `js/config.js` + [`docs/visual-language.md`](visual-language.md) |
 | **Spacing** | Prefer `--space-*` tokens and `--site-grid-*` over raw px in chrome CSS |
 
@@ -241,7 +244,7 @@ Switching modes: `ExperienceRouter.switchTo('archive'|'spatial')` — no full pa
 | Any work | [`AGENTS.md`](../AGENTS.md) |
 | Physics / scroll / blocks | [`docs/CHECKPOINT.md`](CHECKPOINT.md) |
 | UI tokens / colors / type | [`docs/visual-language.md`](visual-language.md) |
-| Depth / L3 grid | [`docs/architecture/depth-v2.md`](architecture/depth-v2.md) |
+| Depth / L2 micro grid | [`docs/architecture/depth-v2.md`](architecture/depth-v2.md) |
 | Product three-part model | [`docs/architecture/experience-model.md`](architecture/experience-model.md) |
 | Opening screen plan | [`docs/work/2026-07-05-opening-screen-plan.md`](work/2026-07-05-opening-screen-plan.md) |
 | Experience 2 plan | [`docs/work/2026-07-05-experience-2-archive-roaming-plan.md`](work/2026-07-05-experience-2-archive-roaming-plan.md) |
@@ -250,12 +253,12 @@ Switching modes: `ExperienceRouter.switchTo('archive'|'spatial')` — no full pa
 
 ## 16. Common mistakes for external agents
 
-1. Treating L2 meso as a live zoom level — **it is not**; only L1 and L3.
+1. Treating legacy meso (code level 2) as a live zoom level — **it is not**; only **L1** and **L2** (code levels 1 and 3).
 2. Editing `js/app.js` instead of source modules + rebuild.
 3. Forgetting `./build-js.sh` after module changes.
 4. Using `scrollTo(0, …)` clamping and breaking RTL wide-canvas centering.
 5. Translating Hebrew note content or UI strings to English.
-6. Assuming three depth buttons — layer nav has **two** (מאקרו, מיקרו).
+6. Assuming three depth buttons — layer nav has **two** symbol toggles (**L1** / **L2**).
 7. Confusing **site shell grid** (24×12 viewport) with **canvas grids** inside `#app`.
 8. Adding CDN dependencies — exhibition runs **offline**; Matter.js is vendored.
 9. Assuming opening screen exists — it is **planned**; routing is URL/switch for now.

@@ -1592,7 +1592,11 @@ const PhysicsEngine = {
             return false;
         }
         const target = e?.target;
-        if (target?.closest?.('.warehouse-shell, .action-block, .action-warehouse')) return false;
+        if (target?.closest?.('.warehouse-shell, .action-block, .action-warehouse, .warehouse-launcher, .warehouse-reset, .warehouse-popup-backdrop, .depth-block-bar')) return false;
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(e.clientX, e.clientY)) {
+            return false;
+        }
         if (target?.closest?.('.site-navigation-layers, .site-navigation-maps')) return false;
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
@@ -1654,11 +1658,83 @@ const PhysicsEngine = {
         document.addEventListener('pointercancel', this.onMoleculePointerUp);
     },
 
-    truncateHoverWords(text, maxWords) {
-        if (!text || maxWords <= 0) return '';
-        const words = text.trim().split(/\s+/).filter(Boolean);
-        if (words.length <= maxWords) return words.join(' ');
-        return words.slice(0, maxWords).join(' ');
+    truncateHoverLabel(text) {
+        if (!text) return '';
+        const line = String(text).trim().split(/\r?\n/)[0].trim();
+        if (!line) return '';
+
+        const maxWords = CONFIG.depth?.moleculeHoverMaxWords ?? 8;
+        const phraseClip = this.clipHoverAtPhraseBoundary(line, maxWords);
+        return this.fitHoverLabelToWidth(phraseClip, this.getMoleculeHoverMaxWidthPx());
+    },
+
+    clipHoverAtPhraseBoundary(line, maxWords) {
+        const words = line.split(/\s+/).filter(Boolean);
+        if (words.length <= maxWords) return line;
+
+        const windowText = words.slice(0, maxWords).join(' ');
+        const breakPatterns = [
+            /[.!?…](?=\s|$)/g,   // sentence end
+            /[,;:—–-](?=\s|$)/g  // clause / list break
+        ];
+
+        for (const pattern of breakPatterns) {
+            let lastEnd = -1;
+            let match;
+            pattern.lastIndex = 0;
+            while ((match = pattern.exec(windowText)) !== null) {
+                lastEnd = match.index + match[0].length;
+            }
+            if (lastEnd > 0) {
+                const candidate = windowText.slice(0, lastEnd).trim();
+                if (candidate.split(/\s+/).filter(Boolean).length >= 2) return candidate;
+            }
+        }
+
+        return windowText;
+    },
+
+    _moleculeHoverMeasureCtx: null,
+
+    getMoleculeHoverMeasureCtx() {
+        if (!this._moleculeHoverMeasureCtx) {
+            const canvas = document.createElement('canvas');
+            this._moleculeHoverMeasureCtx = canvas.getContext('2d');
+        }
+        return this._moleculeHoverMeasureCtx;
+    },
+
+    getMoleculeHoverFont() {
+        const root = getComputedStyle(document.documentElement);
+        const weight = root.getPropertyValue('--type-display-weight').trim() || '400';
+        const size = root.getPropertyValue('--type-display-size').trim() || '2rem';
+        const family = root.getPropertyValue('--type-family-note-h').trim() || 'TheBasics-Dots, sans-serif';
+        return `normal ${weight} ${size} ${family}`;
+    },
+
+    getMoleculeHoverMaxWidthPx() {
+        const cfg = CONFIG.depth || {};
+        const vw = cfg.moleculeHoverMaxWidthVw ?? 42;
+        const rem = cfg.moleculeHoverMaxWidthRem ?? 28;
+        const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+        return Math.min(window.innerWidth * vw / 100, rem * rootPx);
+    },
+
+    fitHoverLabelToWidth(text, maxWidth) {
+        if (!text || maxWidth <= 0) return text || '';
+        const ctx = this.getMoleculeHoverMeasureCtx();
+        ctx.font = this.getMoleculeHoverFont();
+
+        if (ctx.measureText(text).width <= maxWidth) return text;
+
+        const words = text.split(/\s+/).filter(Boolean);
+        let result = '';
+        for (const word of words) {
+            const candidate = result ? `${result} ${word}` : word;
+            if (ctx.measureText(candidate).width > maxWidth) break;
+            result = candidate;
+        }
+        return result || words[0] || '';
     },
 
     noteHasAttachedBlocks(item) {
@@ -1708,66 +1784,21 @@ const PhysicsEngine = {
         label.classList.remove('is-title-chip', 'is-blocks-row', 'note-title', 'note-body');
     },
 
-    _measureSiteGridTokenPx(tokenName, property = 'height') {
-        if (typeof measureSiteGridTokenPx === 'function') {
-            return measureSiteGridTokenPx(tokenName, property);
-        }
-        const root = document.documentElement;
-        const raw = getComputedStyle(root).getPropertyValue(tokenName).trim();
-        if (!raw) return 0;
-
-        let probe = root.querySelector('[data-site-grid-measure]');
-        if (!probe) {
-            probe = document.createElement('div');
-            probe.dataset.siteGridMeasure = '';
-            probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;overflow:hidden;';
-            root.appendChild(probe);
-        }
-        probe.style.width = property === 'width' ? raw : '0';
-        probe.style.height = property === 'height' ? raw : '0';
-        const px = probe.getBoundingClientRect()[property === 'width' ? 'width' : 'height'];
-        probe.style.width = '0';
-        probe.style.height = '0';
-        return px;
-    },
-
-    _getSiteGridPaddingPx() {
-        return this._measureSiteGridTokenPx('--site-grid-padding', 'height');
-    },
-
-    _getSiteGridRowStridePx() {
-        const cellH = this._measureSiteGridTokenPx('--site-grid-cell-h', 'height');
-        const gap = this._measureSiteGridTokenPx('--site-grid-gap', 'height');
-        return cellH + gap;
-    },
-
-    _snapViewportYToShellRowTop(viewportY) {
-        const padding = this._getSiteGridPaddingPx();
-        const stride = this._getSiteGridRowStridePx();
-        if (stride <= 0) return viewportY;
-
-        const rowCount = CONFIG.siteGrid?.rows ?? 12;
-        const relative = viewportY - padding;
-        const rowIndex = Math.max(0, Math.min(rowCount - 1, Math.floor(relative / stride)));
-        return padding + rowIndex * stride;
-    },
-
     positionMoleculeHoverLabel(label, bounds, isLtr) {
         if (!label || !bounds) return;
-        label.style.top = `${this._snapViewportYToShellRowTop(bounds.minY)}px`;
+        label.style.top = `${bounds.minY}px`;
         label.style.left = `${isLtr ? bounds.minX : bounds.maxX}px`;
     },
 
     resolveMoleculeHoverTitle(wrapper) {
         if (!wrapper) return null;
-        const maxWords = CONFIG.depth?.moleculeHoverMaxWords ?? 10;
         const titleEl = wrapper.querySelector('.layer-full .note-title');
         const title = titleEl?.textContent?.trim();
         if (title) {
             const firstLine = title.split(/\r?\n/)[0].trim();
             if (firstLine) {
                 return {
-                    text: this.truncateHoverWords(firstLine, maxWords),
+                    text: this.truncateHoverLabel(firstLine),
                     role: 'title'
                 };
             }
@@ -1778,7 +1809,7 @@ const PhysicsEngine = {
             const firstLine = body.split(/\r?\n/)[0].trim();
             if (firstLine) {
                 return {
-                    text: this.truncateHoverWords(firstLine, maxWords),
+                    text: this.truncateHoverLabel(firstLine),
                     role: 'body'
                 };
             }
@@ -1812,6 +1843,12 @@ const PhysicsEngine = {
 
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(this.mouseClientX, this.mouseClientY)) {
+            hideHover();
+            return;
+        }
+
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(this.mouseClientX, this.mouseClientY)) {
             hideHover();
             return;
         }

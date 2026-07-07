@@ -83,8 +83,8 @@ const NoteCensor = {
         this._activeKey = null;
         this._wordsForKey(key).forEach((word) => word.classList.add('is-word-committed'));
 
-        if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.addCommittedWord) {
-            ActionWarehouse.addCommittedWord(key);
+        if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.syncClearControlVisibility) {
+            ActionWarehouse.syncClearControlVisibility();
         }
 
         this.refreshStudyUnlocks();
@@ -334,6 +334,9 @@ const NoteCensor = {
         this._activeRoutes = [];
         this._retractingRoutes = [];
         this._clearWordLinks();
+        if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.syncClearControlVisibility) {
+            ActionWarehouse.syncClearControlVisibility();
+        }
         this.refreshStudyUnlocks();
     },
 
@@ -892,7 +895,7 @@ const NoteCensor = {
             if (!trimmed) return;
 
             if (chunks.length) {
-                chunks.push('<span class="note-redact__break" aria-hidden="true"></span>');
+                chunks.push('<br class="note-redact__break" aria-hidden="true">');
             }
 
             this.tokenizeWords(trimmed).forEach((word, indexInLine) => {

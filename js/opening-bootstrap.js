@@ -12,6 +12,12 @@ document.addEventListener('DOMContentLoaded', () => {
         console.error('Site token init failed:', err);
     }
 
+    try {
+        if (typeof SiteAbout !== 'undefined') SiteAbout.init();
+    } catch (err) {
+        console.error('SiteAbout.init failed:', err);
+    }
+
     const opening = OpeningScreen.initEarly();
     if (opening.skipped) {
         window.location.replace(OpeningScreen.cfg().entryTarget || 'experience.html');

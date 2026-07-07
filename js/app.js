@@ -1,4 +1,4 @@
-/* app build 20260706192855 */
+/* app build 20260707014913 */
 /* ==========================================================================
    01. SYSTEM BOOTSTRAP
    ========================================================================== */
@@ -104,22 +104,21 @@ const AppState = {
             }
 
             try {
-                if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.buildWorld) {
-                    PhysicsEngine.buildWorld();
-                }
                 if (typeof applyMacroShellGridPlacement === 'function') {
                     applyMacroShellGridPlacement();
                 } else if (typeof updateSiteGridCrosses === 'function') {
                     updateSiteGridCrosses({ force: true });
                 }
-                requestAnimationFrame(() => {
-                    this.scrollToCanvasCenter();
-                    requestAnimationFrame(() => {
-                        this.scrollToCanvasCenter();
+                void document.getElementById('app')?.offsetHeight;
+                if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.buildWorld) {
+                    PhysicsEngine.buildWorld();
+                }
+                this.scheduleViewportCenter({
+                    onComplete: () => {
                         if (typeof NavigationMap !== 'undefined') {
                             NavigationMap.onBootComplete();
                         }
-                    });
+                    }
                 });
             } catch (err) {
                 console.error('Boot prepare failed', err);
@@ -414,36 +413,71 @@ const AppState = {
     /** Scroll so the geometric center of #app sits in the viewport center (warehouse-aware on Y). */
     scrollToCanvasCenter(options = {}) {
         const app = document.getElementById('app');
-        if (!app) return;
+        if (!app) return false;
 
-        SpatialNavigation.bypassScrollClamp(
-            options.smooth
-                ? CONFIG.warehouse.workspaceGrid.rushDuration + 450
-                : 300
-        );
+        if (!options._skipBypass) {
+            SpatialNavigation.bypassScrollClamp(
+                options.smooth
+                    ? CONFIG.warehouse.workspaceGrid.rushDuration + 450
+                    : 300
+            );
+        }
 
         const reserve = typeof ActionWarehouse !== 'undefined'
             ? ActionWarehouse.getScrollReserve()
             : 0;
         const viewMidY = (window.innerHeight - reserve) / 2;
+        const rect = app.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const dX = centerX - window.innerWidth / 2;
+        const dY = centerY - viewMidY;
 
-        const run = () => {
-            const centerX = app.offsetLeft + app.offsetWidth / 2;
-            const centerY = app.offsetTop + app.offsetHeight / 2;
-            const targetX = centerX - window.innerWidth / 2;
-            const targetY = centerY - viewMidY;
+        if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return true;
 
-            window.scrollTo({
-                left: targetX,
-                top: targetY,
-                behavior: options.smooth ? 'smooth' : 'auto'
-            });
+        window.scrollBy({
+            left: dX,
+            top: dY,
+            behavior: options.smooth ? 'smooth' : 'auto'
+        });
+        return false;
+    },
+
+    /** Retry centering across layout passes — boot, layer enter, after both grids/mocks settle. */
+    scheduleViewportCenter(options = {}) {
+        const passes = Math.max(1, options.passes ?? 3);
+        const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+        const smooth = options.smooth === true;
+        let pass = 0;
+
+        SpatialNavigation.bypassScrollClamp(
+            smooth
+                ? CONFIG.warehouse.workspaceGrid.rushDuration + 450
+                : 600
+        );
+
+        const tick = () => {
+            const passOptions = {
+                ...options,
+                _skipBypass: true,
+                smooth: smooth && pass === passes - 1
+            };
+
+            if (level >= 2) {
+                this.centerCanvasOnLayerEnter(passOptions);
+            } else {
+                this.scrollToCanvasCenter(passOptions);
+            }
+
+            pass += 1;
+            if (pass < passes) {
+                requestAnimationFrame(tick);
+            } else if (typeof options.onComplete === 'function') {
+                options.onComplete();
+            }
         };
 
-        requestAnimationFrame(() => {
-            run();
-            requestAnimationFrame(run);
-        });
+        requestAnimationFrame(tick);
     },
 
     centerMesoHiveCluster(options = {}) {
@@ -1843,8 +1877,8 @@ const NoteCensor = {
         this._activeKey = null;
         this._wordsForKey(key).forEach((word) => word.classList.add('is-word-committed'));
 
-        if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.addCommittedWord) {
-            ActionWarehouse.addCommittedWord(key);
+        if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.syncClearControlVisibility) {
+            ActionWarehouse.syncClearControlVisibility();
         }
 
         this.refreshStudyUnlocks();
@@ -2094,6 +2128,9 @@ const NoteCensor = {
         this._activeRoutes = [];
         this._retractingRoutes = [];
         this._clearWordLinks();
+        if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.syncClearControlVisibility) {
+            ActionWarehouse.syncClearControlVisibility();
+        }
         this.refreshStudyUnlocks();
     },
 
@@ -2652,7 +2689,7 @@ const NoteCensor = {
             if (!trimmed) return;
 
             if (chunks.length) {
-                chunks.push('<span class="note-redact__break" aria-hidden="true"></span>');
+                chunks.push('<br class="note-redact__break" aria-hidden="true">');
             }
 
             this.tokenizeWords(trimmed).forEach((word, indexInLine) => {
@@ -6428,7 +6465,7 @@ const DepthTransitionOrchestrator = {
                     MicroMock.applyAll?.();
                 }
                 if (typeof AppState !== 'undefined') {
-                    AppState.centerCanvasOnLayerEnter();
+                    AppState.scheduleViewportCenter();
                 }
             });
         };
@@ -8185,12 +8222,11 @@ const DepthV2 = {
             if (typeof MicroMock !== 'undefined') {
                 MicroMock.applyAll();
             }
+            void document.getElementById('app')?.offsetHeight;
             if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
                 AppState.centerMicroFocusCluster({ smooth: true });
             } else if (typeof AppState !== 'undefined') {
-                requestAnimationFrame(() => {
-                    AppState.centerCanvasOnLayerEnter();
-                });
+                AppState.scheduleViewportCenter({ passes: 4 });
             }
         };
 
@@ -8888,15 +8924,11 @@ const DepthController = {
             ActionWarehouse.updateDotFocusFilter();
             ActionWarehouse.syncDeployedBlocksForDepth?.();
             requestAnimationFrame(() => {
-                AppState.centerCanvasOnLayerEnter();
-                requestAnimationFrame(() => {
-                    PhysicsEngine.setTransitionFrozen(false);
-                    this.endLevelChange();
-                    if (typeof SpatialNavigation !== 'undefined') {
-                        SpatialNavigation.resume();
-                    }
-                    AppState.centerCanvasOnLayerEnter();
-                });
+                PhysicsEngine.setTransitionFrozen(false);
+                this.endLevelChange();
+                if (typeof SpatialNavigation !== 'undefined') {
+                    SpatialNavigation.resume();
+                }
             });
             return true;
         }
@@ -8937,7 +8969,7 @@ const DepthController = {
                     PhysicsEngine.buildWorld();
                 }
                 requestAnimationFrame(() => {
-                    AppState.centerCanvasOnLayerEnter();
+                    AppState.scheduleViewportCenter();
                     SpatialNavigation.resume();
                     this.endLevelChange();
                 });
@@ -8949,7 +8981,7 @@ const DepthController = {
         this.syncViewLevelClass(newLevel);
         ActionWarehouse.updateScrollReserve();
         ActionWarehouse.updateDotFocusFilter();
-        AppState.centerCanvasOnLayerEnter();
+        AppState.scheduleViewportCenter();
         SpatialNavigation.resume();
         this.endLevelChange();
         return true;
@@ -9219,6 +9251,11 @@ const SpatialNavigation = {
             return false;
         }
 
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(clientX, clientY)) {
+            return false;
+        }
+
         if (typeof ArtifactInspector !== 'undefined') {
             if (ArtifactInspector.isActive) {
                 ArtifactInspector.close();
@@ -9261,7 +9298,7 @@ const SpatialNavigation = {
         if (!(target instanceof Element)) return true;
         if (ArtifactInspector.isActive) return true;
         if (ActionWarehouse.dragState) return true;
-        return !!target.closest('.warehouse-shell, .action-block, .warehouse-reset, .focus-backdrop.active, .site-navigation-layers, .site-navigation-maps');
+        return !!target.closest('.warehouse-shell, .action-block, .warehouse-reset, .warehouse-launcher, .warehouse-popup-backdrop, .focus-backdrop.active, .site-navigation-layers, .site-navigation-maps');
     },
 
     canStartPan(e) {
@@ -9871,14 +9908,95 @@ const SpatialNavigation = {
    05b. SITE NAVIGATION — layer labels (top-right) + minimap (bottom-right)
    Two separate UI parts; see CONFIG.layerNavigation vs CONFIG.navigationMap.
    ========================================================================== */
-function createLayerLabelElement(labelText) {
+const LAYER_NAV_SYMBOL_INLINE = {
+    l1: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none" aria-hidden="true"><g id="icon"><path d="M67.23,33.46c9.32,9.32,9.32,24.44,0,33.77s-24.44,9.32-33.77,0l-20.7-20.7c-9.32-9.32-9.32-24.44,0-33.77,9.32-9.32,24.44-9.32,33.77,0l20.7,20.7Z" stroke="currentColor" stroke-width="4.17" fill="none" vector-effect="non-scaling-stroke"/><circle cx="29.65" cy="29.65" r="15.9" fill="currentColor"/><circle cx="50.35" cy="50.35" r="15.9" fill="currentColor"/></g></svg>`
+};
+
+const LAYER_NAV_SYMBOL_FETCH_CACHE = new Map();
+
+function getLayerNavToggleTarget(currentLevel) {
+    const levels = getDepthActiveLevels();
+    const other = levels.find((level) => level !== currentLevel);
+    return other ?? currentLevel;
+}
+
+function getLayerNavSymbolInlineKey(targetLevel) {
+    if (targetLevel === 1) return 'l1';
+    return targetLevel;
+}
+
+function normalizeLayerNavSymbolMarkup(svgText) {
+    if (!svgText) return '';
+    const sanitized = svgText.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, '');
+    const doc = new DOMParser().parseFromString(sanitized, 'image/svg+xml');
+    const svg = doc.querySelector('svg');
+    if (!svg || doc.querySelector('parsererror')) return '';
+
+    svg.removeAttribute('id');
+    svg.setAttribute('aria-hidden', 'true');
+    svg.querySelectorAll('#guides, [id="guides"]').forEach((node) => node.remove());
+    svg.querySelectorAll('style, defs, title, desc').forEach((node) => node.remove());
+    svg.querySelectorAll('[fill]').forEach((node) => {
+        const fill = node.getAttribute('fill');
+        if (fill && fill !== 'none') node.setAttribute('fill', 'currentColor');
+    });
+    svg.querySelectorAll('rect, path, circle, ellipse, polygon').forEach((node) => {
+        if (node.hasAttribute('fill')) return;
+        const stroke = node.getAttribute('stroke');
+        if (stroke && stroke !== 'none') return;
+        node.setAttribute('fill', 'currentColor');
+    });
+    svg.querySelectorAll('[stroke]').forEach((node) => {
+        const stroke = node.getAttribute('stroke');
+        if (stroke && stroke !== 'none') node.setAttribute('stroke', 'currentColor');
+    });
+
+    return svg.outerHTML;
+}
+
+async function ensureLayerNavSymbolMarkup(symbolKey) {
+    if (LAYER_NAV_SYMBOL_INLINE[symbolKey]) {
+        return LAYER_NAV_SYMBOL_INLINE[symbolKey];
+    }
+    if (LAYER_NAV_SYMBOL_FETCH_CACHE.has(symbolKey)) {
+        return LAYER_NAV_SYMBOL_FETCH_CACHE.get(symbolKey);
+    }
+
+    const src = CONFIG.layerNavigation?.symbols?.[symbolKey];
+    const fallback = '';
+    if (!src) return fallback;
+
+    const promise = fetch(src)
+        .then((res) => (res.ok ? res.text() : Promise.reject()))
+        .then((text) => {
+            const markup = normalizeLayerNavSymbolMarkup(text);
+            if (markup) LAYER_NAV_SYMBOL_INLINE[symbolKey] = markup;
+            return markup || fallback;
+        })
+        .catch(() => fallback);
+
+    LAYER_NAV_SYMBOL_FETCH_CACHE.set(symbolKey, promise);
+    return promise;
+}
+
+async function setLayerNavSymbolContent(symbolEl, symbolKey, targetLevel) {
+    if (!symbolEl) return;
+    symbolEl.dataset.layerSymbol = String(targetLevel ?? symbolKey);
+    const markup = await ensureLayerNavSymbolMarkup(symbolKey);
+    if (markup) symbolEl.innerHTML = markup;
+}
+
+function createLayerLabelElement(symbolKey, targetLevel) {
     const label = document.createElement('span');
     label.className = 'site-navigation-layers__label';
 
-    const text = document.createElement('span');
-    text.className = 'site-navigation-layers__label-text';
-    text.textContent = labelText;
-    label.appendChild(text);
+    const symbol = document.createElement('span');
+    symbol.className = 'site-navigation-layers__label-symbol';
+    symbol.dataset.layerSymbol = String(targetLevel ?? symbolKey);
+    symbol.setAttribute('aria-hidden', 'true');
+    label.appendChild(symbol);
+
+    void setLayerNavSymbolContent(symbol, symbolKey, targetLevel);
 
     return label;
 }
@@ -9923,6 +10041,7 @@ const NavigationMap = {
     _viewportEchoSettleTimer: null,
 
     layerMarker: null,
+    toggleButton: null,
     _layerMarkerLoaded: false,
 
     init() {
@@ -9952,6 +10071,12 @@ const NavigationMap = {
         if (layerCfg?.rowGap) {
             root.style.setProperty('--layer-nav-row-gap', siteGridCssLength(layerCfg.rowGap));
         }
+        if (layerCfg?.symbolSizeActive) {
+            root.style.setProperty('--layer-nav-symbol-size-active', siteGridCssLength(layerCfg.symbolSizeActive));
+        }
+        if (layerCfg?.symbolSizeInactive) {
+            root.style.setProperty('--layer-nav-symbol-size-inactive', siteGridCssLength(layerCfg.symbolSizeInactive));
+        }
         if (layerCfg?.slotMoveDuration != null) {
             root.style.setProperty('--layer-nav-slot-duration', `${layerCfg.slotMoveDuration}s`);
         }
@@ -9963,6 +10088,27 @@ const NavigationMap = {
                 '--layer-nav-slot-base-top',
                 'calc(50vh - 0.5 * var(--layer-nav-row-step))'
             );
+        }
+        if (layerCfg?.toggleMode && layerCfg?.toggleTopInset) {
+            root.style.setProperty('--layer-nav-toggle-top', siteGridCssLength(layerCfg.toggleTopInset));
+        }
+        if (layerCfg?.toggleMode && layerCfg?.toggleBoxSize) {
+            root.style.setProperty('--layer-nav-toggle-box-size', siteGridCssLength(layerCfg.toggleBoxSize));
+        }
+        if (layerCfg?.toggleMode && layerCfg?.toggleBoxPadding) {
+            root.style.setProperty('--layer-nav-toggle-pad', siteGridCssLength(layerCfg.toggleBoxPadding));
+        }
+        if (layerCfg?.moleculeSymbolRotateDeg != null) {
+            root.style.setProperty('--layer-nav-molecule-rotate', `${layerCfg.moleculeSymbolRotateDeg}deg`);
+        }
+        if (layerCfg?.moleculeSymbolScale != null) {
+            root.style.setProperty('--layer-nav-molecule-scale', String(layerCfg.moleculeSymbolScale));
+        }
+        if (layerCfg?.blocksSymbolScale != null) {
+            root.style.setProperty('--layer-nav-blocks-scale', String(layerCfg.blocksSymbolScale));
+        }
+        if (layerCfg?.moleculeSymbolNudgeY) {
+            root.style.setProperty('--layer-nav-molecule-nudge-y', siteGridCssLength(layerCfg.moleculeSymbolNudgeY));
         }
         if (layerCfg?.hitAreaPadding) {
             root.style.setProperty('--layer-nav-hit-pad', siteGridCssLength(layerCfg.hitAreaPadding));
@@ -10025,31 +10171,60 @@ const NavigationMap = {
         mapsPanel.appendChild(mapWrap);
 
         const layerLevels = getDepthActiveLevels();
-        layerLevels.forEach((level) => {
-            const title = document.createElement('button');
-            title.type = 'button';
-            title.className = 'site-navigation-layers__title';
-            title.dataset.level = String(level);
-            const label = createLayerLabelElement(layerCfg?.labels?.[level] || `L${level}`);
-            title.appendChild(label);
-            title.addEventListener('pointerdown', (e) => e.stopPropagation());
-            title.addEventListener('click', (e) => {
+        const toggleMode = CONFIG.layerNavigation?.toggleMode !== false;
+
+        if (toggleMode) {
+            layersPanel.classList.add('site-navigation-layers--toggle');
+            const toggleBtn = document.createElement('button');
+            toggleBtn.type = 'button';
+            toggleBtn.className = 'site-navigation-layers__title site-navigation-layers__toggle';
+            const currentLevel = DepthController.currentLevel || layerLevels[0] || 1;
+            const targetLevel = getLayerNavToggleTarget(currentLevel);
+            toggleBtn.dataset.targetLevel = String(targetLevel);
+            toggleBtn.setAttribute(
+                'aria-label',
+                layerCfg?.labels?.[targetLevel] || `L${targetLevel}`
+            );
+            toggleBtn.appendChild(
+                createLayerLabelElement(getLayerNavSymbolInlineKey(targetLevel), targetLevel)
+            );
+            toggleBtn.addEventListener('pointerdown', (e) => e.stopPropagation());
+            toggleBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
-                this.navigateToLayer(level);
+                const target = Number(toggleBtn.dataset.targetLevel);
+                this.navigateToLayer(target);
             });
-            layersPanel.appendChild(title);
-            this.titles.set(level, title);
-        });
+            layersPanel.appendChild(toggleBtn);
+            this.toggleButton = toggleBtn;
+        } else {
+            layerLevels.forEach((level) => {
+                const title = document.createElement('button');
+                title.type = 'button';
+                title.className = 'site-navigation-layers__title';
+                title.dataset.level = String(level);
+                title.setAttribute('aria-label', layerCfg?.labels?.[level] || `L${level}`);
+                title.appendChild(
+                    createLayerLabelElement(getLayerNavSymbolInlineKey(level), level)
+                );
+                title.addEventListener('pointerdown', (e) => e.stopPropagation());
+                title.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    this.navigateToLayer(level);
+                });
+                layersPanel.appendChild(title);
+                this.titles.set(level, title);
+            });
+
+            this.layerMarker = document.createElement('span');
+            this.layerMarker.className = 'site-navigation-layers__marker';
+            this.layerMarker.setAttribute('aria-hidden', 'true');
+            this.layerMarker.dataset.level = String(DepthController.currentLevel || 1);
+            this._loadLayerMarker(layerCfg?.markerSrc || 'assets/ui/layer-nav-marker.svg');
+            layersPanel.appendChild(this.layerMarker);
+        }
 
         mapWrap.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
         mapWrap.addEventListener('pointermove', (e) => this.handlePointerMove(e));
-
-        this.layerMarker = document.createElement('span');
-        this.layerMarker.className = 'site-navigation-layers__marker';
-        this.layerMarker.setAttribute('aria-hidden', 'true');
-        this.layerMarker.dataset.level = String(DepthController.currentLevel || 1);
-        this._loadLayerMarker(layerCfg?.markerSrc || 'assets/ui/layer-nav-marker.svg');
-        layersPanel.appendChild(this.layerMarker);
 
         document.body.appendChild(layersPanel);
 
@@ -11071,10 +11246,14 @@ const NavigationMap = {
 
     syncLayerNavMetrics() {
         const root = document.documentElement;
-        if (!this.titles?.size) return;
+        const layerCfg = CONFIG.layerNavigation;
+        const buttons = this.toggleButton
+            ? [this.toggleButton]
+            : [...(this.titles?.values() || [])];
+        if (!buttons.length) return;
 
         let maxLabelH = 0;
-        this.titles.forEach((title) => {
+        buttons.forEach((title) => {
             const label = title.querySelector('.site-navigation-layers__label');
             if (!label) return;
             maxLabelH = Math.max(maxLabelH, label.getBoundingClientRect().height);
@@ -11085,8 +11264,10 @@ const NavigationMap = {
 
         root.style.setProperty('--layer-nav-label-box-h', `${maxLabelH}px`);
         root.style.setProperty('--layer-nav-row-step', `${maxLabelH + rowGapPx}px`);
-        const slotCount = CONFIG.layerNavigation?.slotCount ?? 2;
-        root.style.setProperty('--layer-nav-stack-h', `${maxLabelH * slotCount + rowGapPx * (slotCount - 1)}px`);
+        const slotCount = layerCfg?.toggleMode !== false
+            ? 1
+            : (layerCfg?.slotCount ?? 2);
+        root.style.setProperty('--layer-nav-stack-h', `${maxLabelH * slotCount + rowGapPx * Math.max(0, slotCount - 1)}px`);
         this.syncLayerMarkerDot();
     },
 
@@ -11135,17 +11316,38 @@ const NavigationMap = {
         this.layersPanel?.classList.toggle('is-dimmed', layersDimmed);
         this.mapsPanel?.classList.toggle('is-inspector-dimmed', inspectorActive);
 
-        this.titles.forEach((title, rowLevel) => {
-            const isActive = rowLevel === level;
-            const slot = this.getSlotForLevel(rowLevel, level);
-            this.applyLayerSlot(title, slot);
-            title.classList.toggle('is-active', isActive);
-            title.classList.toggle('is-inactive', !isActive);
-            title.setAttribute('aria-current', isActive ? 'true' : 'false');
-            title.disabled = transitionActive;
-        });
-        if (this.layerMarker) {
-            this.layerMarker.dataset.level = String(level);
+        const layerCfg = CONFIG.layerNavigation;
+
+        if (this.toggleButton) {
+            const targetLevel = getLayerNavToggleTarget(level);
+            const symbolKey = getLayerNavSymbolInlineKey(targetLevel);
+            const symbol = this.toggleButton.querySelector('.site-navigation-layers__label-symbol');
+
+            this.toggleButton.dataset.targetLevel = String(targetLevel);
+            this.toggleButton.setAttribute(
+                'aria-label',
+                layerCfg?.labels?.[targetLevel] || `L${targetLevel}`
+            );
+            void setLayerNavSymbolContent(symbol, symbolKey, targetLevel);
+
+            this.applyLayerSlot(this.toggleButton, 0);
+            this.toggleButton.classList.add('is-active');
+            this.toggleButton.classList.remove('is-inactive');
+            this.toggleButton.removeAttribute('aria-current');
+            this.toggleButton.disabled = transitionActive;
+        } else {
+            this.titles.forEach((title, rowLevel) => {
+                const isActive = rowLevel === level;
+                const slot = this.getSlotForLevel(rowLevel, level);
+                this.applyLayerSlot(title, slot);
+                title.classList.toggle('is-active', isActive);
+                title.classList.toggle('is-inactive', !isActive);
+                title.setAttribute('aria-current', isActive ? 'true' : 'false');
+                title.disabled = transitionActive;
+            });
+            if (this.layerMarker) {
+                this.layerMarker.dataset.level = String(level);
+            }
         }
         requestAnimationFrame(() => this.syncLayerNavMetrics());
 
@@ -12786,6 +12988,10 @@ const ArtifactInspector = {
             isPointOverSiteNavigationUI(clientX, clientY)) {
             return false;
         }
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(clientX, clientY)) {
+            return false;
+        }
 
         const noteIndex = PhysicsEngine.hitTestMolecule(clientX, clientY);
         if (noteIndex < 0) return false;
@@ -13516,6 +13722,133 @@ const ArtifactInspector = {
         this.activeElement = null;
         this.mode = null;
         SpatialNavigation.resume();
+    }
+};
+/* ==========================================================================
+   Site About — top-left hover panel (opening + Experience 1)
+   ========================================================================== */
+const SiteAbout = {
+    root: null,
+    trigger: null,
+    panel: null,
+    isOpen: false,
+    isPinned: false,
+    _closeTimer: null,
+    _closeDelayMs: 120,
+
+    cfg() {
+        return CONFIG.about || {};
+    },
+
+    init() {
+        if (this.root) return;
+
+        const label = this.cfg().label || 'על הפרויקט';
+        const bodyHtml = this.cfg().bodyHtml || '';
+
+        this.root = document.createElement('div');
+        this.root.className = 'site-about';
+        this.root.dataset.siteLayer = 'about';
+
+        this.trigger = document.createElement('button');
+        this.trigger.type = 'button';
+        this.trigger.className = 'site-about__trigger general-t';
+        this.trigger.id = 'site-about-trigger';
+        this.trigger.setAttribute('aria-expanded', 'false');
+        this.trigger.setAttribute('aria-controls', 'site-about-panel');
+        this.trigger.textContent = label;
+
+        this.panel = document.createElement('aside');
+        this.panel.id = 'site-about-panel';
+        this.panel.className = 'site-about__panel';
+        this.panel.setAttribute('aria-labelledby', 'site-about-trigger');
+        this.panel.setAttribute('aria-hidden', 'true');
+        this.panel.innerHTML = `
+            <section class="artifact-inspector-metadata site-about__metadata">
+                <div class="artifact-inspector-metadata__scroll-glyphs" aria-hidden="true">
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+                </div>
+                <div class="site-about__body general-t" dir="rtl">${bodyHtml}</div>
+            </section>
+        `;
+
+        this.root.appendChild(this.trigger);
+        this.root.appendChild(this.panel);
+        document.body.appendChild(this.root);
+
+        this.root.addEventListener('mouseenter', () => this._onPointerEnter());
+        this.root.addEventListener('mouseleave', () => this._onPointerLeave());
+        this.trigger.addEventListener('click', (e) => this._onTriggerClick(e));
+        this.trigger.addEventListener('keydown', (e) => this._onTriggerKeyDown(e));
+
+        this._onKeyDown = (e) => {
+            if (e.key === 'Escape' && this.isOpen) {
+                e.preventDefault();
+                this.close(true);
+            }
+        };
+        window.addEventListener('keydown', this._onKeyDown);
+    },
+
+    _clearCloseTimer() {
+        if (this._closeTimer !== null) {
+            clearTimeout(this._closeTimer);
+            this._closeTimer = null;
+        }
+    },
+
+    _onPointerEnter() {
+        this._clearCloseTimer();
+        this.open();
+    },
+
+    _onPointerLeave() {
+        if (this.isPinned) return;
+        this._clearCloseTimer();
+        this._closeTimer = setTimeout(() => {
+            this._closeTimer = null;
+            if (!this.isPinned) this.close();
+        }, this._closeDelayMs);
+    },
+
+    _onTriggerClick(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (this.isPinned && this.isOpen) {
+            this.close(true);
+            return;
+        }
+        this.isPinned = true;
+        this.open();
+    },
+
+    _onTriggerKeyDown(e) {
+        if (e.key === 'Enter' || e.key === ' ') {
+            e.preventDefault();
+            this._onTriggerClick(e);
+        }
+    },
+
+    open() {
+        if (this.isOpen) return;
+        this.isOpen = true;
+        this.syncState();
+    },
+
+    close(unpin = false) {
+        if (unpin) this.isPinned = false;
+        if (!this.isOpen) return;
+        this.isOpen = false;
+        this.syncState();
+    },
+
+    syncState() {
+        this.root?.classList.toggle('is-open', this.isOpen);
+        this.trigger?.setAttribute('aria-expanded', this.isOpen ? 'true' : 'false');
+        this.panel?.setAttribute('aria-hidden', this.isOpen ? 'false' : 'true');
+        document.body.classList.toggle('is-site-about-open', this.isOpen);
     }
 };
 /* ==========================================================================
@@ -15112,7 +15445,11 @@ const PhysicsEngine = {
             return false;
         }
         const target = e?.target;
-        if (target?.closest?.('.warehouse-shell, .action-block, .action-warehouse')) return false;
+        if (target?.closest?.('.warehouse-shell, .action-block, .action-warehouse, .warehouse-launcher, .warehouse-reset, .warehouse-popup-backdrop, .depth-block-bar')) return false;
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(e.clientX, e.clientY)) {
+            return false;
+        }
         if (target?.closest?.('.site-navigation-layers, .site-navigation-maps')) return false;
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
@@ -15174,11 +15511,83 @@ const PhysicsEngine = {
         document.addEventListener('pointercancel', this.onMoleculePointerUp);
     },
 
-    truncateHoverWords(text, maxWords) {
-        if (!text || maxWords <= 0) return '';
-        const words = text.trim().split(/\s+/).filter(Boolean);
-        if (words.length <= maxWords) return words.join(' ');
-        return words.slice(0, maxWords).join(' ');
+    truncateHoverLabel(text) {
+        if (!text) return '';
+        const line = String(text).trim().split(/\r?\n/)[0].trim();
+        if (!line) return '';
+
+        const maxWords = CONFIG.depth?.moleculeHoverMaxWords ?? 8;
+        const phraseClip = this.clipHoverAtPhraseBoundary(line, maxWords);
+        return this.fitHoverLabelToWidth(phraseClip, this.getMoleculeHoverMaxWidthPx());
+    },
+
+    clipHoverAtPhraseBoundary(line, maxWords) {
+        const words = line.split(/\s+/).filter(Boolean);
+        if (words.length <= maxWords) return line;
+
+        const windowText = words.slice(0, maxWords).join(' ');
+        const breakPatterns = [
+            /[.!?…](?=\s|$)/g,   // sentence end
+            /[,;:—–-](?=\s|$)/g  // clause / list break
+        ];
+
+        for (const pattern of breakPatterns) {
+            let lastEnd = -1;
+            let match;
+            pattern.lastIndex = 0;
+            while ((match = pattern.exec(windowText)) !== null) {
+                lastEnd = match.index + match[0].length;
+            }
+            if (lastEnd > 0) {
+                const candidate = windowText.slice(0, lastEnd).trim();
+                if (candidate.split(/\s+/).filter(Boolean).length >= 2) return candidate;
+            }
+        }
+
+        return windowText;
+    },
+
+    _moleculeHoverMeasureCtx: null,
+
+    getMoleculeHoverMeasureCtx() {
+        if (!this._moleculeHoverMeasureCtx) {
+            const canvas = document.createElement('canvas');
+            this._moleculeHoverMeasureCtx = canvas.getContext('2d');
+        }
+        return this._moleculeHoverMeasureCtx;
+    },
+
+    getMoleculeHoverFont() {
+        const root = getComputedStyle(document.documentElement);
+        const weight = root.getPropertyValue('--type-display-weight').trim() || '400';
+        const size = root.getPropertyValue('--type-display-size').trim() || '2rem';
+        const family = root.getPropertyValue('--type-family-note-h').trim() || 'TheBasics-Dots, sans-serif';
+        return `normal ${weight} ${size} ${family}`;
+    },
+
+    getMoleculeHoverMaxWidthPx() {
+        const cfg = CONFIG.depth || {};
+        const vw = cfg.moleculeHoverMaxWidthVw ?? 42;
+        const rem = cfg.moleculeHoverMaxWidthRem ?? 28;
+        const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+        return Math.min(window.innerWidth * vw / 100, rem * rootPx);
+    },
+
+    fitHoverLabelToWidth(text, maxWidth) {
+        if (!text || maxWidth <= 0) return text || '';
+        const ctx = this.getMoleculeHoverMeasureCtx();
+        ctx.font = this.getMoleculeHoverFont();
+
+        if (ctx.measureText(text).width <= maxWidth) return text;
+
+        const words = text.split(/\s+/).filter(Boolean);
+        let result = '';
+        for (const word of words) {
+            const candidate = result ? `${result} ${word}` : word;
+            if (ctx.measureText(candidate).width > maxWidth) break;
+            result = candidate;
+        }
+        return result || words[0] || '';
     },
 
     noteHasAttachedBlocks(item) {
@@ -15228,66 +15637,21 @@ const PhysicsEngine = {
         label.classList.remove('is-title-chip', 'is-blocks-row', 'note-title', 'note-body');
     },
 
-    _measureSiteGridTokenPx(tokenName, property = 'height') {
-        if (typeof measureSiteGridTokenPx === 'function') {
-            return measureSiteGridTokenPx(tokenName, property);
-        }
-        const root = document.documentElement;
-        const raw = getComputedStyle(root).getPropertyValue(tokenName).trim();
-        if (!raw) return 0;
-
-        let probe = root.querySelector('[data-site-grid-measure]');
-        if (!probe) {
-            probe = document.createElement('div');
-            probe.dataset.siteGridMeasure = '';
-            probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;overflow:hidden;';
-            root.appendChild(probe);
-        }
-        probe.style.width = property === 'width' ? raw : '0';
-        probe.style.height = property === 'height' ? raw : '0';
-        const px = probe.getBoundingClientRect()[property === 'width' ? 'width' : 'height'];
-        probe.style.width = '0';
-        probe.style.height = '0';
-        return px;
-    },
-
-    _getSiteGridPaddingPx() {
-        return this._measureSiteGridTokenPx('--site-grid-padding', 'height');
-    },
-
-    _getSiteGridRowStridePx() {
-        const cellH = this._measureSiteGridTokenPx('--site-grid-cell-h', 'height');
-        const gap = this._measureSiteGridTokenPx('--site-grid-gap', 'height');
-        return cellH + gap;
-    },
-
-    _snapViewportYToShellRowTop(viewportY) {
-        const padding = this._getSiteGridPaddingPx();
-        const stride = this._getSiteGridRowStridePx();
-        if (stride <= 0) return viewportY;
-
-        const rowCount = CONFIG.siteGrid?.rows ?? 12;
-        const relative = viewportY - padding;
-        const rowIndex = Math.max(0, Math.min(rowCount - 1, Math.floor(relative / stride)));
-        return padding + rowIndex * stride;
-    },
-
     positionMoleculeHoverLabel(label, bounds, isLtr) {
         if (!label || !bounds) return;
-        label.style.top = `${this._snapViewportYToShellRowTop(bounds.minY)}px`;
+        label.style.top = `${bounds.minY}px`;
         label.style.left = `${isLtr ? bounds.minX : bounds.maxX}px`;
     },
 
     resolveMoleculeHoverTitle(wrapper) {
         if (!wrapper) return null;
-        const maxWords = CONFIG.depth?.moleculeHoverMaxWords ?? 10;
         const titleEl = wrapper.querySelector('.layer-full .note-title');
         const title = titleEl?.textContent?.trim();
         if (title) {
             const firstLine = title.split(/\r?\n/)[0].trim();
             if (firstLine) {
                 return {
-                    text: this.truncateHoverWords(firstLine, maxWords),
+                    text: this.truncateHoverLabel(firstLine),
                     role: 'title'
                 };
             }
@@ -15298,7 +15662,7 @@ const PhysicsEngine = {
             const firstLine = body.split(/\r?\n/)[0].trim();
             if (firstLine) {
                 return {
-                    text: this.truncateHoverWords(firstLine, maxWords),
+                    text: this.truncateHoverLabel(firstLine),
                     role: 'body'
                 };
             }
@@ -15332,6 +15696,12 @@ const PhysicsEngine = {
 
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(this.mouseClientX, this.mouseClientY)) {
+            hideHover();
+            return;
+        }
+
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(this.mouseClientX, this.mouseClientY)) {
             hideHover();
             return;
         }
@@ -15434,6 +15804,14 @@ const ActionWarehouse = {
     filteredNoteIndices: new Set(),
     filterExitByNote: new Map(),   // noteIndex → { phase: 'hollow'|'peel', phaseStart }
     _navigationMapBlockCount: 0,
+    popupOpen: false,
+    launcherElement: null,
+    launcherGlyphElement: null,
+    backdropElement: null,
+    _popupOutsidePointerBound: null,
+    _launcherPointerBound: null,
+    _launcherPointerRaf: null,
+    _launcherPointerXY: null,
 
     statisticsElement: null,
     messagePortElement: null,
@@ -15451,6 +15829,7 @@ const ActionWarehouse = {
     statisticsAnimationStartedAt: 0,
     statisticsAnimationDurationMs: 520,
     _wordPanelWords: null,
+    resetElement: null,
 
     isWordPanelTheme() {
         return (CONFIG.theme?.mode || 'default') === 'censored';
@@ -15478,6 +15857,7 @@ const ActionWarehouse = {
             const text = CONFIG.warehouse?.dock?.messageText || 'גררו להפעלה';
             this.messagePortElement.textContent = text;
         }
+        this.syncClearControlVisibility();
     },
 
     updateWordPanelMessage() {
@@ -15488,23 +15868,25 @@ const ActionWarehouse = {
         this.messagePortElement.textContent = text;
     },
 
-    addCommittedWord(text) {
-        const key = String(text || '').trim();
-        if (!key || !this.isWordPanelTheme()) return;
+    addCommittedWord(_text) {
+        // Word commits stay on canvas only — no dock chips.
+    },
 
-        this.ensureWordPanel();
-        if (this._wordPanelWords.has(key)) return;
+    hasClearableSelection() {
+        if (this.isWordPanelLevelActive()) {
+            return typeof NoteCensor !== 'undefined'
+                && NoteCensor._committedKeys
+                && NoteCensor._committedKeys.size > 0;
+        }
+        return this.blocks.some(b =>
+            b.state === 'active' &&
+            b.element?.classList.contains('is-deployed') &&
+            !b.nestedIn
+        );
+    },
 
-        this._wordPanelWords.add(key);
-
-        const chip = document.createElement('div');
-        chip.className = 'word-panel__chip general-t';
-        chip.dataset.wordKey = key;
-        chip.textContent = key;
-        chip.setAttribute('dir', 'auto');
-        this.trayBlocksElement.appendChild(chip);
-
-        requestAnimationFrame(() => this.updateScrollReserve());
+    syncClearControlVisibility() {
+        document.body.classList.toggle('is-clear-visible', this.hasClearableSelection());
     },
 
     clearWordPanel() {
@@ -15584,15 +15966,191 @@ const ActionWarehouse = {
         this.trayFramesElement = this.shellElement.querySelector('.warehouse-tray-section--frames');
         this.trayBlocksElement = this.shellElement.querySelector('.warehouse-tray-section--blocks');
         this.trayScrollElement.addEventListener('wheel', (e) => this.onTrayWheel(e), { passive: false, capture: true });
-        this.shellElement.querySelector('.warehouse-reset')
-            .addEventListener('click', () => this.resetAll());
-        const resetBtn = this.shellElement.querySelector('.warehouse-reset');
+        this.resetElement = this.shellElement.querySelector('.warehouse-reset');
+        this.resetElement.addEventListener('click', () => this.resetAll());
         document.body.appendChild(this.shellElement);
+        this.initWarehousePopup();
+        this.syncClearControlVisibility();
 
         this.resizeObserver = new ResizeObserver(() => this.updateScrollReserve());
         this.resizeObserver.observe(this.shellElement);
         window.addEventListener('resize', () => this.updateScrollReserve());
         this.updateScrollReserve();
+    },
+
+    isPopupMode() {
+        return CONFIG.warehouse?.popup?.enabled === true;
+    },
+
+    isPopupOpen() {
+        return !this.isPopupMode() || this.popupOpen;
+    },
+
+    initWarehousePopup() {
+        const popupCfg = CONFIG.warehouse?.popup;
+        if (!popupCfg?.enabled) return;
+
+        document.body.classList.add('is-warehouse-popup-mode');
+
+        this.backdropElement = document.createElement('div');
+        this.backdropElement.className = 'warehouse-popup-backdrop';
+        this.backdropElement.setAttribute('aria-hidden', 'true');
+        document.body.appendChild(this.backdropElement);
+
+        this.launcherElement = document.createElement('button');
+        this.launcherElement.type = 'button';
+        this.launcherElement.className = 'warehouse-launcher';
+        this.launcherElement.setAttribute('aria-expanded', 'false');
+        this.launcherElement.setAttribute('aria-controls', 'warehouse-popup-panel');
+        this.launcherElement.setAttribute('aria-label', popupCfg.launcherLabel || 'כלים');
+        this.launcherElement.innerHTML =
+            '<span class="warehouse-launcher__glyph" aria-hidden="true"></span>';
+        const arrowSrc = popupCfg.launcherArrowSrc || 'assets/ui/arrow.svg';
+        const glyph = this.launcherElement.querySelector('.warehouse-launcher__glyph');
+        if (glyph) glyph.style.webkitMaskImage = glyph.style.maskImage = `url("${arrowSrc}")`;
+        document.body.appendChild(this.launcherElement);
+        this.launcherGlyphElement = glyph;
+        this.initLauncherGlyphTracking();
+
+        if (this.resetElement) {
+            document.body.appendChild(this.resetElement);
+        }
+
+        this.shellElement.id = 'warehouse-popup-panel';
+        this.shellElement.setAttribute('role', 'dialog');
+        this.shellElement.setAttribute('aria-modal', 'true');
+        this.shellElement.setAttribute('aria-label', popupCfg.launcherLabel || 'כלים');
+
+        this.launcherElement.addEventListener('click', (e) => {
+            e.stopPropagation();
+            this.togglePopup();
+        });
+
+        this.launcherElement.addEventListener('pointerdown', (e) => {
+            e.stopPropagation();
+        }, true);
+
+        this.launcherElement.addEventListener('pointerup', (e) => {
+            e.stopPropagation();
+        }, true);
+
+        if (popupCfg.closeOnOutsideClick) {
+            this.backdropElement.addEventListener('click', () => this.closePopup());
+            this._popupOutsidePointerBound = (e) => {
+                if (!this.popupOpen || this.dragState) return;
+                const target = e.target;
+                if (!(target instanceof Element)) return;
+                if (target.closest('.warehouse-shell, .warehouse-launcher, .action-block.is-dragging')) return;
+                this.closePopup();
+            };
+            document.addEventListener('pointerdown', this._popupOutsidePointerBound, true);
+        }
+
+        if (popupCfg.closeOnEscape) {
+            document.addEventListener('keydown', (e) => {
+                if (e.key !== 'Escape' || !this.popupOpen) return;
+                if (this.dragState && popupCfg.stayOpenWhileDragging) return;
+                this.closePopup();
+            });
+        }
+
+        this.syncPopupState(popupCfg.defaultOpen === true);
+    },
+
+    initLauncherGlyphTracking() {
+        if (!this.launcherGlyphElement) return;
+
+        this._launcherPointerBound = (e) => {
+            this._launcherPointerXY = { x: e.clientX, y: e.clientY };
+            if (this._launcherPointerRaf !== null) return;
+            this._launcherPointerRaf = requestAnimationFrame(() => {
+                this._launcherPointerRaf = null;
+                const pt = this._launcherPointerXY;
+                if (!pt) return;
+                this.updateLauncherGlyphRotation(pt.x, pt.y);
+            });
+        };
+
+        document.addEventListener('pointermove', this._launcherPointerBound, { passive: true });
+        this.updateLauncherGlyphRotation(window.innerWidth * 0.5, window.innerHeight * 0.5);
+    },
+
+    updateLauncherGlyphRotation(clientX, clientY) {
+        const glyph = this.launcherGlyphElement;
+        const anchor = this.launcherElement;
+        if (!glyph || !anchor) return;
+
+        const rect = anchor.getBoundingClientRect();
+        const cx = rect.left + rect.width / 2;
+        const cy = rect.top + rect.height / 2;
+        const aimDeg = Math.atan2(clientY - cy, clientX - cx) * (180 / Math.PI);
+        const baseDeg = CONFIG.warehouse?.popup?.launcherArrowBaseDeg ?? -90;
+        glyph.style.transform = `rotate(${aimDeg - baseDeg}deg)`;
+    },
+
+    syncPopupState(open) {
+        this.popupOpen = !!open;
+        document.body.classList.toggle('is-warehouse-popup-open', this.popupOpen);
+        this.shellElement?.classList.toggle('is-popup-open', this.popupOpen);
+        this.shellElement?.classList.toggle('is-popup-collapsed', this.isPopupMode() && !this.popupOpen);
+        this.launcherElement?.classList.toggle('is-active', this.popupOpen);
+        this.launcherElement?.setAttribute('aria-expanded', this.popupOpen ? 'true' : 'false');
+        this.backdropElement?.setAttribute('aria-hidden', this.popupOpen ? 'false' : 'true');
+        this.updateScrollReserve();
+    },
+
+    openPopup() {
+        if (!this.isPopupMode() || this.popupOpen) return;
+        this.syncPopupState(true);
+    },
+
+    closePopup(force = false) {
+        if (!this.isPopupMode() || !this.popupOpen) return;
+        const popupCfg = CONFIG.warehouse?.popup;
+        if (!force && this.dragState && popupCfg?.stayOpenWhileDragging) return;
+        this.syncPopupState(false);
+    },
+
+    togglePopup() {
+        if (this.popupOpen) this.closePopup(true);
+        else this.openPopup();
+    },
+
+    getCollapsedChromeReserve() {
+        const gap = scale(10);
+        let chromeTop = window.innerHeight;
+
+        if (this.launcherElement) {
+            chromeTop = Math.min(chromeTop, this.launcherElement.getBoundingClientRect().top);
+        }
+
+        const reset = this.resetElement;
+        if (reset && document.body.classList.contains('is-clear-visible')) {
+            const resetRect = reset.getBoundingClientRect();
+            if (resetRect.height > 0 && resetRect.width > 0) {
+                chromeTop = Math.min(chromeTop, resetRect.top);
+            }
+        }
+
+        const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+        if (level >= 2 && this.depthBlockBarElement?.childElementCount > 0) {
+            const barRect = this.depthBlockBarElement.getBoundingClientRect();
+            if (barRect.height > 0) {
+                chromeTop = Math.min(chromeTop, barRect.top);
+            }
+        }
+
+        if (chromeTop >= window.innerHeight) {
+            const inset = parseFloat(
+                getComputedStyle(document.documentElement).getPropertyValue('--space-40')
+            ) || 40;
+            const size = parseFloat(
+                getComputedStyle(document.documentElement).getPropertyValue('--warehouse-launcher-size')
+            ) || 72;
+            return Math.ceil(inset + size + gap);
+        }
+
+        return Math.ceil(window.innerHeight - chromeTop + gap);
     },
 
     cancelHoverTypewriter() {
@@ -15692,6 +16250,17 @@ const ActionWarehouse = {
             document.documentElement.style.setProperty('--warehouse-reserve', '0px');
             return;
         }
+
+        if (this.isPopupMode() && !this.popupOpen) {
+            const collapsedReserve = level === 1 ? 0 : this.getCollapsedChromeReserve();
+            document.documentElement.style.setProperty('--warehouse-reserve', `${collapsedReserve}px`);
+            if (this.launcherElement) {
+                const launcherH = Math.ceil(this.launcherElement.getBoundingClientRect().height);
+                document.documentElement.style.setProperty('--warehouse-launcher-reserve', `${launcherH}px`);
+            }
+            return;
+        }
+
         const rect = this.shellElement.getBoundingClientRect();
         const bottomOffset = parseFloat(
             getComputedStyle(document.documentElement).getPropertyValue('--warehouse-bottom-offset')
@@ -15862,6 +16431,7 @@ const ActionWarehouse = {
             if (typeof NoteCensor !== 'undefined' && NoteCensor._clearAllHoverState) {
                 NoteCensor._clearAllHoverState();
             }
+            this.syncClearControlVisibility();
             return;
         }
 
@@ -15889,9 +16459,11 @@ const ActionWarehouse = {
             if (block.state !== 'active' || block.nestedIn) return;
             this.returnToDock(block);
         });
+        this.syncClearControlVisibility();
     },
 
     isPointOverDock(x, y) {
+        if (this.isPopupMode() && !this.popupOpen) return false;
         const dock = this.shellElement?.querySelector('.warehouse-dock');
         if (!dock) return false;
         const rect = dock.getBoundingClientRect();
@@ -16380,6 +16952,7 @@ const ActionWarehouse = {
         if (this.shellElement) {
             this.shellElement.classList.toggle('is-workspace-active', deployedCount > 0);
         }
+        this.syncClearControlVisibility();
         this.updateScrollReserve();
         this.updateDotFocusFilter();
     },
@@ -16763,6 +17336,9 @@ const ActionWarehouse = {
         if (typeof DepthTransitionOrchestrator !== 'undefined' &&
             DepthTransitionOrchestrator.isRunning()) {
             return;
+        }
+        if (block.state === 'docked' && !block.nestedIn) {
+            this.openPopup();
         }
         if (block.state === 'docked' && !block.nestedIn &&
             this.isActiveCaptureBlock(block) && this.isWarehouseCaptureFull()) {
@@ -17152,6 +17728,7 @@ const ActionWarehouse = {
                 ).length;
                 this.depthBlockBarElement?.classList.toggle('has-blocks', deployedCount > 0);
                 this.shellElement?.classList.toggle('is-workspace-active', deployedCount > 0);
+                this.syncClearControlVisibility();
                 this.updateScrollReserve();
                 this.updateDotFocusFilter();
             }
@@ -17369,6 +17946,7 @@ const ActionWarehouse = {
         if (this.shellElement) {
             this.shellElement.classList.toggle('is-workspace-active', anyActive);
         }
+        this.syncClearControlVisibility();
 
         this.updateWarehouseCapacityUI();
         this.updateDotFocusFilter();
@@ -22536,6 +23114,12 @@ document.addEventListener('DOMContentLoaded', () => {
         applySiteGridTokens();
     } catch (err) {
         console.error('Site token init failed:', err);
+    }
+
+    try {
+        if (typeof SiteAbout !== 'undefined') SiteAbout.init();
+    } catch (err) {
+        console.error('SiteAbout.init failed:', err);
     }
 
     try {

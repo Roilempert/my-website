@@ -25,22 +25,21 @@ const AppState = {
             }
 
             try {
-                if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.buildWorld) {
-                    PhysicsEngine.buildWorld();
-                }
                 if (typeof applyMacroShellGridPlacement === 'function') {
                     applyMacroShellGridPlacement();
                 } else if (typeof updateSiteGridCrosses === 'function') {
                     updateSiteGridCrosses({ force: true });
                 }
-                requestAnimationFrame(() => {
-                    this.scrollToCanvasCenter();
-                    requestAnimationFrame(() => {
-                        this.scrollToCanvasCenter();
+                void document.getElementById('app')?.offsetHeight;
+                if (typeof PhysicsEngine !== 'undefined' && PhysicsEngine.buildWorld) {
+                    PhysicsEngine.buildWorld();
+                }
+                this.scheduleViewportCenter({
+                    onComplete: () => {
                         if (typeof NavigationMap !== 'undefined') {
                             NavigationMap.onBootComplete();
                         }
-                    });
+                    }
                 });
             } catch (err) {
                 console.error('Boot prepare failed', err);
@@ -335,36 +334,71 @@ const AppState = {
     /** Scroll so the geometric center of #app sits in the viewport center (warehouse-aware on Y). */
     scrollToCanvasCenter(options = {}) {
         const app = document.getElementById('app');
-        if (!app) return;
+        if (!app) return false;
 
-        SpatialNavigation.bypassScrollClamp(
-            options.smooth
-                ? CONFIG.warehouse.workspaceGrid.rushDuration + 450
-                : 300
-        );
+        if (!options._skipBypass) {
+            SpatialNavigation.bypassScrollClamp(
+                options.smooth
+                    ? CONFIG.warehouse.workspaceGrid.rushDuration + 450
+                    : 300
+            );
+        }
 
         const reserve = typeof ActionWarehouse !== 'undefined'
             ? ActionWarehouse.getScrollReserve()
             : 0;
         const viewMidY = (window.innerHeight - reserve) / 2;
+        const rect = app.getBoundingClientRect();
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const dX = centerX - window.innerWidth / 2;
+        const dY = centerY - viewMidY;
 
-        const run = () => {
-            const centerX = app.offsetLeft + app.offsetWidth / 2;
-            const centerY = app.offsetTop + app.offsetHeight / 2;
-            const targetX = centerX - window.innerWidth / 2;
-            const targetY = centerY - viewMidY;
+        if (Math.abs(dX) < 0.5 && Math.abs(dY) < 0.5) return true;
 
-            window.scrollTo({
-                left: targetX,
-                top: targetY,
-                behavior: options.smooth ? 'smooth' : 'auto'
-            });
+        window.scrollBy({
+            left: dX,
+            top: dY,
+            behavior: options.smooth ? 'smooth' : 'auto'
+        });
+        return false;
+    },
+
+    /** Retry centering across layout passes — boot, layer enter, after both grids/mocks settle. */
+    scheduleViewportCenter(options = {}) {
+        const passes = Math.max(1, options.passes ?? 3);
+        const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+        const smooth = options.smooth === true;
+        let pass = 0;
+
+        SpatialNavigation.bypassScrollClamp(
+            smooth
+                ? CONFIG.warehouse.workspaceGrid.rushDuration + 450
+                : 600
+        );
+
+        const tick = () => {
+            const passOptions = {
+                ...options,
+                _skipBypass: true,
+                smooth: smooth && pass === passes - 1
+            };
+
+            if (level >= 2) {
+                this.centerCanvasOnLayerEnter(passOptions);
+            } else {
+                this.scrollToCanvasCenter(passOptions);
+            }
+
+            pass += 1;
+            if (pass < passes) {
+                requestAnimationFrame(tick);
+            } else if (typeof options.onComplete === 'function') {
+                options.onComplete();
+            }
         };
 
-        requestAnimationFrame(() => {
-            run();
-            requestAnimationFrame(run);
-        });
+        requestAnimationFrame(tick);
     },
 
     centerMesoHiveCluster(options = {}) {

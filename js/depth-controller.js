@@ -381,15 +381,11 @@ const DepthController = {
             ActionWarehouse.updateDotFocusFilter();
             ActionWarehouse.syncDeployedBlocksForDepth?.();
             requestAnimationFrame(() => {
-                AppState.centerCanvasOnLayerEnter();
-                requestAnimationFrame(() => {
-                    PhysicsEngine.setTransitionFrozen(false);
-                    this.endLevelChange();
-                    if (typeof SpatialNavigation !== 'undefined') {
-                        SpatialNavigation.resume();
-                    }
-                    AppState.centerCanvasOnLayerEnter();
-                });
+                PhysicsEngine.setTransitionFrozen(false);
+                this.endLevelChange();
+                if (typeof SpatialNavigation !== 'undefined') {
+                    SpatialNavigation.resume();
+                }
             });
             return true;
         }
@@ -430,7 +426,7 @@ const DepthController = {
                     PhysicsEngine.buildWorld();
                 }
                 requestAnimationFrame(() => {
-                    AppState.centerCanvasOnLayerEnter();
+                    AppState.scheduleViewportCenter();
                     SpatialNavigation.resume();
                     this.endLevelChange();
                 });
@@ -442,7 +438,7 @@ const DepthController = {
         this.syncViewLevelClass(newLevel);
         ActionWarehouse.updateScrollReserve();
         ActionWarehouse.updateDotFocusFilter();
-        AppState.centerCanvasOnLayerEnter();
+        AppState.scheduleViewportCenter();
         SpatialNavigation.resume();
         this.endLevelChange();
         return true;

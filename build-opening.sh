@@ -10,6 +10,7 @@ cd "$ROOT/js"
     opening-background.js \
     opening-data.js \
     opening-screen.js \
+    site-about.js \
     opening-bootstrap.js
 } > opening-app.js
 echo "Built js/opening-app.js ($(wc -l < opening-app.js | tr -d ' ') lines)"

@@ -11,13 +11,13 @@ Full experience architecture: [`docs/architecture/experience-model.md`](docs/arc
 - **Live data pipeline:** A stable system that loads note data (Google Sheets with local CSV fallback) and maps each row to an object on the canvas.
 - **Three-part experience** *(opening screen planned; Experience 2 planned):*
   - **Opening screen** — ceremonial onboarding threshold; typographic **silhouette forms** as abstract artistic decoration (not readable notes). *Status: planned.*
-  - **Experience 1 — Spatial laboratory** — the current build: L1 macro physics, L3 micro (full notes grid), blocks, capture, inspector. Two complementary modes inside this path:
+  - **Experience 1 — Spatial laboratory** — the current build: L1 macro physics, L2 micro (full notes grid), blocks, capture, inspector. Two complementary modes inside this path:
     - **Discovery (roaming)** — curiosity-driven snooping through motion, proximity, and aimless roaming across a deep scroll/zoom space.
     - **Study (focus)** — intentional investigation via blocks, tags, capture, and depth zoom (macro → micro).
   - **Experience 2 — Archive roaming** — a second, different way to roam the archive. *Status: planned — design TBD.*
-- **Deep display space:** Two zoom levels — macro (dots + physics) and micro (full readable notes). L2 meso silhouettes removed from navigation; silhouette geometry kept for opening-screen art only.
+- **Deep display space:** Two zoom levels — **L1** macro (dots + physics) and **L2** micro (full readable notes). Legacy meso silhouettes removed from navigation; silhouette geometry kept for opening-screen art only.
 - **Data-driven physics:** Stable object behavior, clustering, and capture driven by each note's data (tags, layout), with precise colliders and no clipping.
-- **Typographic meso:** Medium zoom shows **typographic silhouettes** — abstract structure from title/body layout, not full readable notes. Silhouettes also serve opening-screen art. *(Interim: gradient mock at L2 until `SilhouetteEngine` is wired in V2 — see Meso layer below.)*
+- **Typographic meso:** Medium zoom showed **typographic silhouettes** — abstract structure from title/body layout, not full readable notes. Silhouettes also serve opening-screen art. *(Legacy meso code / MesoMock interim — not a navigable level; see Meso layer below.)*
 - **Optimization:** High, stable client-side performance for exhibition hardware and large note counts.
 
 ## Experience architecture
@@ -25,7 +25,7 @@ Full experience architecture: [`docs/architecture/experience-model.md`](docs/arc
 | Part | Status | Role |
 |------|--------|------|
 | **Opening screen** | planned | Ceremonial entry; sets the rules of looking; silhouette SVG paths as decorative art |
-| **Experience 1 — Spatial laboratory** | **active** | Full current build — L1 macro + L3 micro grid, warehouse/blocks, inspector |
+| **Experience 1 — Spatial laboratory** | **active** | Full current build — L1 macro + L2 micro grid, warehouse/blocks, inspector |
 | **Experience 2 — Archive roaming** | planned | Complementary archive path — different roaming and filtering mechanics TBD |
 
 Details, silhouette art intent, and Experience 2 open questions: [`docs/architecture/experience-model.md`](docs/architecture/experience-model.md).
@@ -53,7 +53,9 @@ Do not default to a cold clinical or faux-archival aesthetic unless a specific t
 
 **Site shell grid:** **24 columns × 12 rows** — viewport-level proportions, padding, and UI anchors (`CONFIG.siteGrid`). See [`docs/architecture/site-grid.md`](docs/architecture/site-grid.md).
 
-Canvas grids inside `#app` (macro physics, L2 meso, L3 micro) are separate and wider than the viewport; do not confuse them with the 24×12 shell.
+Canvas grids inside `#app` (macro physics, L2 micro) are separate and wider than the viewport; do not confuse them with the 24×12 shell.
+
+**Depth naming:** Two navigable levels — **L1** (macro) and **L2** (micro). Internal code still uses level index `3` for micro (`activeLevels: [1, 3]`, `view-level-3`, `DepthController.currentLevel === 3`). Legacy meso (old middle zoom) is code level `2` only — not navigable.
 
 ## Technical stack
 
@@ -98,8 +100,8 @@ Canvas grids inside `#app` (macro physics, L2 meso, L3 micro) are separate and w
 | **Ring** | Radial layout of captured notes around a block; radius grows with count. | `updateOrbits` |
 | **Stretch** | Note captured by two or more blocks, pulled between them on springs. | `stretchedNotes` |
 | **Edge scroll** | Canvas navigation by holding the pointer at screen edges; clamped to content bounds. | `SpatialNavigation` |
-| **Depth levels** | Two active levels: macro (L1 — dots + physics), micro (L3 — full notes grid). L2 meso not navigable; silhouettes reserved for opening-screen art. | `DepthController`, `activeLevels: [1, 3]` |
-| **Inspector** | Single-note focus popup (optional on L3 click). | `ArtifactInspector` |
+| **Depth levels** | Two active levels: **L1** macro (dots + physics), **L2** micro (full notes grid). Legacy meso not navigable; silhouettes reserved for opening-screen art. | `DepthController`, `activeLevels: [1, 3]` (micro = code level 3) |
+| **Inspector** | Single-note focus popup (optional on L2 click). | `ArtifactInspector` |
 
 ## Working guidelines
 
@@ -122,17 +124,17 @@ No fixed task board. Per topic:
 
 Details: [`docs/DOC-INDEX.md`](docs/DOC-INDEX.md#work-sessions)
 
-## Meso layer
+## Meso layer (legacy — not navigable)
 
-**Target (exhibition):** Typographic **silhouettes** at L2 — measured from each note's title/body layout (`SilhouetteEngine`), abstract structure rather than readable text. Tag markers on the silhouette where relevant.
+**Target (opening art):** Typographic **silhouettes** — measured from each note's title/body layout (`SilhouetteEngine`), abstract structure rather than readable text.
 
-**Current build (interim):** V2 L2 still uses **MesoMock** (p5 gradient placeholders) while silhouette integration is pending. Do not treat the mock as the final meso aesthetic.
+**Current build:** Legacy meso / **MesoMock** (p5 gradient placeholders) remains in the codebase for silhouette geometry and opening-screen art. It is **not** a navigable depth level. The readable deep layer is **L2 micro**.
 
 | Topic | Reference |
 |-------|-----------|
-| V2 grids, phases, mock vs silhouette | [`docs/architecture/depth-v2.md`](docs/architecture/depth-v2.md) |
+| V2 grids, legacy meso vs L2 micro | [`docs/architecture/depth-v2.md`](docs/architecture/depth-v2.md) |
 | Silhouette measurement | `js/silhouette-engine.js` |
 | Interim mock | `js/meso-mock.js`, `js/meso-gradient-p5.js` |
-| Layout | `js/depth-v2.js` — separate L2/L3 canvas grids |
+| Layout | `js/depth-v2.js` — L2 micro canvas grid (+ legacy meso code) |
 | Structure | `.note-stage` — silhouette + note, shared zoom (`--note-zoom`) |
 | Zoom transitions | `DepthTransitionOrchestrator`, `MacroMesoBridge`, `CatalogState` |
