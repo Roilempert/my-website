@@ -199,9 +199,29 @@ const AppState = {
         });
     },
 
+    resolveColumnsFromHeader(headerRow) {
+        const aliases = {
+            'full name': 'authorFullName',
+            'author code': 'authorCode',
+            date: 'date',
+            id: 'id',
+            title: 'title',
+            body: 'body',
+            tags: 'tags',
+            typology: 'typology',
+            direction: 'direction'
+        };
+        const cols = { ...CONFIG.data.columns };
+        headerRow.forEach((cell, index) => {
+            const key = aliases[this.normalizeString(cell)];
+            if (key) cols[key] = index;
+        });
+        return cols;
+    },
+
     parseMainNotes(csvText) {
         const rows = this.parseCSVToArray(csvText);
-        const cols = CONFIG.data.columns;
+        const cols = this.resolveColumnsFromHeader(rows[0] || []);
         return rows.slice(1).map((columns, index) => {
             const authorFullName = this.normalizeString(columns[cols.authorFullName] || '');
             const authorCode = this.normalizeString(columns[cols.authorCode] || '');

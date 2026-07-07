@@ -39,6 +39,8 @@ const ActionWarehouse = {
     launcherExpandProgress: 0,
     launcherExpandDragState: null,
     launcherExpandReleaseLockUntil: 0,
+    launcherExpandTeaserActive: false,
+    _launcherExpandTeaserRaf: null,
     launcherWrapElement: null,
     launcherStripElement: null,
     launcherPillElement: null,
@@ -259,6 +261,200 @@ const ActionWarehouse = {
         }, 400);
     },
 
+    getLauncherExpandTeaserCfg() {
+        return CONFIG.warehouse?.popup?.launcherStrip?.firstPressTeaser ?? {};
+    },
+
+    hasSeenLauncherExpandTeaser() {
+        const cfg = this.getLauncherExpandTeaserCfg();
+        if (cfg.enabled === false) return true;
+        const key = cfg.storageKey || 'warehouseLauncherExpandHintSeen';
+        try {
+            if (cfg.persist === 'session') {
+                return sessionStorage.getItem(key) === '1';
+            }
+            return localStorage.getItem(key) === '1';
+        } catch (_) {
+            return false;
+        }
+    },
+
+    markLauncherExpandTeaserSeen() {
+        const cfg = this.getLauncherExpandTeaserCfg();
+        const key = cfg.storageKey || 'warehouseLauncherExpandHintSeen';
+        try {
+            if (cfg.persist === 'session') {
+                sessionStorage.setItem(key, '1');
+            } else {
+                localStorage.setItem(key, '1');
+            }
+        } catch (_) { /* private mode */ }
+    },
+
+    shouldPlayLauncherExpandTeaser() {
+        const cfg = this.getLauncherExpandTeaserCfg();
+        if (cfg.enabled === false) return false;
+        if (!this.isLauncherExpandDragMode()) return false;
+        if (this.hasSeenLauncherExpandTeaser()) return false;
+        if (this.launcherExpandTeaserActive) return false;
+        if (this.launcherStripPinned) return false;
+        if (this.launcherExpandDragState) return false;
+        if ((this.launcherExpandProgress ?? 0) > 0.05) return false;
+        return true;
+    },
+
+    isLauncherExpandCollapsedTap(drag) {
+        if (!drag || drag.startProgress !== 0 || this.launcherStripPinned) return false;
+        const progress = this.launcherExpandProgress ?? 0;
+        if (progress > 0.05) return false;
+        const maxTravel = drag.maxRailTravel ?? 0;
+        if (maxTravel > 0.05) return false;
+        const pointerDist = Math.hypot(
+            (drag.lastX ?? drag.startX) - drag.startX,
+            (drag.lastY ?? drag.startY) - drag.startY
+        );
+        if (drag.didMove && pointerDist > 10) return false;
+        return true;
+    },
+
+    tryPlayLauncherExpandTeaserFromTap() {
+        if (!this.shouldPlayLauncherExpandTeaser()) return false;
+        this.playLauncherExpandTeaser();
+        return true;
+    },
+
+    cancelLauncherExpandTeaser() {
+        if (this._launcherExpandTeaserRaf !== null) {
+            cancelAnimationFrame(this._launcherExpandTeaserRaf);
+            this._launcherExpandTeaserRaf = null;
+        }
+        this.launcherExpandTeaserActive = false;
+        this.launcherWrapElement?.classList.remove('is-expand-teaser');
+        document.body.classList.remove('is-launcher-expand-teaser');
+    },
+
+    easeLauncherExpandTeaser(t, mode) {
+        const x = Math.max(0, Math.min(1, t));
+        switch (mode) {
+            case 'inQuad':
+                return x * x;
+            case 'outQuad':
+                return 1 - (1 - x) * (1 - x);
+            case 'inCubic':
+                return x * x * x;
+            case 'outCubic':
+                return 1 - Math.pow(1 - x, 3);
+            default:
+                return x;
+        }
+    },
+
+    buildLauncherExpandTeaserSegments(peak, bounces = 2) {
+        const bounceHeights = [0.38, 0.14];
+        const segments = [];
+        let t = 0;
+
+        const push = (dt, p0, p1, ease) => {
+            const t0 = t;
+            t += dt;
+            segments.push({ t0, t1: t, p0, p1, ease });
+        };
+
+        push(0.30, 0, peak, 'outCubic');
+        push(0.17, peak, 0, 'inQuad');
+
+        for (let i = 0; i < bounces; i += 1) {
+            const h = peak * (bounceHeights[i] ?? bounceHeights[bounceHeights.length - 1]);
+            push(0.09, 0, h, 'outQuad');
+            push(0.12, h, 0, 'inQuad');
+        }
+
+        push(0.08, 0, 0, 'linear');
+        const endT = t || 1;
+        segments.forEach((seg) => {
+            seg.t0 /= endT;
+            seg.t1 /= endT;
+        });
+        return segments;
+    },
+
+    sampleLauncherExpandTeaserProgress(u, segments) {
+        const t = Math.max(0, Math.min(1, u));
+        const seg = segments.find((s) => t >= s.t0 && t <= s.t1) || segments[segments.length - 1];
+        const span = Math.max(1e-6, seg.t1 - seg.t0);
+        const local = (t - seg.t0) / span;
+        const eased = this.easeLauncherExpandTeaser(local, seg.ease);
+        return seg.p0 + (seg.p1 - seg.p0) * eased;
+    },
+
+    getLauncherExpandTeaserPeakProgress(bounds = null) {
+        const cfg = this.getLauncherExpandTeaserCfg();
+        if (typeof cfg.peakProgress === 'number') {
+            return Math.max(0.04, Math.min(0.42, cfg.peakProgress));
+        }
+        const b = bounds || this.getLauncherExpandBounds();
+        const rail = this.getLauncherExpandRail(b);
+        const travelPx = cfg.peakTravelPx ?? 72;
+        return Math.max(0.04, Math.min(0.42, travelPx / rail.length));
+    },
+
+    playLauncherExpandTeaser() {
+        if (!this.shouldPlayLauncherExpandTeaser()) return;
+        this.cancelLauncherExpandTeaser();
+
+        const cfg = this.getLauncherExpandTeaserCfg();
+        const bounds = this.getLauncherExpandBounds();
+        const peak = this.getLauncherExpandTeaserPeakProgress(bounds);
+        const segments = this.buildLauncherExpandTeaserSegments(peak, cfg.bounces ?? 2);
+        const durationMs = Math.max(500, cfg.durationMs ?? 950);
+        const wrap = this.launcherWrapElement;
+
+        this.launcherExpandTeaserActive = true;
+        wrap?.classList.add('is-expand-teaser');
+        document.body.classList.add('is-launcher-expand-teaser');
+        this.lockLauncherExpandDismiss(durationMs + 120);
+        this.suppressLauncherExpandClickBurst();
+
+        let startTime = null;
+        const step = (now) => {
+            if (!this.launcherExpandTeaserActive) return;
+            if (startTime === null) startTime = now;
+            const u = Math.max(0, Math.min(1, (now - startTime) / durationMs));
+            const progress = this.sampleLauncherExpandTeaserProgress(u, segments);
+            this.applyLauncherExpandSize(progress, true);
+
+            const rail = this.getLauncherExpandRail(bounds);
+            const pt = this._launcherPointerXY || {
+                x: window.innerWidth * 0.5,
+                y: window.innerHeight * 0.5
+            };
+            if (progress > 0.02) {
+                const wrapRect = wrap?.getBoundingClientRect();
+                if (wrapRect) {
+                    const cx = wrapRect.right - bounds.collapsedW / 2;
+                    const cy = wrapRect.bottom - bounds.collapsedH / 2;
+                    this.updateLauncherGlyphRotation(
+                        cx - rail.ux * progress * rail.length,
+                        cy - rail.uy * progress * rail.length
+                    );
+                }
+            } else {
+                this.updateLauncherGlyphRotation(pt.x, pt.y);
+            }
+
+            if (u < 1) {
+                this._launcherExpandTeaserRaf = requestAnimationFrame(step);
+                return;
+            }
+
+            this.applyLauncherExpandSize(0, false);
+            this.cancelLauncherExpandTeaser();
+            this.updateLauncherGlyphRotation(pt.x, pt.y);
+        };
+
+        this._launcherExpandTeaserRaf = requestAnimationFrame(step);
+    },
+
     getLauncherExpandBounds() {
         const root = getComputedStyle(document.documentElement);
         const collapsedW = parseFloat(root.getPropertyValue('--warehouse-launcher-width')) || 80;
@@ -277,7 +473,7 @@ const ActionWarehouse = {
         };
     },
 
-    /** Diagonal rail — tilt matches 12×6 panel growth (width vs height delta). */
+    /** Diagonal rail — tilt matches expand panel growth (width vs height delta). */
     getLauncherExpandRail(bounds = null) {
         const b = bounds || this.getLauncherExpandBounds();
         const deltaW = Math.max(0, b.expandedW - b.collapsedW);
@@ -662,6 +858,10 @@ const ActionWarehouse = {
     },
 
     syncLauncherStripPin(pinned) {
+        if (pinned) {
+            this.cancelLauncherExpandTeaser();
+            this.markLauncherExpandTeaserSeen();
+        }
         this.launcherStripPinned = !!pinned;
         document.body.classList.toggle('is-launcher-strip-pinned', this.launcherStripPinned);
         this.launcherWrapElement?.classList.toggle('is-pinned', this.launcherStripPinned);
@@ -732,6 +932,14 @@ const ActionWarehouse = {
                 return;
             }
 
+            if (this.isLauncherExpandCollapsedTap(drag)) {
+                this.applyLauncherExpandSize(0, false);
+                const pt = this._launcherPointerXY || { x: e.clientX, y: e.clientY };
+                this.updateLauncherGlyphRotation(pt.x, pt.y);
+                this.tryPlayLauncherExpandTeaserFromTap();
+                return;
+            }
+
             const threshold = CONFIG.warehouse?.popup?.launcherStrip?.snapThreshold ?? 0.82;
             const progress = this.launcherExpandProgress ?? 0;
 
@@ -750,7 +958,7 @@ const ActionWarehouse = {
 
         const onPointerDown = (e) => {
             if (e.button !== 0) return;
-            e.preventDefault();
+            if (this.launcherExpandTeaserActive) return;
             e.stopPropagation();
             if (this.dragState) return;
 
@@ -761,9 +969,12 @@ const ActionWarehouse = {
                 pointerId: e.pointerId,
                 startX: e.clientX,
                 startY: e.clientY,
+                lastX: e.clientX,
+                lastY: e.clientY,
                 startProgress,
                 bounds,
-                didMove: false
+                didMove: false,
+                maxRailTravel: 0
             };
 
             launcher.setPointerCapture(e.pointerId);
@@ -793,6 +1004,8 @@ const ActionWarehouse = {
         };
 
         launcher.addEventListener('pointerdown', onPointerDown);
+        launcher.addEventListener('pointerup', finish);
+        launcher.addEventListener('pointercancel', finish);
         launcher.addEventListener('lostpointercapture', onLostCapture);
     },
 
@@ -801,12 +1014,15 @@ const ActionWarehouse = {
         if (!drag) return;
 
         const { startX, startY, startProgress, bounds } = drag;
-        if (Math.hypot(clientX - startX, clientY - startY) > 4) {
+        drag.lastX = clientX;
+        drag.lastY = clientY;
+        if (Math.hypot(clientX - startX, clientY - startY) > 6) {
             drag.didMove = true;
         }
         const rail = this.getLauncherExpandRail(bounds);
         const travel = (startX - clientX) * rail.ux + (startY - clientY) * rail.uy;
         const progress = Math.max(0, Math.min(1, startProgress + travel / rail.length));
+        drag.maxRailTravel = Math.max(drag.maxRailTravel || 0, Math.abs(progress - startProgress));
 
         this.applyLauncherExpandSize(progress, true);
         this.updateLauncherGlyphRotation(clientX, clientY);

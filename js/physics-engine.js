@@ -17,6 +17,7 @@ const PhysicsEngine = {
     mouseClientX: 0,
     mouseClientY: 0,
     hoveredNoteIndex: -1,
+    lastCanvasHoverIndex: -2,
     moleculeHoverPinnedIndex: -1,
     repulsionHoldNoteIndex: -1,
     moleculeClickIntent: null,
@@ -1016,10 +1017,18 @@ const PhysicsEngine = {
             .getPropertyValue(CONFIG.warehouse.linkage.line.cssColorVariable).trim() || '#101010';
 
         const hoverFillVar = CONFIG.outlines?.hoverFillCssVariable || '--color-6';
-        this.hoverFillColor = getComputedStyle(document.documentElement)
-            .getPropertyValue(hoverFillVar).trim() || '#E6E0DA';
+        this.hoverFillCssVariable = hoverFillVar;
+        this.hoverFillColor = this.resolveHoverFillColor();
 
         this.resizeLinkCanvas();
+    },
+
+    resolveHoverFillColor() {
+        const cssVar = this.hoverFillCssVariable ||
+            CONFIG.outlines?.hoverFillCssVariable ||
+            '--color-6';
+        return getComputedStyle(document.documentElement)
+            .getPropertyValue(cssVar).trim() || '#E6E0DA';
     },
 
     resizeLinkCanvas() {
@@ -1136,27 +1145,54 @@ const PhysicsEngine = {
         return cfg.renderPadding ?? cfg.padding;
     },
 
+    resolveSheetColorValue(color) {
+        const raw = String(color || '').trim();
+        if (!raw) return '';
+        if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(raw)) return raw;
+        if (raw.startsWith('rgb')) return raw;
+
+        const varName = raw.match(/var\(\s*(--[^,)]+)/)?.[1];
+        if (varName) {
+            const resolved = getComputedStyle(document.documentElement)
+                .getPropertyValue(varName).trim();
+            if (resolved) return resolved;
+        }
+        return raw;
+    },
+
     getDotFillColor(element) {
-        if (!element) return this.linkColor;
+        if (!element) return '';
 
         const raw = element.style.getPropertyValue('--dot-bg').trim()
             || getComputedStyle(element).getPropertyValue('--dot-bg').trim();
         if (raw) {
-            if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(raw)) return raw;
-            if (raw.startsWith('rgb')) return raw;
+            const resolved = this.resolveSheetColorValue(raw);
+            if (resolved && resolved !== this.linkColor) return resolved;
+        }
 
-            const varName = raw.match(/var\(\s*(--[^,)]+)/)?.[1];
-            if (varName) {
-                const resolved = getComputedStyle(document.documentElement)
-                    .getPropertyValue(varName).trim();
+        const tagName = element.dataset?.tag;
+        if (tagName && typeof AppState !== 'undefined') {
+            const fromMap = AppState.tagColorsMap?.get(tagName);
+            if (fromMap) {
+                const resolved = this.resolveSheetColorValue(fromMap);
                 if (resolved) return resolved;
             }
-            return raw;
         }
 
         const bg = getComputedStyle(element).backgroundColor;
         if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return bg;
-        return this.linkColor;
+        return '';
+    },
+
+    getMoleculeHoverFillColor(pts) {
+        const mode = CONFIG.outlines?.hoverFillMode ?? 'tag';
+        if (mode === 'tag' && pts?.length) {
+            for (let i = 0; i < pts.length; i++) {
+                const color = pts[i].color;
+                if (color) return color;
+            }
+        }
+        return this.resolveHoverFillColor();
     },
 
     collectNoteOutlineGroups() {
@@ -1215,6 +1251,7 @@ const PhysicsEngine = {
 
         groups.forEach((pts, noteIndex) => {
             if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
+            if (noteIndex === this.hoveredNoteIndex) return;
             if (this.shouldCullOutlineGroup(pts)) return;
 
             const R = pts[0].r + this.getOutlineRenderPadding();
@@ -1249,7 +1286,9 @@ const PhysicsEngine = {
 
         const ctx = this.linkCtx;
         ctx.save();
-        ctx.fillStyle = this.hoverFillColor;
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = this.getMoleculeHoverFillColor(pts);
         this.fillHullOutline(pts, R, ctx);
         ctx.restore();
     },
@@ -1575,23 +1614,25 @@ const PhysicsEngine = {
         if (macroVisualActive) {
             this.isActive = true;
             this.syncDotTransforms();
+            this.updateMoleculeHoverState();
         } else {
             this.isActive = false;
         }
 
-        if (!this.linkCtx || skipCanvasDraw) return;
+        const hoverChanged = this.hoveredNoteIndex !== this.lastCanvasHoverIndex;
+        if (!this.linkCtx || (skipCanvasDraw && !hoverChanged)) return;
 
         this.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
         if (macroVisualActive) {
             this.drawNoteBackings();
-            this.drawNoteHoverFills();
             this.drawSiblingLinks();
             if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
                 DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
             }
             this.drawNoteOutlines();
-            this.updateMoleculeHoverState();
+            this.drawNoteHoverFills();
+            this.lastCanvasHoverIndex = this.hoveredNoteIndex;
         }
 
         if (depthFocusLinks) {
@@ -1601,14 +1642,16 @@ const PhysicsEngine = {
 
     flushMacroCanvas() {
         if (!this.linkCtx) return;
+        this.updateMoleculeHoverState();
         this.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
         this.drawNoteBackings();
-        this.drawNoteHoverFills();
         this.drawSiblingLinks();
         if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
             DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
         }
         this.drawNoteOutlines();
+        this.drawNoteHoverFills();
+        this.lastCanvasHoverIndex = this.hoveredNoteIndex;
     },
 
     // Axis-aligned bounds of a note's hull in viewport coordinates

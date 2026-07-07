@@ -49,7 +49,7 @@ const CONFIG = {
             filterFringe: { colStart: 23, colEnd: 25, rowStart: 1, rowEnd: 11 },
             navigationLayers: { colStart: 23, colEnd: 25, rowStart: 1, rowEnd: 7  },
             navigationMaps:   { colStart: 21, colEnd: 25, rowStart: 11, rowEnd: 13 }, // alias: warehouseMap
-            about:            { colStart: 1, colEnd: 2, rowStart: 1, rowEnd: 3 }
+            about:            { colStart: 7, colEnd: 19, rowStart: 1, rowEnd: 3 }
             // reset button: centered above warehouse shell — not a grid region
         },
         regionsByLevel: {
@@ -88,7 +88,7 @@ const CONFIG = {
             // Optional manual override: ltr | rtl | en | he (empty → auto-detect from title+body)
             direction: 10
         },
-        fallbackTagColor: 'var(--color-4)',
+        fallbackTagColor: '#898989',
         typologyPatterns: {
             Block: 'regular',
             List: 'dashed',
@@ -109,6 +109,7 @@ const CONFIG = {
     about: {
         label: 'על הפרויקט',
         bodyHtml: '',
+        panelCols: 12,
         openHeightVh: 65,
         openMaxPx: 640,
         snapThreshold: 0.35
@@ -601,7 +602,7 @@ const CONFIG = {
         toggleBoxSize: { value: 80, unit: 'px' },
         toggleBoxPadding: { value: 5, unit: 'px' },
         moleculeSymbolRotateDeg: 0,
-        moleculeSymbolScale: 0.9,
+        moleculeSymbolScale: 1,
         blocksSymbolScale: 0.9,
         moleculeSymbolNudgeY: { value: 0, unit: 'px' }
     },
@@ -867,12 +868,20 @@ const CONFIG = {
             launcherStrip: {
                 enabled: true,
                 expandDrag: true,
-                expandCols: 12,
-                expandRows: 6,
+                expandCols: 9,
+                expandRows: 3,
                 mapCols: 4,
                 showMap: true,
                 tagOnly: true,
-                snapThreshold: 0.82
+                snapThreshold: 0.82,
+                firstPressTeaser: {
+                    enabled: true,
+                    peakTravelPx: 72,
+                    durationMs: 950,
+                    bounces: 2,
+                    persist: 'session',
+                    storageKey: 'warehouseLauncherExpandHintSeen'
+                }
             }
         },
 
@@ -997,7 +1006,8 @@ const CONFIG = {
         renderPadding: scale(5),   // visual hull gap only — effective corner radius = dotR(10) + 5 = 15px
         width: 0.4 * (96 / 72),
         hoverWidth: 0.4 * (96 / 72),
-        hoverFillCssVariable: '--color-6'
+        hoverFillCssVariable: '--color-6',
+        hoverFillMode: 'token' // 'tag' = first dot sheet color; 'token' = hoverFillCssVariable
     }
 };
 
@@ -1222,8 +1232,8 @@ function applyWarehouseLauncherStripTokens(root = document.documentElement) {
     const stripCfg = CONFIG.warehouse?.popup?.launcherStrip;
     if (!isWarehouseLauncherStripMode() || !stripCfg) return;
     const mapCols = Math.max(1, stripCfg.mapCols ?? 4);
-    const expandCols = Math.max(1, stripCfg.expandCols ?? 12);
-    const expandRows = Math.max(1, stripCfg.expandRows ?? 6);
+    const expandCols = Math.max(1, stripCfg.expandCols ?? 9);
+    const expandRows = Math.max(1, stripCfg.expandRows ?? 3);
     root.style.setProperty('--warehouse-launcher-expand-width', siteGridSpanWidth(expandCols));
     root.style.setProperty('--warehouse-launcher-expand-height', siteGridSpanHeight(expandRows));
     root.style.setProperty('--warehouse-launcher-map-width', siteGridSpanWidth(mapCols));
@@ -1591,6 +1601,7 @@ function isPointOverSiteNavigationUI(clientX, clientY) {
         const backdrop = aboutRoot.querySelector('.site-about__backdrop');
         const targets = [sheet, backdrop].filter(Boolean);
         for (const el of targets) {
+            if (window.getComputedStyle(el).pointerEvents === 'none') continue;
             const rect = el.getBoundingClientRect();
             if (rect.width <= 0 && rect.height <= 0) continue;
             if (

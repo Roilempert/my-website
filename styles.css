@@ -109,7 +109,7 @@
     --layer-nav-toggle-inner-size: calc(var(--layer-nav-toggle-box-size) - 2 * var(--layer-nav-toggle-pad));
     --layer-nav-toggle-pad: var(--space-5);
     --layer-nav-molecule-rotate: 0deg;
-    --layer-nav-molecule-scale: 0.9;
+    --layer-nav-molecule-scale: 1;
     --layer-nav-blocks-scale: 0.9;
     --layer-nav-molecule-nudge-y: 0px;
     --focus-card-scale: calc(8 / 6);
@@ -1974,6 +1974,9 @@ body.is-depth-v2.view-level-2 .link-canvas {
     z-index: 1000;
     pointer-events: none;
     box-sizing: border-box;
+    --site-about-panel-width: calc(
+        12 * var(--site-grid-cell-w) + 11 * var(--site-grid-gap)
+    );
 }
 
 body.opening-page .site-about {
@@ -1983,6 +1986,7 @@ body.opening-page .site-about {
 .site-about__backdrop {
     position: fixed;
     inset: 0;
+    z-index: 0;
     display: block;
     background: color-mix(in srgb, var(--color-3) 20%, transparent);
     opacity: 0;
@@ -2002,13 +2006,15 @@ body.opening-page .site-about {
 
 .site-about__sheet {
     position: fixed;
+    z-index: 1;
     top: calc(100vh - var(--site-about-tab-h, 2.5rem));
     left: 50%;
-    display: inline-grid;
-    grid-template-columns: minmax(0, max-content);
-    width: max-content;
-    max-width: min(92vw, calc(6 * var(--site-grid-cell-w) + 5 * var(--site-grid-gap)));
+    width: var(--site-about-panel-width);
+    max-width: min(92vw, var(--site-about-panel-width));
     transform: translateX(-50%) translateY(calc(-1 * var(--site-about-lift, 0px)));
+    display: flex;
+    flex-direction: column;
+    align-items: center;
     pointer-events: auto;
     transition: transform 0.32s cubic-bezier(0.25, 1, 0.5, 1);
 }
@@ -2018,7 +2024,6 @@ body.opening-page .site-about {
 }
 
 .site-about__trigger {
-    grid-row: 1;
     display: block;
     flex-shrink: 0;
     margin: 0;
@@ -2027,13 +2032,15 @@ body.opening-page .site-about {
     border-radius: var(--warehouse-radius, 0.3125rem) var(--warehouse-radius, 0.3125rem) 0 0;
     background: var(--color-6);
     color: var(--color-3);
-    cursor: grab;
+    cursor: pointer;
     touch-action: none;
     user-select: none;
     text-align: center;
     line-height: 1;
     box-sizing: border-box;
     width: max-content;
+    max-width: 100%;
+    align-self: center;
     transition:
         color var(--transition-fast),
         background-color var(--transition-fast);
@@ -2054,11 +2061,11 @@ body.opening-page .site-about {
 .site-about.is-revealed .site-about__trigger {
     background: var(--color-3);
     color: var(--color-6);
-    border-radius: 0;
 }
 
 .site-about__panel {
-    grid-row: 2;
+    flex-shrink: 0;
+    align-self: stretch;
     width: 100%;
     min-width: 0;
     height: var(--site-about-open-height, 0px);

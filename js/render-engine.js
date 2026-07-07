@@ -27,6 +27,28 @@ const RenderEngine = {
         return Math.round((negMin + magPick * (negMax - negMin)) * 100) / 100;
     },
 
+    resolveSheetColor(color) {
+        const raw = String(color || '').trim();
+        if (!raw) return '';
+        if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(raw)) return raw;
+        if (raw.startsWith('rgb')) return raw;
+
+        const varName = raw.match(/var\(\s*(--[^,)]+)/)?.[1];
+        if (varName && typeof getComputedStyle === 'function') {
+            const resolved = getComputedStyle(document.documentElement)
+                .getPropertyValue(varName).trim();
+            if (resolved) return resolved;
+        }
+        return raw;
+    },
+
+    dotMarkup(tag, index) {
+        const color = this.resolveSheetColor(tag.color) ||
+            CONFIG.data.fallbackTagColor ||
+            '#898989';
+        return `<div class="layer-item layer-dot" data-index="${index}" data-tag="${tag.name}" style="--dot-bg:${color};background-color:${color};"></div>`;
+    },
+
     createNoteDOM(item, noteIndex = -1) {
         const wrapper = document.createElement('div');
         wrapper.classList.add('note-wrapper', 'snap-point');
@@ -41,7 +63,7 @@ const RenderEngine = {
         let tagsHTML = '';
         if (item.tags && item.tags.length > 0) {
             tagsHTML = item.tags.map(t => 
-                `<span class="tag"><span class="tag-circle" style="background-color: ${t.color}"></span>${t.name}</span>`
+                `<span class="tag"><span class="tag-circle" style="background-color: ${this.resolveSheetColor(t.color) || CONFIG.data.fallbackTagColor}"></span>${t.name}</span>`
             ).join('');
         }
 
@@ -71,10 +93,11 @@ const RenderEngine = {
         let dotsHTML = '';
         if (item.tags && item.tags.length > 0) {
             item.tags.forEach((tag, index) => {
-                dotsHTML += `<div class="layer-item layer-dot" data-index="${index}" data-tag="${tag.name}" style="--dot-bg: ${tag.color};"></div>`;
+                dotsHTML += this.dotMarkup(tag, index);
             });
         } else {
-            dotsHTML = `<div class="layer-item layer-dot" style="--dot-bg: var(--main-text);"></div>`;
+            const fallback = this.resolveSheetColor('var(--color-3)') || '#2D2D2D';
+            dotsHTML = `<div class="layer-item layer-dot" style="--dot-bg:${fallback};background-color:${fallback};"></div>`;
         }
 
         wrapper.innerHTML = `

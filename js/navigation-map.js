@@ -3,7 +3,7 @@
    Two separate UI parts; see CONFIG.layerNavigation vs CONFIG.navigationMap.
    ========================================================================== */
 const LAYER_NAV_SYMBOL_INLINE = {
-    l1: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none" aria-hidden="true"><g id="icon"><path d="M67.23,33.46c9.32,9.32,9.32,24.44,0,33.77s-24.44,9.32-33.77,0l-20.7-20.7c-9.32-9.32-9.32-24.44,0-33.77,9.32-9.32,24.44-9.32,33.77,0l20.7,20.7Z" stroke="currentColor" stroke-width="4.17" fill="none" vector-effect="non-scaling-stroke"/><circle cx="29.65" cy="29.65" r="15.9" fill="currentColor"/><circle cx="50.35" cy="50.35" r="15.9" fill="currentColor"/></g></svg>`
+    l1: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none" aria-hidden="true"><g id="icon"><path d="M67.23,33.46c9.32,9.32,9.32,24.44,0,33.77s-24.44,9.32-33.77,0l-20.7-20.7c-9.32-9.32-9.32-24.44,0-33.77,9.32-9.32,24.44-9.32,33.77,0l20.7,20.7Z" stroke="currentColor" stroke-width="2.8" fill="none" vector-effect="non-scaling-stroke"/><circle cx="29.65" cy="29.65" r="15.9" fill="currentColor"/><circle cx="50.35" cy="50.35" r="15.9" fill="currentColor"/></g></svg>`
 };
 
 const LAYER_NAV_SYMBOL_FETCH_CACHE = new Map();

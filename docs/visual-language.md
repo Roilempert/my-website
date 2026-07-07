@@ -120,10 +120,11 @@ Config: `CONFIG.opening` in `js/config.js`. Module: `js/opening-screen.js`.
 
 **Expand-drag launcher (active):** `CONFIG.warehouse.popup.launcherStrip.expandDrag: true` — window-style resize from the bottom-right corner:
 - **Default:** same **80×40** outer shell (color **6**); inner pill (`.warehouse-launcher__pill`, color **3**) with arrow glyph (color **6**); arrow tracks pointer
-- **Hover:** arrow points along the expand **rail** (tilt derived from 12×6 growth ratio)
-- **Open:** drag the color-3 pill along the expand rail until **12 cols × 6 rows**, then snap; handle rests **top-left**; blocks fill to the right edge; arrow points **bottom-right** (retract)
+- **Hover:** arrow points along the expand **rail** (tilt derived from 9×3 growth ratio)
+- **Open:** drag the color-3 pill along the expand rail until **9 cols × 3 rows**, then snap; handle rests **top-left**; blocks fill to the right edge; arrow points **bottom-right** (retract)
 - **While dragging:** map + blocks clip-reveal inside the growing panel; blocks muted until fully snapped
 - **Close:** drag the pill back along the rail, **click** the arrow button, click outside, or Escape
+- **First press (until full open):** collapsed tap plays a short expand teaser along the rail (~72px), then two damped upward bounces before resting closed; repeats on each collapsed click until the panel is fully dragged open (`firstPressTeaser`; `persist: 'session'` marks seen only after full pin)
 - Full panel: minimap (left, below handle) + tag blocks (scroll, full width right) + launcher handle (top-left when open)
 
 **Legacy launcher strip** (`expandDrag: false`): hover peek + click pin — see changelog.
@@ -196,7 +197,7 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 
 ### L1 molecule hover
 
-- Hull outline **0.4pt** (`CONFIG.outlines.width`); on hover the hull **fills with color 6** (`--color-6`; canvas layer behind DOM dots; `body.is-molecule-hover`)
+- Hull outline **0.4pt** (`CONFIG.outlines.width`); on hover the hull **fills with color 6** (`--color-6`, `hoverFillMode: 'token'`; canvas layer behind DOM dots; `body.is-molecule-hover`)
 - **Idle breathing:** whole-molecule visual drift (`CONFIG.physics.breathing`) — sine offset on draw positions only; physics bodies unchanged; quieter when captured or on bank grid
 - **Title mode** (`moleculeHoverMode: 'title'` — current default): floating `.molecule-hover-title` pinned on hover start at fixed viewport coords; **10px** (`var(--space-10)`) above/outside the hull top corner (RTL `maxX` / LTR `minX`); does not track molecule motion after pin; **truncation rule** (no ellipsis): first title line only (body fallback) → phrase clip within **8 words** (prefer sentence `.!?…`, else clause `,;:—`) → pixel-fit to `.note-h` at `min(28rem, 42vw)` whole words only; `.note-h` scale, transparent background
 - **Blocks / mixed modes** (optional): same floating label with attached-block pill row via `MicroMock.buildTagsRowHTML`; config: `moleculeHoverMode`, `moleculeHoverBlocksPercent`, `moleculeHoverBlocksPerRow`, `moleculeHoverBlocksSingleRowMax`
@@ -287,16 +288,21 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-07 | Layer nav toggle icon scale: L1 molecule **1**; L2 blocks **0.9** (−10% vs molecule) |
+| 2026-07-07 | L1 layer nav icon (`layer-nav-l1.svg`) hull stroke **3.5 → 2.8** (`vector-effect: non-scaling-stroke`) |
+| 2026-07-07 | L1 molecule hover fill restored to **color 6** (`hoverFillMode: 'token'`) |
 | 2026-07-07 | About sheet: panel matches tab width — single column shape on pull-up; square seam at tab join when open |
 | 2026-07-07 | About sheet: tab + panel move together on pull-up; backdrop darkens like focus popup (`color-3` @ 20%, scales with drag) |
 | 2026-07-07 | About panel: bottom-center pull-up sheet — tab flush to viewport bottom (top corners 5px, bottom 0); drag up to reveal; snap at 35% |
 | 2026-07-07 | Layer navigation toggle inset **40px → 20px** from viewport right and top (`--space-20`) |
-| 2026-07-07 | L1 idle molecule breathing — visual-only sine drift (`CONFIG.physics.breathing`); physics/collision unchanged |
+| 2026-07-07 | L1 molecule dots + hover fill: resolve sheet tag colors to hex at render/draw (fixes black fallback); hover fill uses tag color |
 | 2026-07-07 | L1 molecule hull outline **0.4pt**; hover fills hull with **color 6** (`--color-6`) behind DOM dots instead of thickening stroke |
 | 2026-07-07 | About trigger: color-6 box, `--space-10` padding, 5px radius; hover/open invert to color-3 fill |
 | 2026-07-07 | Layer nav L1 destination icon uses `layer-nav-molecule-6.svg` (loaded from assets) |
 | 2026-07-07 | Added `layer-nav-molecule-6.svg` — 6-dot molecule paste template with reference guide layer |
 | 2026-07-07 | Layer navigation: single destination toggle — on L1 show L2 blocks icon, on L2 show L1 molecule icon; spine marker hidden |
+| 2026-07-07 | Launcher first-press teaser: play on pointerup tap (not deferred click); removed pointerdown preventDefault that blocked click |
+| 2026-07-07 | Launcher expand-drag snap size **8×4 → 9×3** (`CONFIG.warehouse.popup.launcherStrip.expandCols` / `expandRows`) |
 | 2026-07-07 | Added `layer-nav-molecule-2.svg` — 2-dot L1 molecule variant (same hull algorithm as 3-dot icon) |
 | 2026-07-07 | L1 layer nav molecule icon hull: arcs + straight tangents (matches `traceHullOutlinePath`, not arc-only chain) |
 | 2026-07-07 | L1 layer nav molecule icon: 3-dot cluster + convex hull from live proportions (dotR 10, renderPadding 5, clusterR 9) |

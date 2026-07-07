@@ -1,4 +1,4 @@
-/* opening build 20260707032757 */
+/* opening build 20260707140411 */
 /* ==========================================================================
    Opening Background — L1-style molecules with fold-mirror symmetry
    Tag colors from the data sheet; dots + sibling links + subtle hull outline.
@@ -2203,6 +2203,9 @@ const SiteAbout = {
     _openHeight: 0,
     _tabHeight: 40,
     _dragging: false,
+    _pointerActive: false,
+    _dragCommitted: false,
+    _dragThresholdPx: 8,
     _dragStartY: 0,
     _dragStartProgress: 0,
     _onResize: null,
@@ -2261,8 +2264,9 @@ const SiteAbout = {
 
         this.trigger.addEventListener('pointerdown', (e) => this._onPointerDown(e));
         this.trigger.addEventListener('pointermove', (e) => this._onPointerMove(e));
-        this.trigger.addEventListener('pointerup', (e) => this._onPointerUp(e));
-        this.trigger.addEventListener('pointercancel', (e) => this._onPointerUp(e));
+        this.trigger.addEventListener('pointerup', (e) => this._endPointer(e));
+        this.trigger.addEventListener('pointercancel', (e) => this._endPointer(e, { cancelled: true }));
+        this.trigger.addEventListener('lostpointercapture', (e) => this._endPointer(e, { cancelled: true }));
         this.trigger.addEventListener('click', (e) => e.preventDefault());
         this.trigger.addEventListener('keydown', (e) => this._onTriggerKeyDown(e));
 
@@ -2313,34 +2317,56 @@ const SiteAbout = {
     _onPointerDown(e) {
         if (e.button !== 0) return;
         e.preventDefault();
-        this._dragging = true;
+        this._pointerActive = true;
+        this._dragCommitted = false;
+        this._dragging = false;
         this._dragStartY = e.clientY;
         this._dragStartProgress = this._progress;
-        this.root.classList.add('is-dragging');
         try {
             this.trigger.setPointerCapture(e.pointerId);
         } catch (_) { /* ignore */ }
     },
 
     _onPointerMove(e) {
-        if (!this._dragging) return;
-        const travel = this._openHeight || 1;
+        if (!this._pointerActive) return;
+
         const dy = this._dragStartY - e.clientY;
+        if (!this._dragCommitted) {
+            if (Math.abs(dy) < this._dragThresholdPx) return;
+            this._dragCommitted = true;
+            this._dragging = true;
+            this.root.classList.add('is-dragging');
+        }
+
+        const travel = this._openHeight || 1;
         this._progress = Math.min(1, Math.max(0, this._dragStartProgress + dy / travel));
         this._applyProgress(false);
     },
 
-    _onPointerUp(e) {
-        if (!this._dragging) return;
+    _endPointer(e, { cancelled = false } = {}) {
+        if (!this._pointerActive) return;
+
+        const wasDrag = this._dragCommitted;
+        this._pointerActive = false;
+        this._dragCommitted = false;
         this._dragging = false;
         this.root.classList.remove('is-dragging');
+
         try {
             this.trigger.releasePointerCapture(e.pointerId);
         } catch (_) { /* ignore */ }
 
-        const threshold = this.cfg().snapThreshold ?? 0.35;
-        this._progress = this._progress >= threshold ? 1 : 0;
-        this._applyProgress(true);
+        if (wasDrag) {
+            const threshold = this.cfg().snapThreshold ?? 0.35;
+            this._progress = this._progress >= threshold ? 1 : 0;
+            this._applyProgress(true);
+        } else if (cancelled) {
+            this._progress = this._dragStartProgress;
+            this._applyProgress(true);
+        } else {
+            this._progress = this._dragStartProgress >= 1 ? 0 : 1;
+            this._applyProgress(true);
+        }
     },
 
     _onTriggerKeyDown(e) {

@@ -1,4 +1,4 @@
-/* app build 20260707033426 */
+/* app build 20260707150518 */
 /* ==========================================================================
    01. SYSTEM BOOTSTRAP
    ========================================================================== */
@@ -278,9 +278,29 @@ const AppState = {
         });
     },
 
+    resolveColumnsFromHeader(headerRow) {
+        const aliases = {
+            'full name': 'authorFullName',
+            'author code': 'authorCode',
+            date: 'date',
+            id: 'id',
+            title: 'title',
+            body: 'body',
+            tags: 'tags',
+            typology: 'typology',
+            direction: 'direction'
+        };
+        const cols = { ...CONFIG.data.columns };
+        headerRow.forEach((cell, index) => {
+            const key = aliases[this.normalizeString(cell)];
+            if (key) cols[key] = index;
+        });
+        return cols;
+    },
+
     parseMainNotes(csvText) {
         const rows = this.parseCSVToArray(csvText);
-        const cols = CONFIG.data.columns;
+        const cols = this.resolveColumnsFromHeader(rows[0] || []);
         return rows.slice(1).map((columns, index) => {
             const authorFullName = this.normalizeString(columns[cols.authorFullName] || '');
             const authorCode = this.normalizeString(columns[cols.authorCode] || '');
@@ -5502,6 +5522,28 @@ const RenderEngine = {
         return Math.round((negMin + magPick * (negMax - negMin)) * 100) / 100;
     },
 
+    resolveSheetColor(color) {
+        const raw = String(color || '').trim();
+        if (!raw) return '';
+        if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(raw)) return raw;
+        if (raw.startsWith('rgb')) return raw;
+
+        const varName = raw.match(/var\(\s*(--[^,)]+)/)?.[1];
+        if (varName && typeof getComputedStyle === 'function') {
+            const resolved = getComputedStyle(document.documentElement)
+                .getPropertyValue(varName).trim();
+            if (resolved) return resolved;
+        }
+        return raw;
+    },
+
+    dotMarkup(tag, index) {
+        const color = this.resolveSheetColor(tag.color) ||
+            CONFIG.data.fallbackTagColor ||
+            '#898989';
+        return `<div class="layer-item layer-dot" data-index="${index}" data-tag="${tag.name}" style="--dot-bg:${color};background-color:${color};"></div>`;
+    },
+
     createNoteDOM(item, noteIndex = -1) {
         const wrapper = document.createElement('div');
         wrapper.classList.add('note-wrapper', 'snap-point');
@@ -5516,7 +5558,7 @@ const RenderEngine = {
         let tagsHTML = '';
         if (item.tags && item.tags.length > 0) {
             tagsHTML = item.tags.map(t => 
-                `<span class="tag"><span class="tag-circle" style="background-color: ${t.color}"></span>${t.name}</span>`
+                `<span class="tag"><span class="tag-circle" style="background-color: ${this.resolveSheetColor(t.color) || CONFIG.data.fallbackTagColor}"></span>${t.name}</span>`
             ).join('');
         }
 
@@ -5546,10 +5588,11 @@ const RenderEngine = {
         let dotsHTML = '';
         if (item.tags && item.tags.length > 0) {
             item.tags.forEach((tag, index) => {
-                dotsHTML += `<div class="layer-item layer-dot" data-index="${index}" data-tag="${tag.name}" style="--dot-bg: ${tag.color};"></div>`;
+                dotsHTML += this.dotMarkup(tag, index);
             });
         } else {
-            dotsHTML = `<div class="layer-item layer-dot" style="--dot-bg: var(--main-text);"></div>`;
+            const fallback = this.resolveSheetColor('var(--color-3)') || '#2D2D2D';
+            dotsHTML = `<div class="layer-item layer-dot" style="--dot-bg:${fallback};background-color:${fallback};"></div>`;
         }
 
         wrapper.innerHTML = `
@@ -9909,7 +9952,7 @@ const SpatialNavigation = {
    Two separate UI parts; see CONFIG.layerNavigation vs CONFIG.navigationMap.
    ========================================================================== */
 const LAYER_NAV_SYMBOL_INLINE = {
-    l1: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none" aria-hidden="true"><g id="icon"><path d="M67.23,33.46c9.32,9.32,9.32,24.44,0,33.77s-24.44,9.32-33.77,0l-20.7-20.7c-9.32-9.32-9.32-24.44,0-33.77,9.32-9.32,24.44-9.32,33.77,0l20.7,20.7Z" stroke="currentColor" stroke-width="4.17" fill="none" vector-effect="non-scaling-stroke"/><circle cx="29.65" cy="29.65" r="15.9" fill="currentColor"/><circle cx="50.35" cy="50.35" r="15.9" fill="currentColor"/></g></svg>`
+    l1: `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none" aria-hidden="true"><g id="icon"><path d="M67.23,33.46c9.32,9.32,9.32,24.44,0,33.77s-24.44,9.32-33.77,0l-20.7-20.7c-9.32-9.32-9.32-24.44,0-33.77,9.32-9.32,24.44-9.32,33.77,0l20.7,20.7Z" stroke="currentColor" stroke-width="2.8" fill="none" vector-effect="non-scaling-stroke"/><circle cx="29.65" cy="29.65" r="15.9" fill="currentColor"/><circle cx="50.35" cy="50.35" r="15.9" fill="currentColor"/></g></svg>`
 };
 
 const LAYER_NAV_SYMBOL_FETCH_CACHE = new Map();
@@ -13766,6 +13809,9 @@ const SiteAbout = {
     _openHeight: 0,
     _tabHeight: 40,
     _dragging: false,
+    _pointerActive: false,
+    _dragCommitted: false,
+    _dragThresholdPx: 8,
     _dragStartY: 0,
     _dragStartProgress: 0,
     _onResize: null,
@@ -13824,8 +13870,9 @@ const SiteAbout = {
 
         this.trigger.addEventListener('pointerdown', (e) => this._onPointerDown(e));
         this.trigger.addEventListener('pointermove', (e) => this._onPointerMove(e));
-        this.trigger.addEventListener('pointerup', (e) => this._onPointerUp(e));
-        this.trigger.addEventListener('pointercancel', (e) => this._onPointerUp(e));
+        this.trigger.addEventListener('pointerup', (e) => this._endPointer(e));
+        this.trigger.addEventListener('pointercancel', (e) => this._endPointer(e, { cancelled: true }));
+        this.trigger.addEventListener('lostpointercapture', (e) => this._endPointer(e, { cancelled: true }));
         this.trigger.addEventListener('click', (e) => e.preventDefault());
         this.trigger.addEventListener('keydown', (e) => this._onTriggerKeyDown(e));
 
@@ -13876,34 +13923,56 @@ const SiteAbout = {
     _onPointerDown(e) {
         if (e.button !== 0) return;
         e.preventDefault();
-        this._dragging = true;
+        this._pointerActive = true;
+        this._dragCommitted = false;
+        this._dragging = false;
         this._dragStartY = e.clientY;
         this._dragStartProgress = this._progress;
-        this.root.classList.add('is-dragging');
         try {
             this.trigger.setPointerCapture(e.pointerId);
         } catch (_) { /* ignore */ }
     },
 
     _onPointerMove(e) {
-        if (!this._dragging) return;
-        const travel = this._openHeight || 1;
+        if (!this._pointerActive) return;
+
         const dy = this._dragStartY - e.clientY;
+        if (!this._dragCommitted) {
+            if (Math.abs(dy) < this._dragThresholdPx) return;
+            this._dragCommitted = true;
+            this._dragging = true;
+            this.root.classList.add('is-dragging');
+        }
+
+        const travel = this._openHeight || 1;
         this._progress = Math.min(1, Math.max(0, this._dragStartProgress + dy / travel));
         this._applyProgress(false);
     },
 
-    _onPointerUp(e) {
-        if (!this._dragging) return;
+    _endPointer(e, { cancelled = false } = {}) {
+        if (!this._pointerActive) return;
+
+        const wasDrag = this._dragCommitted;
+        this._pointerActive = false;
+        this._dragCommitted = false;
         this._dragging = false;
         this.root.classList.remove('is-dragging');
+
         try {
             this.trigger.releasePointerCapture(e.pointerId);
         } catch (_) { /* ignore */ }
 
-        const threshold = this.cfg().snapThreshold ?? 0.35;
-        this._progress = this._progress >= threshold ? 1 : 0;
-        this._applyProgress(true);
+        if (wasDrag) {
+            const threshold = this.cfg().snapThreshold ?? 0.35;
+            this._progress = this._progress >= threshold ? 1 : 0;
+            this._applyProgress(true);
+        } else if (cancelled) {
+            this._progress = this._dragStartProgress;
+            this._applyProgress(true);
+        } else {
+            this._progress = this._dragStartProgress >= 1 ? 0 : 1;
+            this._applyProgress(true);
+        }
     },
 
     _onTriggerKeyDown(e) {
@@ -13968,6 +14037,7 @@ const PhysicsEngine = {
     mouseClientX: 0,
     mouseClientY: 0,
     hoveredNoteIndex: -1,
+    lastCanvasHoverIndex: -2,
     moleculeHoverPinnedIndex: -1,
     repulsionHoldNoteIndex: -1,
     moleculeClickIntent: null,
@@ -14967,10 +15037,18 @@ const PhysicsEngine = {
             .getPropertyValue(CONFIG.warehouse.linkage.line.cssColorVariable).trim() || '#101010';
 
         const hoverFillVar = CONFIG.outlines?.hoverFillCssVariable || '--color-6';
-        this.hoverFillColor = getComputedStyle(document.documentElement)
-            .getPropertyValue(hoverFillVar).trim() || '#E6E0DA';
+        this.hoverFillCssVariable = hoverFillVar;
+        this.hoverFillColor = this.resolveHoverFillColor();
 
         this.resizeLinkCanvas();
+    },
+
+    resolveHoverFillColor() {
+        const cssVar = this.hoverFillCssVariable ||
+            CONFIG.outlines?.hoverFillCssVariable ||
+            '--color-6';
+        return getComputedStyle(document.documentElement)
+            .getPropertyValue(cssVar).trim() || '#E6E0DA';
     },
 
     resizeLinkCanvas() {
@@ -15087,27 +15165,54 @@ const PhysicsEngine = {
         return cfg.renderPadding ?? cfg.padding;
     },
 
+    resolveSheetColorValue(color) {
+        const raw = String(color || '').trim();
+        if (!raw) return '';
+        if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(raw)) return raw;
+        if (raw.startsWith('rgb')) return raw;
+
+        const varName = raw.match(/var\(\s*(--[^,)]+)/)?.[1];
+        if (varName) {
+            const resolved = getComputedStyle(document.documentElement)
+                .getPropertyValue(varName).trim();
+            if (resolved) return resolved;
+        }
+        return raw;
+    },
+
     getDotFillColor(element) {
-        if (!element) return this.linkColor;
+        if (!element) return '';
 
         const raw = element.style.getPropertyValue('--dot-bg').trim()
             || getComputedStyle(element).getPropertyValue('--dot-bg').trim();
         if (raw) {
-            if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(raw)) return raw;
-            if (raw.startsWith('rgb')) return raw;
+            const resolved = this.resolveSheetColorValue(raw);
+            if (resolved && resolved !== this.linkColor) return resolved;
+        }
 
-            const varName = raw.match(/var\(\s*(--[^,)]+)/)?.[1];
-            if (varName) {
-                const resolved = getComputedStyle(document.documentElement)
-                    .getPropertyValue(varName).trim();
+        const tagName = element.dataset?.tag;
+        if (tagName && typeof AppState !== 'undefined') {
+            const fromMap = AppState.tagColorsMap?.get(tagName);
+            if (fromMap) {
+                const resolved = this.resolveSheetColorValue(fromMap);
                 if (resolved) return resolved;
             }
-            return raw;
         }
 
         const bg = getComputedStyle(element).backgroundColor;
         if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return bg;
-        return this.linkColor;
+        return '';
+    },
+
+    getMoleculeHoverFillColor(pts) {
+        const mode = CONFIG.outlines?.hoverFillMode ?? 'tag';
+        if (mode === 'tag' && pts?.length) {
+            for (let i = 0; i < pts.length; i++) {
+                const color = pts[i].color;
+                if (color) return color;
+            }
+        }
+        return this.resolveHoverFillColor();
     },
 
     collectNoteOutlineGroups() {
@@ -15166,6 +15271,7 @@ const PhysicsEngine = {
 
         groups.forEach((pts, noteIndex) => {
             if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
+            if (noteIndex === this.hoveredNoteIndex) return;
             if (this.shouldCullOutlineGroup(pts)) return;
 
             const R = pts[0].r + this.getOutlineRenderPadding();
@@ -15200,7 +15306,9 @@ const PhysicsEngine = {
 
         const ctx = this.linkCtx;
         ctx.save();
-        ctx.fillStyle = this.hoverFillColor;
+        ctx.globalAlpha = 1;
+        ctx.globalCompositeOperation = 'source-over';
+        ctx.fillStyle = this.getMoleculeHoverFillColor(pts);
         this.fillHullOutline(pts, R, ctx);
         ctx.restore();
     },
@@ -15526,23 +15634,25 @@ const PhysicsEngine = {
         if (macroVisualActive) {
             this.isActive = true;
             this.syncDotTransforms();
+            this.updateMoleculeHoverState();
         } else {
             this.isActive = false;
         }
 
-        if (!this.linkCtx || skipCanvasDraw) return;
+        const hoverChanged = this.hoveredNoteIndex !== this.lastCanvasHoverIndex;
+        if (!this.linkCtx || (skipCanvasDraw && !hoverChanged)) return;
 
         this.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
 
         if (macroVisualActive) {
             this.drawNoteBackings();
-            this.drawNoteHoverFills();
             this.drawSiblingLinks();
             if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
                 DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
             }
             this.drawNoteOutlines();
-            this.updateMoleculeHoverState();
+            this.drawNoteHoverFills();
+            this.lastCanvasHoverIndex = this.hoveredNoteIndex;
         }
 
         if (depthFocusLinks) {
@@ -15552,14 +15662,16 @@ const PhysicsEngine = {
 
     flushMacroCanvas() {
         if (!this.linkCtx) return;
+        this.updateMoleculeHoverState();
         this.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
         this.drawNoteBackings();
-        this.drawNoteHoverFills();
         this.drawSiblingLinks();
         if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
             DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
         }
         this.drawNoteOutlines();
+        this.drawNoteHoverFills();
+        this.lastCanvasHoverIndex = this.hoveredNoteIndex;
     },
 
     // Axis-aligned bounds of a note's hull in viewport coordinates
@@ -15989,6 +16101,8 @@ const ActionWarehouse = {
     launcherExpandProgress: 0,
     launcherExpandDragState: null,
     launcherExpandReleaseLockUntil: 0,
+    launcherExpandTeaserActive: false,
+    _launcherExpandTeaserRaf: null,
     launcherWrapElement: null,
     launcherStripElement: null,
     launcherPillElement: null,
@@ -16209,6 +16323,200 @@ const ActionWarehouse = {
         }, 400);
     },
 
+    getLauncherExpandTeaserCfg() {
+        return CONFIG.warehouse?.popup?.launcherStrip?.firstPressTeaser ?? {};
+    },
+
+    hasSeenLauncherExpandTeaser() {
+        const cfg = this.getLauncherExpandTeaserCfg();
+        if (cfg.enabled === false) return true;
+        const key = cfg.storageKey || 'warehouseLauncherExpandHintSeen';
+        try {
+            if (cfg.persist === 'session') {
+                return sessionStorage.getItem(key) === '1';
+            }
+            return localStorage.getItem(key) === '1';
+        } catch (_) {
+            return false;
+        }
+    },
+
+    markLauncherExpandTeaserSeen() {
+        const cfg = this.getLauncherExpandTeaserCfg();
+        const key = cfg.storageKey || 'warehouseLauncherExpandHintSeen';
+        try {
+            if (cfg.persist === 'session') {
+                sessionStorage.setItem(key, '1');
+            } else {
+                localStorage.setItem(key, '1');
+            }
+        } catch (_) { /* private mode */ }
+    },
+
+    shouldPlayLauncherExpandTeaser() {
+        const cfg = this.getLauncherExpandTeaserCfg();
+        if (cfg.enabled === false) return false;
+        if (!this.isLauncherExpandDragMode()) return false;
+        if (this.hasSeenLauncherExpandTeaser()) return false;
+        if (this.launcherExpandTeaserActive) return false;
+        if (this.launcherStripPinned) return false;
+        if (this.launcherExpandDragState) return false;
+        if ((this.launcherExpandProgress ?? 0) > 0.05) return false;
+        return true;
+    },
+
+    isLauncherExpandCollapsedTap(drag) {
+        if (!drag || drag.startProgress !== 0 || this.launcherStripPinned) return false;
+        const progress = this.launcherExpandProgress ?? 0;
+        if (progress > 0.05) return false;
+        const maxTravel = drag.maxRailTravel ?? 0;
+        if (maxTravel > 0.05) return false;
+        const pointerDist = Math.hypot(
+            (drag.lastX ?? drag.startX) - drag.startX,
+            (drag.lastY ?? drag.startY) - drag.startY
+        );
+        if (drag.didMove && pointerDist > 10) return false;
+        return true;
+    },
+
+    tryPlayLauncherExpandTeaserFromTap() {
+        if (!this.shouldPlayLauncherExpandTeaser()) return false;
+        this.playLauncherExpandTeaser();
+        return true;
+    },
+
+    cancelLauncherExpandTeaser() {
+        if (this._launcherExpandTeaserRaf !== null) {
+            cancelAnimationFrame(this._launcherExpandTeaserRaf);
+            this._launcherExpandTeaserRaf = null;
+        }
+        this.launcherExpandTeaserActive = false;
+        this.launcherWrapElement?.classList.remove('is-expand-teaser');
+        document.body.classList.remove('is-launcher-expand-teaser');
+    },
+
+    easeLauncherExpandTeaser(t, mode) {
+        const x = Math.max(0, Math.min(1, t));
+        switch (mode) {
+            case 'inQuad':
+                return x * x;
+            case 'outQuad':
+                return 1 - (1 - x) * (1 - x);
+            case 'inCubic':
+                return x * x * x;
+            case 'outCubic':
+                return 1 - Math.pow(1 - x, 3);
+            default:
+                return x;
+        }
+    },
+
+    buildLauncherExpandTeaserSegments(peak, bounces = 2) {
+        const bounceHeights = [0.38, 0.14];
+        const segments = [];
+        let t = 0;
+
+        const push = (dt, p0, p1, ease) => {
+            const t0 = t;
+            t += dt;
+            segments.push({ t0, t1: t, p0, p1, ease });
+        };
+
+        push(0.30, 0, peak, 'outCubic');
+        push(0.17, peak, 0, 'inQuad');
+
+        for (let i = 0; i < bounces; i += 1) {
+            const h = peak * (bounceHeights[i] ?? bounceHeights[bounceHeights.length - 1]);
+            push(0.09, 0, h, 'outQuad');
+            push(0.12, h, 0, 'inQuad');
+        }
+
+        push(0.08, 0, 0, 'linear');
+        const endT = t || 1;
+        segments.forEach((seg) => {
+            seg.t0 /= endT;
+            seg.t1 /= endT;
+        });
+        return segments;
+    },
+
+    sampleLauncherExpandTeaserProgress(u, segments) {
+        const t = Math.max(0, Math.min(1, u));
+        const seg = segments.find((s) => t >= s.t0 && t <= s.t1) || segments[segments.length - 1];
+        const span = Math.max(1e-6, seg.t1 - seg.t0);
+        const local = (t - seg.t0) / span;
+        const eased = this.easeLauncherExpandTeaser(local, seg.ease);
+        return seg.p0 + (seg.p1 - seg.p0) * eased;
+    },
+
+    getLauncherExpandTeaserPeakProgress(bounds = null) {
+        const cfg = this.getLauncherExpandTeaserCfg();
+        if (typeof cfg.peakProgress === 'number') {
+            return Math.max(0.04, Math.min(0.42, cfg.peakProgress));
+        }
+        const b = bounds || this.getLauncherExpandBounds();
+        const rail = this.getLauncherExpandRail(b);
+        const travelPx = cfg.peakTravelPx ?? 72;
+        return Math.max(0.04, Math.min(0.42, travelPx / rail.length));
+    },
+
+    playLauncherExpandTeaser() {
+        if (!this.shouldPlayLauncherExpandTeaser()) return;
+        this.cancelLauncherExpandTeaser();
+
+        const cfg = this.getLauncherExpandTeaserCfg();
+        const bounds = this.getLauncherExpandBounds();
+        const peak = this.getLauncherExpandTeaserPeakProgress(bounds);
+        const segments = this.buildLauncherExpandTeaserSegments(peak, cfg.bounces ?? 2);
+        const durationMs = Math.max(500, cfg.durationMs ?? 950);
+        const wrap = this.launcherWrapElement;
+
+        this.launcherExpandTeaserActive = true;
+        wrap?.classList.add('is-expand-teaser');
+        document.body.classList.add('is-launcher-expand-teaser');
+        this.lockLauncherExpandDismiss(durationMs + 120);
+        this.suppressLauncherExpandClickBurst();
+
+        let startTime = null;
+        const step = (now) => {
+            if (!this.launcherExpandTeaserActive) return;
+            if (startTime === null) startTime = now;
+            const u = Math.max(0, Math.min(1, (now - startTime) / durationMs));
+            const progress = this.sampleLauncherExpandTeaserProgress(u, segments);
+            this.applyLauncherExpandSize(progress, true);
+
+            const rail = this.getLauncherExpandRail(bounds);
+            const pt = this._launcherPointerXY || {
+                x: window.innerWidth * 0.5,
+                y: window.innerHeight * 0.5
+            };
+            if (progress > 0.02) {
+                const wrapRect = wrap?.getBoundingClientRect();
+                if (wrapRect) {
+                    const cx = wrapRect.right - bounds.collapsedW / 2;
+                    const cy = wrapRect.bottom - bounds.collapsedH / 2;
+                    this.updateLauncherGlyphRotation(
+                        cx - rail.ux * progress * rail.length,
+                        cy - rail.uy * progress * rail.length
+                    );
+                }
+            } else {
+                this.updateLauncherGlyphRotation(pt.x, pt.y);
+            }
+
+            if (u < 1) {
+                this._launcherExpandTeaserRaf = requestAnimationFrame(step);
+                return;
+            }
+
+            this.applyLauncherExpandSize(0, false);
+            this.cancelLauncherExpandTeaser();
+            this.updateLauncherGlyphRotation(pt.x, pt.y);
+        };
+
+        this._launcherExpandTeaserRaf = requestAnimationFrame(step);
+    },
+
     getLauncherExpandBounds() {
         const root = getComputedStyle(document.documentElement);
         const collapsedW = parseFloat(root.getPropertyValue('--warehouse-launcher-width')) || 80;
@@ -16227,7 +16535,7 @@ const ActionWarehouse = {
         };
     },
 
-    /** Diagonal rail — tilt matches 12×6 panel growth (width vs height delta). */
+    /** Diagonal rail — tilt matches expand panel growth (width vs height delta). */
     getLauncherExpandRail(bounds = null) {
         const b = bounds || this.getLauncherExpandBounds();
         const deltaW = Math.max(0, b.expandedW - b.collapsedW);
@@ -16612,6 +16920,10 @@ const ActionWarehouse = {
     },
 
     syncLauncherStripPin(pinned) {
+        if (pinned) {
+            this.cancelLauncherExpandTeaser();
+            this.markLauncherExpandTeaserSeen();
+        }
         this.launcherStripPinned = !!pinned;
         document.body.classList.toggle('is-launcher-strip-pinned', this.launcherStripPinned);
         this.launcherWrapElement?.classList.toggle('is-pinned', this.launcherStripPinned);
@@ -16682,6 +16994,14 @@ const ActionWarehouse = {
                 return;
             }
 
+            if (this.isLauncherExpandCollapsedTap(drag)) {
+                this.applyLauncherExpandSize(0, false);
+                const pt = this._launcherPointerXY || { x: e.clientX, y: e.clientY };
+                this.updateLauncherGlyphRotation(pt.x, pt.y);
+                this.tryPlayLauncherExpandTeaserFromTap();
+                return;
+            }
+
             const threshold = CONFIG.warehouse?.popup?.launcherStrip?.snapThreshold ?? 0.82;
             const progress = this.launcherExpandProgress ?? 0;
 
@@ -16700,7 +17020,7 @@ const ActionWarehouse = {
 
         const onPointerDown = (e) => {
             if (e.button !== 0) return;
-            e.preventDefault();
+            if (this.launcherExpandTeaserActive) return;
             e.stopPropagation();
             if (this.dragState) return;
 
@@ -16711,9 +17031,12 @@ const ActionWarehouse = {
                 pointerId: e.pointerId,
                 startX: e.clientX,
                 startY: e.clientY,
+                lastX: e.clientX,
+                lastY: e.clientY,
                 startProgress,
                 bounds,
-                didMove: false
+                didMove: false,
+                maxRailTravel: 0
             };
 
             launcher.setPointerCapture(e.pointerId);
@@ -16743,6 +17066,8 @@ const ActionWarehouse = {
         };
 
         launcher.addEventListener('pointerdown', onPointerDown);
+        launcher.addEventListener('pointerup', finish);
+        launcher.addEventListener('pointercancel', finish);
         launcher.addEventListener('lostpointercapture', onLostCapture);
     },
 
@@ -16751,12 +17076,15 @@ const ActionWarehouse = {
         if (!drag) return;
 
         const { startX, startY, startProgress, bounds } = drag;
-        if (Math.hypot(clientX - startX, clientY - startY) > 4) {
+        drag.lastX = clientX;
+        drag.lastY = clientY;
+        if (Math.hypot(clientX - startX, clientY - startY) > 6) {
             drag.didMove = true;
         }
         const rail = this.getLauncherExpandRail(bounds);
         const travel = (startX - clientX) * rail.ux + (startY - clientY) * rail.uy;
         const progress = Math.max(0, Math.min(1, startProgress + travel / rail.length));
+        drag.maxRailTravel = Math.max(drag.maxRailTravel || 0, Math.abs(progress - startProgress));
 
         this.applyLauncherExpandSize(progress, true);
         this.updateLauncherGlyphRotation(clientX, clientY);
