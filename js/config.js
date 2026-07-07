@@ -49,7 +49,7 @@ const CONFIG = {
             filterFringe: { colStart: 23, colEnd: 25, rowStart: 1, rowEnd: 11 },
             navigationLayers: { colStart: 23, colEnd: 25, rowStart: 1, rowEnd: 7  },
             navigationMaps:   { colStart: 21, colEnd: 25, rowStart: 11, rowEnd: 13 }, // alias: warehouseMap
-            about:            { colStart: 4, colEnd: 5, rowStart: 1, rowEnd: 3 }
+            about:            { colStart: 1, colEnd: 2, rowStart: 1, rowEnd: 3 }
             // reset button: centered above warehouse shell — not a grid region
         },
         regionsByLevel: {
@@ -105,10 +105,13 @@ const CONFIG = {
         retiredTypologies: ['Quote', 'quote']
     },
 
-    /* --- About panel (top-left hover chrome) --- */
+    /* --- About panel (bottom pull-up sheet) --- */
     about: {
         label: 'על הפרויקט',
-        bodyHtml: ''
+        bodyHtml: '',
+        openHeightVh: 65,
+        openMaxPx: 640,
+        snapThreshold: 0.35
     },
 
     /* --- Boot Sequence --- */
@@ -256,13 +259,11 @@ const CONFIG = {
         devSkipStorageKey: 'opening.skip',
         preloadAssets: [
             'assets/ui/layer-nav-marker.svg',
-            'assets/ui/layer-nav-molecule.svg',
-            'assets/ui/layer-nav-molecule-2.svg',
             'assets/ui/layer-nav-l1.svg',
-            'assets/ui/layer-nav-molecule-6.svg',
             'assets/ui/layer-nav-blocks.svg',
             'assets/ui/decoration-corner-tr.svg',
             'assets/fonts/NarkissYair-Bold-TRIAL.woff2',
+            'assets/fonts/NarkissYair-RegularMono-TRIAL.woff2',
             'assets/fonts/NarkissYair-BoldMono-TRIAL.woff2',
             'assets/fonts/TheBasics-Dots.woff2',
             'assets/fonts/FrankRuhl_Universal-Mono.woff2'
@@ -578,15 +579,12 @@ const CONFIG = {
     layerNavigation: {
         labels: { 1: 'L1', 3: 'L2' },
         symbols: {
-            1: 'assets/ui/layer-nav-molecule.svg',
-            2: 'assets/ui/layer-nav-molecule-2.svg',
             l1: 'assets/ui/layer-nav-l1.svg',
-            6: 'assets/ui/layer-nav-molecule-6.svg',
             3: 'assets/ui/layer-nav-blocks.svg'
         },
         symbolSizeActive: { value: 4.5, unit: 'rem' },
         symbolSizeInactive: { value: 3.25, unit: 'rem' },
-        rightInset: { value: 2.5, unit: 'rem' },
+        rightInset: { value: 1.25, unit: 'rem' },
         boxGap: { value: 0.625, unit: 'rem' },
         boxPadding: { value: 0.625, unit: 'rem' },
         boxRadius: { value: 0.3125, unit: 'rem' },
@@ -599,7 +597,7 @@ const CONFIG = {
         hitAreaPadding: { value: 0, unit: 'rem' },
         toggleMode: true,
         slotCount: 1,
-        toggleTopInset: { value: 2.5, unit: 'rem' },
+        toggleTopInset: { value: 1.25, unit: 'rem' },
         toggleBoxSize: { value: 80, unit: 'px' },
         toggleBoxPadding: { value: 5, unit: 'px' },
         moleculeSymbolRotateDeg: 0,
@@ -740,6 +738,16 @@ const CONFIG = {
             wanderSpeed: 0.02
         },
 
+        // Visual-only idle drift — applied in draw positions, not physics bodies
+        breathing: {
+            enabled: true,
+            amplitude: scale(1.8),   // px peak offset per molecule
+            speed: 0.55,             // rad/s — slow ~11s loop
+            verticalRatio: 0.82,
+            capturedScale: 0.2,      // quieter while orbiting blocks
+            bankScale: 0.65          // softer on workspace bank
+        },
+
         // Cursor interaction — per-dot repulsion (very soft)
         mouse: {
             interactionRadius: scale(44),
@@ -835,7 +843,13 @@ const CONFIG = {
             cornerDecorationSrc: 'assets/ui/decoration-corner-tr.svg',
             messageText: 'גררו להפעלה',
             messageTypewriterMsPerChar: 35,
-            blockTrayGap: { value: 3.75, unit: 'rem' }
+            blockTrayGap: { value: 3.75, unit: 'rem' },
+            // Panel toggles — blocks tray always on; set false to hide chrome while iterating dock layout.
+            panels: {
+                statistics: false,
+                message: false,
+                map: false
+            }
         },
 
         // Collapsed by default — full dock slides up as a popup; minimap lives inside.
@@ -845,9 +859,21 @@ const CONFIG = {
             launcherLabel: 'כלים',
             launcherArrowSrc: 'assets/ui/arrow.svg',
             launcherArrowBaseDeg: -90,
+            launcherArrowHoverDeg: -135,
+            launcherSize: { width: 80, height: 40 },
             stayOpenWhileDragging: true,
             closeOnOutsideClick: true,
-            closeOnEscape: true
+            closeOnEscape: true,
+            launcherStrip: {
+                enabled: true,
+                expandDrag: true,
+                expandCols: 12,
+                expandRows: 6,
+                mapCols: 4,
+                showMap: true,
+                tagOnly: true,
+                snapThreshold: 0.82
+            }
         },
 
         drag: {
@@ -969,8 +995,9 @@ const CONFIG = {
         padding: scale(7),         // physics hull shell + molecule extent (unchanged)
         renderScale: 2,            // L1 dot visual diameter = 10px × renderScale → 20px (10px radius); physics unchanged
         renderPadding: scale(5),   // visual hull gap only — effective corner radius = dotR(10) + 5 = 15px
-        width: 0.2 * (96 / 72),
-        hoverWidth: 0.55 * (96 / 72)
+        width: 0.4 * (96 / 72),
+        hoverWidth: 0.4 * (96 / 72),
+        hoverFillCssVariable: '--color-6'
     }
 };
 
@@ -1159,6 +1186,68 @@ function measureSiteGridTokenPx(tokenName, property = 'height') {
     probe.style.width = '0';
     probe.style.height = '0';
     return px;
+}
+
+function isWarehouseDockPanelEnabled(panel) {
+    const panels = CONFIG.warehouse?.dock?.panels;
+    if (!panels) return true;
+    return panels[panel] !== false;
+}
+
+function isWarehouseDockBlocksOnly() {
+    const panels = CONFIG.warehouse?.dock?.panels;
+    if (!panels) return false;
+    return panels.statistics === false &&
+        panels.message === false &&
+        panels.map === false;
+}
+
+function isWarehouseLauncherStripMode() {
+    const popup = CONFIG.warehouse?.popup;
+    return popup?.enabled === true && popup?.launcherStrip?.enabled === true;
+}
+
+function isWarehouseLauncherExpandDragMode() {
+    const stripCfg = CONFIG.warehouse?.popup?.launcherStrip;
+    return isWarehouseLauncherStripMode() && stripCfg?.expandDrag === true;
+}
+
+function isWarehouseLauncherMapEnabled() {
+    const stripCfg = CONFIG.warehouse?.popup?.launcherStrip;
+    if (isWarehouseLauncherStripMode() && stripCfg?.showMap) return true;
+    return isWarehouseDockPanelEnabled('map');
+}
+
+function applyWarehouseLauncherStripTokens(root = document.documentElement) {
+    const stripCfg = CONFIG.warehouse?.popup?.launcherStrip;
+    if (!isWarehouseLauncherStripMode() || !stripCfg) return;
+    const mapCols = Math.max(1, stripCfg.mapCols ?? 4);
+    const expandCols = Math.max(1, stripCfg.expandCols ?? 12);
+    const expandRows = Math.max(1, stripCfg.expandRows ?? 6);
+    root.style.setProperty('--warehouse-launcher-expand-width', siteGridSpanWidth(expandCols));
+    root.style.setProperty('--warehouse-launcher-expand-height', siteGridSpanHeight(expandRows));
+    root.style.setProperty('--warehouse-launcher-map-width', siteGridSpanWidth(mapCols));
+    if (isWarehouseLauncherExpandDragMode()) return;
+    const peekCols = Math.max(1, stripCfg.expandCols ?? 6);
+    const pinCols = Math.max(1, stripCfg.pinCols ?? 8);
+    const pinRows = Math.max(1, stripCfg.pinRows ?? 3);
+    root.style.setProperty('--warehouse-launcher-strip-width', siteGridSpanWidth(peekCols));
+    root.style.setProperty('--warehouse-launcher-pin-blocks-width', siteGridSpanWidth(pinCols));
+    root.style.setProperty('--warehouse-launcher-pin-height', siteGridSpanHeight(pinRows));
+    root.style.setProperty(
+        '--warehouse-launcher-pin-width',
+        `calc(var(--warehouse-launcher-map-width) + var(--space-10) + var(--warehouse-launcher-pin-blocks-width))`
+    );
+}
+
+function applyWarehouseLauncherTokens(root = document.documentElement) {
+    const size = CONFIG.warehouse?.popup?.launcherSize || { width: 80, height: 40 };
+    const width = Math.max(1, size.width ?? 80);
+    const height = Math.max(1, size.height ?? 40);
+    root.style.setProperty('--warehouse-launcher-width', `${width}px`);
+    root.style.setProperty('--warehouse-launcher-height', `${height}px`);
+    root.style.setProperty('--warehouse-launcher-size', `${height}px`);
+    root.style.setProperty('--warehouse-launcher-radius', `${height / 2}px`);
 }
 
 /** L1 viewport chrome below the canvas region — aligned to warehouse shell top. */
@@ -1498,9 +1587,12 @@ function isPointOverSiteNavigationUI(clientX, clientY) {
 
     const aboutRoot = document.querySelector('.site-about');
     if (aboutRoot) {
-        const style = window.getComputedStyle(aboutRoot);
-        if (style.pointerEvents !== 'none' || aboutRoot.classList.contains('is-open')) {
-            const rect = aboutRoot.getBoundingClientRect();
+        const sheet = aboutRoot.querySelector('.site-about__sheet');
+        const backdrop = aboutRoot.querySelector('.site-about__backdrop');
+        const targets = [sheet, backdrop].filter(Boolean);
+        for (const el of targets) {
+            const rect = el.getBoundingClientRect();
+            if (rect.width <= 0 && rect.height <= 0) continue;
             if (
                 clientX >= rect.left - pad &&
                 clientX <= rect.right + pad &&
@@ -1522,6 +1614,7 @@ function isPointOverWarehouseChrome(clientX, clientY) {
     const pad = 4;
     const selectors = [
         '.warehouse-launcher',
+        '.warehouse-launcher-wrap',
         '.warehouse-popup-backdrop',
         '.warehouse-reset',
         '.depth-block-bar.has-blocks'
@@ -1712,6 +1805,9 @@ function applySiteGridTokens(root = document.documentElement, level = null) {
     updateSiteGridCrosses();
 
     applySiteGridContentScale(root);
+
+    applyWarehouseLauncherTokens(root);
+    applyWarehouseLauncherStripTokens(root);
 
     applyMacroShellGridPlacement();
 

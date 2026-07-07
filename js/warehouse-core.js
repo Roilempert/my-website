@@ -35,6 +35,15 @@ const ActionWarehouse = {
     filterExitByNote: new Map(),   // noteIndex → { phase: 'hollow'|'peel', phaseStart }
     _navigationMapBlockCount: 0,
     popupOpen: false,
+    launcherStripPinned: false,
+    launcherExpandProgress: 0,
+    launcherExpandDragState: null,
+    launcherExpandReleaseLockUntil: 0,
+    launcherWrapElement: null,
+    launcherStripElement: null,
+    launcherPillElement: null,
+    launcherMapMountElement: null,
+    launcherStripTrayElement: null,
     launcherElement: null,
     launcherGlyphElement: null,
     backdropElement: null,
@@ -199,6 +208,9 @@ const ActionWarehouse = {
         this.resetElement = this.shellElement.querySelector('.warehouse-reset');
         this.resetElement.addEventListener('click', () => this.resetAll());
         document.body.appendChild(this.shellElement);
+        if (typeof isWarehouseDockBlocksOnly === 'function' && isWarehouseDockBlocksOnly()) {
+            document.body.classList.add('is-warehouse-dock-blocks-only');
+        }
         this.initWarehousePopup();
         this.syncClearControlVisibility();
 
@@ -212,6 +224,183 @@ const ActionWarehouse = {
         return CONFIG.warehouse?.popup?.enabled === true;
     },
 
+    isLauncherStripMode() {
+        return typeof isWarehouseLauncherStripMode === 'function' && isWarehouseLauncherStripMode();
+    },
+
+    isLauncherExpandDragMode() {
+        return typeof isWarehouseLauncherExpandDragMode === 'function' &&
+            isWarehouseLauncherExpandDragMode();
+    },
+
+    isLauncherExpandDismissBlocked() {
+        return performance.now() < (this.launcherExpandReleaseLockUntil || 0);
+    },
+
+    lockLauncherExpandDismiss(ms = 450) {
+        this.launcherExpandReleaseLockUntil = performance.now() + ms;
+    },
+
+    suppressLauncherExpandClickBurst() {
+        if (this._launcherExpandClickSuppressBound) {
+            document.removeEventListener('click', this._launcherExpandClickSuppressBound, true);
+        }
+        this._launcherExpandClickSuppressBound = (e) => {
+            e.preventDefault();
+            e.stopPropagation();
+            document.removeEventListener('click', this._launcherExpandClickSuppressBound, true);
+            this._launcherExpandClickSuppressBound = null;
+        };
+        document.addEventListener('click', this._launcherExpandClickSuppressBound, true);
+        window.setTimeout(() => {
+            if (!this._launcherExpandClickSuppressBound) return;
+            document.removeEventListener('click', this._launcherExpandClickSuppressBound, true);
+            this._launcherExpandClickSuppressBound = null;
+        }, 400);
+    },
+
+    getLauncherExpandBounds() {
+        const root = getComputedStyle(document.documentElement);
+        const collapsedW = parseFloat(root.getPropertyValue('--warehouse-launcher-width')) || 80;
+        const collapsedH = parseFloat(root.getPropertyValue('--warehouse-launcher-height')) || 40;
+        const expandedW = typeof measureSiteGridTokenPx === 'function'
+            ? measureSiteGridTokenPx('--warehouse-launcher-expand-width', 'width')
+            : 0;
+        const expandedH = typeof measureSiteGridTokenPx === 'function'
+            ? measureSiteGridTokenPx('--warehouse-launcher-expand-height', 'height')
+            : 0;
+        return {
+            collapsedW,
+            collapsedH,
+            expandedW: Math.max(collapsedW, expandedW || collapsedW),
+            expandedH: Math.max(collapsedH, expandedH || collapsedH)
+        };
+    },
+
+    /** Diagonal rail — tilt matches 12×6 panel growth (width vs height delta). */
+    getLauncherExpandRail(bounds = null) {
+        const b = bounds || this.getLauncherExpandBounds();
+        const deltaW = Math.max(0, b.expandedW - b.collapsedW);
+        const deltaH = Math.max(0, b.expandedH - b.collapsedH);
+        const length = Math.hypot(deltaW, deltaH) || 1;
+        return {
+            deltaW,
+            deltaH,
+            length,
+            ux: deltaW / length,
+            uy: deltaH / length
+        };
+    },
+
+    getLauncherExpandRailArrowDeg() {
+        const popupCfg = CONFIG.warehouse?.popup;
+        const baseDeg = popupCfg?.launcherArrowBaseDeg ?? -90;
+        const rail = this.getLauncherExpandRail();
+        const aimDeg = Math.atan2(-rail.deltaH, -rail.deltaW) * (180 / Math.PI);
+        return aimDeg - baseDeg;
+    },
+
+    getLauncherExpandRetractArrowDeg() {
+        const popupCfg = CONFIG.warehouse?.popup;
+        const baseDeg = popupCfg?.launcherArrowBaseDeg ?? -90;
+        const wrap = this.launcherWrapElement;
+        const launcher = this.launcherElement;
+        if (!wrap || !launcher) return 0;
+        const wrapRect = wrap.getBoundingClientRect();
+        const launcherRect = launcher.getBoundingClientRect();
+        const cx = launcherRect.left + launcherRect.width / 2;
+        const cy = launcherRect.top + launcherRect.height / 2;
+        const aimDeg = Math.atan2(wrapRect.bottom - cy, wrapRect.right - cx) * (180 / Math.PI);
+        return aimDeg - baseDeg;
+    },
+
+    applyLauncherExpandHandlePosition(clamped, isDragging) {
+        const launcher = this.launcherElement;
+        if (!launcher || !this.isLauncherExpandDragMode()) return;
+
+        const bounds = this.getLauncherExpandBounds();
+        const lw = bounds.collapsedW;
+        const lh = bounds.collapsedH;
+        const pinned = this.launcherStripPinned && clamped >= 1 && !isDragging;
+
+        launcher.style.left = '';
+        launcher.style.top = '';
+        launcher.style.right = '';
+        launcher.style.bottom = '';
+        launcher.style.transform = '';
+
+        if (pinned) {
+            launcher.style.left = '0';
+            launcher.style.top = '0';
+            return;
+        }
+
+        if (clamped <= 0 && !isDragging) {
+            launcher.style.right = '0';
+            launcher.style.bottom = '0';
+            return;
+        }
+
+        const tx = -clamped * (bounds.expandedW - lw);
+        const ty = -clamped * (bounds.expandedH - lh);
+        launcher.style.right = '0';
+        launcher.style.bottom = '0';
+        launcher.style.transform = `translate(${tx}px, ${ty}px)`;
+    },
+
+    applyLauncherExpandSize(progress, isDragging) {
+        const clamped = Math.max(0, Math.min(1, progress));
+        this.launcherExpandProgress = clamped;
+        const bounds = this.getLauncherExpandBounds();
+        const w = bounds.collapsedW + clamped * (bounds.expandedW - bounds.collapsedW);
+        const h = bounds.collapsedH + clamped * (bounds.expandedH - bounds.collapsedH);
+        const wrap = this.launcherWrapElement;
+        if (!wrap) return;
+
+        wrap.style.width = `${w}px`;
+        wrap.style.height = `${h}px`;
+        const ease = '0.34s cubic-bezier(0.25, 1, 0.5, 1)';
+        wrap.style.transition = isDragging
+            ? 'none'
+            : `width ${ease}, height ${ease}`;
+
+        const launcher = this.launcherElement;
+        if (launcher && this.isLauncherExpandDragMode()) {
+            launcher.style.transition = isDragging ? 'none' : `transform ${ease}, left ${ease}, top ${ease}, right ${ease}, bottom ${ease}`;
+            this.applyLauncherExpandHandlePosition(clamped, isDragging);
+        }
+
+        const showContent = clamped > 0.06;
+        wrap.classList.toggle('is-showing-content', showContent);
+        wrap.classList.toggle('is-partially-expanded', clamped > 0 && clamped < 1);
+        wrap.setAttribute('aria-hidden', showContent ? 'false' : 'true');
+        this.launcherMapMountElement?.setAttribute('aria-hidden', showContent ? 'false' : 'true');
+
+        if (!isDragging && typeof NavigationMap !== 'undefined' && NavigationMap.mapsPanel && showContent) {
+            requestAnimationFrame(() => {
+                NavigationMap._contentDirty = true;
+                NavigationMap.resizeCanvas?.();
+                if (NavigationMap.isMapReady?.()) NavigationMap.scheduleRender?.();
+            });
+        }
+        this.updateScrollReserve();
+    },
+
+    isBlockTrayContainer(el) {
+        return el === this.trayBlocksElement || el === this.launcherStripTrayElement;
+    },
+
+    getBlockTrayParent(def) {
+        const stripCfg = CONFIG.warehouse?.popup?.launcherStrip;
+        if (this.isLauncherStripMode() && stripCfg?.tagOnly !== false) {
+            const type = def.type || 'tag';
+            if (type === 'tag' && this.launcherStripTrayElement) {
+                return this.launcherStripTrayElement;
+            }
+        }
+        return this.trayBlocksElement;
+    },
+
     isPopupOpen() {
         return !this.isPopupMode() || this.popupOpen;
     },
@@ -221,6 +410,20 @@ const ActionWarehouse = {
         if (!popupCfg?.enabled) return;
 
         document.body.classList.add('is-warehouse-popup-mode');
+        const stripMode = this.isLauncherStripMode();
+        const expandDrag = this.isLauncherExpandDragMode();
+        if (stripMode) {
+            document.body.classList.add('is-warehouse-launcher-strip-mode');
+            if (expandDrag) {
+                document.body.classList.add('is-warehouse-launcher-expand-drag-mode');
+            }
+            if (typeof applyWarehouseLauncherTokens === 'function') {
+                applyWarehouseLauncherTokens();
+            }
+            if (typeof applyWarehouseLauncherStripTokens === 'function') {
+                applyWarehouseLauncherStripTokens();
+            }
+        }
 
         this.backdropElement = document.createElement('div');
         this.backdropElement.className = 'warehouse-popup-backdrop';
@@ -231,16 +434,54 @@ const ActionWarehouse = {
         this.launcherElement.type = 'button';
         this.launcherElement.className = 'warehouse-launcher';
         this.launcherElement.setAttribute('aria-expanded', 'false');
-        this.launcherElement.setAttribute('aria-controls', 'warehouse-popup-panel');
+        this.launcherElement.setAttribute(
+            'aria-controls',
+            stripMode ? 'warehouse-launcher-strip' : 'warehouse-popup-panel'
+        );
         this.launcherElement.setAttribute('aria-label', popupCfg.launcherLabel || 'כלים');
-        this.launcherElement.innerHTML =
-            '<span class="warehouse-launcher__glyph" aria-hidden="true"></span>';
         const arrowSrc = popupCfg.launcherArrowSrc || 'assets/ui/arrow.svg';
+        if (expandDrag) {
+            this.launcherElement.innerHTML =
+                '<span class="warehouse-launcher__pill" aria-hidden="true"></span>' +
+                '<span class="warehouse-launcher__glyph" aria-hidden="true"></span>';
+            this.launcherPillElement = this.launcherElement.querySelector('.warehouse-launcher__pill');
+        } else {
+            this.launcherElement.innerHTML =
+                '<span class="warehouse-launcher__glyph" aria-hidden="true"></span>';
+            this.launcherPillElement = null;
+        }
         const glyph = this.launcherElement.querySelector('.warehouse-launcher__glyph');
         if (glyph) glyph.style.webkitMaskImage = glyph.style.maskImage = `url("${arrowSrc}")`;
-        document.body.appendChild(this.launcherElement);
         this.launcherGlyphElement = glyph;
+
+        if (stripMode) {
+            this.launcherWrapElement = document.createElement('div');
+            this.launcherWrapElement.className = 'warehouse-launcher-wrap';
+            this.launcherWrapElement.id = 'warehouse-launcher-strip';
+            this.launcherWrapElement.setAttribute('aria-hidden', 'true');
+
+            this.launcherStripTrayElement = document.createElement('div');
+            this.launcherStripTrayElement.className =
+                'warehouse-launcher-strip__tray warehouse-tray-section--blocks';
+
+            this.launcherMapMountElement = document.createElement('div');
+            this.launcherMapMountElement.id = 'warehouse-launcher-map-mount';
+            this.launcherMapMountElement.className = 'warehouse-launcher-map-mount';
+            this.launcherMapMountElement.setAttribute('aria-hidden', 'true');
+
+            this.launcherWrapElement.appendChild(this.launcherMapMountElement);
+            this.launcherWrapElement.appendChild(this.launcherStripTrayElement);
+            this.launcherWrapElement.appendChild(this.launcherElement);
+            document.body.appendChild(this.launcherWrapElement);
+            this.launcherStripElement = this.launcherWrapElement;
+        } else {
+            document.body.appendChild(this.launcherElement);
+        }
+
         this.initLauncherGlyphTracking();
+        if (expandDrag) {
+            this.initLauncherExpandDrag();
+        }
 
         if (this.resetElement) {
             document.body.appendChild(this.resetElement);
@@ -253,23 +494,45 @@ const ActionWarehouse = {
 
         this.launcherElement.addEventListener('click', (e) => {
             e.stopPropagation();
-            this.togglePopup();
+            if (expandDrag) {
+                if (this.launcherStripPinned && !this.launcherExpandDragState) {
+                    this.unpinLauncherStrip(true);
+                }
+                return;
+            }
+            if (stripMode) this.toggleLauncherStripPin();
+            else this.togglePopup();
         });
 
         this.launcherElement.addEventListener('pointerdown', (e) => {
+            if (expandDrag) return;
             e.stopPropagation();
         }, true);
 
         this.launcherElement.addEventListener('pointerup', (e) => {
+            if (expandDrag) return;
             e.stopPropagation();
         }, true);
 
         if (popupCfg.closeOnOutsideClick) {
-            this.backdropElement.addEventListener('click', () => this.closePopup());
+            this.backdropElement.addEventListener('click', () => {
+                if (expandDrag && this.isLauncherExpandDismissBlocked()) return;
+                if (stripMode) this.unpinLauncherStrip();
+                else this.closePopup();
+            });
             this._popupOutsidePointerBound = (e) => {
-                if (!this.popupOpen || this.dragState) return;
                 const target = e.target;
                 if (!(target instanceof Element)) return;
+                if (stripMode) {
+                    if (expandDrag && this.isLauncherExpandDismissBlocked()) return;
+                    const partialExpand = expandDrag && (this.launcherExpandProgress ?? 0) > 0;
+                    if (!this.launcherStripPinned && !partialExpand) return;
+                    if (this.launcherExpandDragState) return;
+                    if (target.closest('.warehouse-launcher-wrap, .action-block.is-dragging')) return;
+                    this.unpinLauncherStrip();
+                    return;
+                }
+                if (!this.popupOpen || this.dragState) return;
                 if (target.closest('.warehouse-shell, .warehouse-launcher, .action-block.is-dragging')) return;
                 this.closePopup();
             };
@@ -278,13 +541,29 @@ const ActionWarehouse = {
 
         if (popupCfg.closeOnEscape) {
             document.addEventListener('keydown', (e) => {
-                if (e.key !== 'Escape' || !this.popupOpen) return;
+                if (e.key !== 'Escape') return;
+                if (stripMode) {
+                    const partialExpand = expandDrag && (this.launcherExpandProgress ?? 0) > 0;
+                    if (!this.launcherStripPinned && !partialExpand) return;
+                    if (this.dragState && popupCfg.stayOpenWhileDragging) return;
+                    if (this.launcherExpandDragState) return;
+                    this.unpinLauncherStrip();
+                    return;
+                }
+                if (!this.popupOpen) return;
                 if (this.dragState && popupCfg.stayOpenWhileDragging) return;
                 this.closePopup();
             });
         }
 
-        this.syncPopupState(popupCfg.defaultOpen === true);
+        if (stripMode) {
+            this.syncLauncherStripPin(false);
+            if (expandDrag) {
+                this.applyLauncherExpandSize(0, false);
+            }
+        } else {
+            this.syncPopupState(popupCfg.defaultOpen === true);
+        }
     },
 
     initLauncherGlyphTracking() {
@@ -302,6 +581,45 @@ const ActionWarehouse = {
         };
 
         document.addEventListener('pointermove', this._launcherPointerBound, { passive: true });
+
+        if (this.isLauncherStripMode() && this.launcherWrapElement) {
+            const syncGlyph = () => {
+                const pt = this._launcherPointerXY || {
+                    x: window.innerWidth * 0.5,
+                    y: window.innerHeight * 0.5
+                };
+                this.updateLauncherGlyphRotation(pt.x, pt.y);
+            };
+            this.launcherWrapElement.addEventListener('mouseenter', syncGlyph);
+            this.launcherWrapElement.addEventListener('mouseleave', syncGlyph);
+
+            if (!this.isLauncherExpandDragMode()) {
+                const syncPeek = () => {
+                    requestAnimationFrame(() => {
+                        this.syncLauncherStripPeek();
+                        requestAnimationFrame(() => this.syncLauncherStripPeek());
+                    });
+                };
+                this.launcherWrapElement.addEventListener('mouseenter', syncPeek);
+                this.launcherWrapElement.addEventListener('mouseleave', () => {
+                    this.syncLauncherStripPeek();
+                });
+                this.launcherWrapElement.addEventListener('transitionend', (e) => {
+                    if (e.propertyName === 'width' || e.propertyName === 'height') {
+                        this.syncLauncherStripPeek();
+                    }
+                });
+                this._launcherStripPeekResizeBound = () => this.syncLauncherStripPeek();
+                window.addEventListener('resize', this._launcherStripPeekResizeBound, { passive: true });
+                this._launcherStripPeekObserver = new ResizeObserver(() => {
+                    if (!this.launcherStripPinned && this.launcherWrapElement?.matches(':hover')) {
+                        this.syncLauncherStripPeek();
+                    }
+                });
+                this._launcherStripPeekObserver.observe(this.launcherWrapElement);
+            }
+        }
+
         this.updateLauncherGlyphRotation(window.innerWidth * 0.5, window.innerHeight * 0.5);
     },
 
@@ -310,15 +628,261 @@ const ActionWarehouse = {
         const anchor = this.launcherElement;
         if (!glyph || !anchor) return;
 
+        const popupCfg = CONFIG.warehouse?.popup;
+        const baseDeg = popupCfg?.launcherArrowBaseDeg ?? -90;
+
+        if (this.isLauncherStripMode() && this.launcherWrapElement) {
+            const hovered = this.launcherWrapElement.matches(':hover');
+            const open = this.launcherStripPinned ||
+                this.launcherExpandDragState ||
+                (this.launcherExpandProgress ?? 0) > 0;
+            if (this.isLauncherExpandDragMode()) {
+                const retracting = this.launcherStripPinned ||
+                    (this.launcherExpandDragState?.startProgress ?? 0) >= 1 ||
+                    (this.launcherExpandProgress ?? 0) >= 0.92;
+                if (retracting && (hovered || open)) {
+                    glyph.style.transform = `rotate(${this.getLauncherExpandRetractArrowDeg()}deg)`;
+                    return;
+                }
+                if (hovered || open) {
+                    glyph.style.transform = `rotate(${this.getLauncherExpandRailArrowDeg()}deg)`;
+                    return;
+                }
+            } else if (this.launcherStripPinned || hovered) {
+                glyph.style.transform = `rotate(${popupCfg?.launcherArrowHoverDeg ?? -90}deg)`;
+                return;
+            }
+        }
+
         const rect = anchor.getBoundingClientRect();
         const cx = rect.left + rect.width / 2;
         const cy = rect.top + rect.height / 2;
         const aimDeg = Math.atan2(clientY - cy, clientX - cx) * (180 / Math.PI);
-        const baseDeg = CONFIG.warehouse?.popup?.launcherArrowBaseDeg ?? -90;
         glyph.style.transform = `rotate(${aimDeg - baseDeg}deg)`;
     },
 
+    syncLauncherStripPin(pinned) {
+        this.launcherStripPinned = !!pinned;
+        document.body.classList.toggle('is-launcher-strip-pinned', this.launcherStripPinned);
+        this.launcherWrapElement?.classList.toggle('is-pinned', this.launcherStripPinned);
+        this.launcherElement?.classList.toggle('is-active', this.launcherStripPinned);
+        this.launcherElement?.setAttribute('aria-expanded', this.launcherStripPinned ? 'true' : 'false');
+        this.launcherWrapElement?.setAttribute(
+            'aria-hidden',
+            this.launcherStripPinned ? 'false' : 'true'
+        );
+        this.launcherMapMountElement?.setAttribute(
+            'aria-hidden',
+            this.launcherStripPinned ? 'false' : 'true'
+        );
+        this.backdropElement?.setAttribute('aria-hidden', this.launcherStripPinned ? 'false' : 'true');
+        const pt = this._launcherPointerXY || {
+            x: window.innerWidth * 0.5,
+            y: window.innerHeight * 0.5
+        };
+        this.updateLauncherGlyphRotation(pt.x, pt.y);
+        if (typeof NavigationMap !== 'undefined' && NavigationMap.mapsPanel) {
+            requestAnimationFrame(() => {
+                NavigationMap._contentDirty = true;
+                NavigationMap.resizeCanvas?.();
+                if (NavigationMap.isMapReady?.()) NavigationMap.scheduleRender?.();
+            });
+        }
+        this.updateScrollReserve();
+        if (!this.isLauncherExpandDragMode()) {
+            this.syncLauncherStripPeek();
+        } else {
+            this.applyLauncherExpandSize(pinned ? 1 : 0, false);
+        }
+    },
+
+    initLauncherExpandDrag() {
+        const launcher = this.launcherElement;
+        const wrap = this.launcherWrapElement;
+        if (!launcher || !wrap) return;
+
+        const clearExpandDragChrome = () => {
+            this.launcherExpandDragState = null;
+            launcher.classList.remove('is-grabbed');
+            wrap.classList.remove('is-expanding');
+            document.body.classList.remove('is-launcher-expanding');
+            if (this._launcherExpandDocPointerBound) {
+                document.removeEventListener('pointermove', this._launcherExpandDocPointerBound);
+                document.removeEventListener('pointerup', this._launcherExpandDocPointerBound);
+                document.removeEventListener('pointercancel', this._launcherExpandDocPointerBound);
+                this._launcherExpandDocPointerBound = null;
+            }
+        };
+
+        const finish = (e) => {
+            const drag = this.launcherExpandDragState;
+            if (!drag || e.pointerId !== drag.pointerId) return;
+            e.preventDefault();
+            this.launcherExpandDragState = null;
+
+            try {
+                launcher.releasePointerCapture(e.pointerId);
+            } catch (_) { /* already released */ }
+
+            clearExpandDragChrome();
+
+            if (!drag.didMove && drag.startProgress >= 1) {
+                const pt = this._launcherPointerXY || { x: e.clientX, y: e.clientY };
+                this.updateLauncherGlyphRotation(pt.x, pt.y);
+                return;
+            }
+
+            const threshold = CONFIG.warehouse?.popup?.launcherStrip?.snapThreshold ?? 0.82;
+            const progress = this.launcherExpandProgress ?? 0;
+
+            this.lockLauncherExpandDismiss();
+            this.suppressLauncherExpandClickBurst();
+
+            if (progress >= threshold) {
+                this.syncLauncherStripPin(true);
+            } else {
+                this.syncLauncherStripPin(false);
+            }
+
+            const pt = this._launcherPointerXY || { x: e.clientX, y: e.clientY };
+            this.updateLauncherGlyphRotation(pt.x, pt.y);
+        };
+
+        const onPointerDown = (e) => {
+            if (e.button !== 0) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (this.dragState) return;
+
+            const bounds = this.getLauncherExpandBounds();
+            const startProgress = this.launcherStripPinned ? 1 : (this.launcherExpandProgress ?? 0);
+
+            this.launcherExpandDragState = {
+                pointerId: e.pointerId,
+                startX: e.clientX,
+                startY: e.clientY,
+                startProgress,
+                bounds,
+                didMove: false
+            };
+
+            launcher.setPointerCapture(e.pointerId);
+            launcher.classList.add('is-grabbed');
+            wrap.classList.add('is-expanding');
+            document.body.classList.add('is-launcher-expanding');
+
+            this._launcherExpandDocPointerBound = (ev) => {
+                const active = this.launcherExpandDragState;
+                if (!active || ev.pointerId !== active.pointerId) return;
+                if (ev.type === 'pointermove') {
+                    this.updateLauncherExpandFromDrag(ev.clientX, ev.clientY);
+                    return;
+                }
+                finish(ev);
+            };
+            document.addEventListener('pointermove', this._launcherExpandDocPointerBound);
+            document.addEventListener('pointerup', this._launcherExpandDocPointerBound);
+            document.addEventListener('pointercancel', this._launcherExpandDocPointerBound);
+
+            this.updateLauncherGlyphRotation(e.clientX, e.clientY);
+        };
+
+        const onLostCapture = (e) => {
+            if (!this.launcherExpandDragState || e.pointerId !== this.launcherExpandDragState.pointerId) return;
+            finish(e);
+        };
+
+        launcher.addEventListener('pointerdown', onPointerDown);
+        launcher.addEventListener('lostpointercapture', onLostCapture);
+    },
+
+    updateLauncherExpandFromDrag(clientX, clientY) {
+        const drag = this.launcherExpandDragState;
+        if (!drag) return;
+
+        const { startX, startY, startProgress, bounds } = drag;
+        if (Math.hypot(clientX - startX, clientY - startY) > 4) {
+            drag.didMove = true;
+        }
+        const rail = this.getLauncherExpandRail(bounds);
+        const travel = (startX - clientX) * rail.ux + (startY - clientY) * rail.uy;
+        const progress = Math.max(0, Math.min(1, startProgress + travel / rail.length));
+
+        this.applyLauncherExpandSize(progress, true);
+        this.updateLauncherGlyphRotation(clientX, clientY);
+    },
+
+    syncLauncherStripPeek() {
+        if (this.isLauncherExpandDragMode()) return;
+        const tray = this.launcherStripTrayElement;
+        const wrap = this.launcherWrapElement;
+        if (!tray || !wrap || !this.isLauncherStripMode()) return;
+
+        const preview = !this.launcherStripPinned && wrap.matches(':hover');
+        wrap.classList.toggle('is-strip-preview', preview);
+
+        const slots = [...tray.querySelectorAll('.block-slot:not(.is-empty)')];
+        slots.forEach((slot) => slot.classList.remove('is-peek-clipped'));
+
+        if (!preview) return;
+
+        const getPeekBounds = () => {
+            const wrapRect = wrap.getBoundingClientRect();
+            const root = getComputedStyle(document.documentElement);
+            const space10 = parseFloat(root.getPropertyValue('--space-10')) || 0;
+            const launcherW = parseFloat(root.getPropertyValue('--warehouse-launcher-width')) || 0;
+            return {
+                left: wrapRect.left + space10,
+                right: wrapRect.right - launcherW - space10
+            };
+        };
+
+        const clipPartialSlots = () => {
+            const { left: peekLeft, right: peekRight } = getPeekBounds();
+            let clipped = false;
+            const ordered = [...slots].sort(
+                (a, b) => a.getBoundingClientRect().left - b.getBoundingClientRect().left
+            );
+
+            for (const slot of ordered) {
+                if (slot.classList.contains('is-peek-clipped')) continue;
+                const rect = slot.getBoundingClientRect();
+                if (rect.width <= 0) continue;
+                const fullyVisible =
+                    rect.left >= peekLeft - 0.5 &&
+                    rect.right <= peekRight + 0.5;
+                if (!fullyVisible) {
+                    slot.classList.add('is-peek-clipped');
+                    clipped = true;
+                }
+            }
+            return clipped;
+        };
+
+        let passes = 0;
+        while (clipPartialSlots() && passes < 4) passes += 1;
+    },
+
+    pinLauncherStrip() {
+        if (!this.isLauncherStripMode() || this.launcherStripPinned) return;
+        this.syncLauncherStripPin(true);
+    },
+
+    unpinLauncherStrip(force = false) {
+        if (!force && this.isLauncherExpandDismissBlocked()) return;
+        if (!this.isLauncherStripMode() || (!this.launcherStripPinned && !(this.launcherExpandProgress ?? 0))) return;
+        const popupCfg = CONFIG.warehouse?.popup;
+        if (!force && this.dragState && popupCfg?.stayOpenWhileDragging) return;
+        this.syncLauncherStripPin(false);
+    },
+
+    toggleLauncherStripPin() {
+        if (this.launcherStripPinned) this.unpinLauncherStrip(true);
+        else this.pinLauncherStrip();
+    },
+
     syncPopupState(open) {
+        if (this.isLauncherStripMode()) return;
         this.popupOpen = !!open;
         document.body.classList.toggle('is-warehouse-popup-open', this.popupOpen);
         this.shellElement?.classList.toggle('is-popup-open', this.popupOpen);
@@ -330,12 +894,22 @@ const ActionWarehouse = {
     },
 
     openPopup() {
-        if (!this.isPopupMode() || this.popupOpen) return;
+        if (!this.isPopupMode()) return;
+        if (this.isLauncherStripMode()) {
+            this.pinLauncherStrip();
+            return;
+        }
+        if (this.popupOpen) return;
         this.syncPopupState(true);
     },
 
     closePopup(force = false) {
-        if (!this.isPopupMode() || !this.popupOpen) return;
+        if (!this.isPopupMode()) return;
+        if (this.isLauncherStripMode()) {
+            this.unpinLauncherStrip(force);
+            return;
+        }
+        if (!this.popupOpen) return;
         const popupCfg = CONFIG.warehouse?.popup;
         if (!force && this.dragState && popupCfg?.stayOpenWhileDragging) return;
         this.syncPopupState(false);
@@ -350,8 +924,9 @@ const ActionWarehouse = {
         const gap = scale(10);
         let chromeTop = window.innerHeight;
 
-        if (this.launcherElement) {
-            chromeTop = Math.min(chromeTop, this.launcherElement.getBoundingClientRect().top);
+        const launcherAnchor = this.launcherWrapElement || this.launcherElement;
+        if (launcherAnchor) {
+            chromeTop = Math.min(chromeTop, launcherAnchor.getBoundingClientRect().top);
         }
 
         const reset = this.resetElement;
@@ -375,8 +950,10 @@ const ActionWarehouse = {
                 getComputedStyle(document.documentElement).getPropertyValue('--space-40')
             ) || 40;
             const size = parseFloat(
+                getComputedStyle(document.documentElement).getPropertyValue('--warehouse-launcher-height')
+            ) || parseFloat(
                 getComputedStyle(document.documentElement).getPropertyValue('--warehouse-launcher-size')
-            ) || 72;
+            ) || 40;
             return Math.ceil(inset + size + gap);
         }
 
@@ -482,10 +1059,13 @@ const ActionWarehouse = {
         }
 
         if (this.isPopupMode() && !this.popupOpen) {
-            const collapsedReserve = level === 1 ? 0 : this.getCollapsedChromeReserve();
+            const pinnedStrip = this.isLauncherStripMode() &&
+                (this.launcherStripPinned || (this.launcherExpandProgress ?? 0) > 0);
+            const collapsedReserve = (level === 1 && !pinnedStrip) ? 0 : this.getCollapsedChromeReserve();
             document.documentElement.style.setProperty('--warehouse-reserve', `${collapsedReserve}px`);
-            if (this.launcherElement) {
-                const launcherH = Math.ceil(this.launcherElement.getBoundingClientRect().height);
+            const launcherAnchor = this.launcherWrapElement || this.launcherElement;
+            if (launcherAnchor) {
+                const launcherH = Math.ceil(launcherAnchor.getBoundingClientRect().height);
                 document.documentElement.style.setProperty('--warehouse-launcher-reserve', `${launcherH}px`);
             }
             return;
@@ -734,6 +1314,7 @@ const ActionWarehouse = {
         requestAnimationFrame(() => this.updateScrollReserve());
         this.captureDockTrayBaseOrder();
         this.updateWarehouseCapacityUI();
+        this.syncLauncherStripPeek();
     },
 
     captureDockTrayBaseOrder() {
@@ -753,9 +1334,8 @@ const ActionWarehouse = {
         this.ensureDockTrayBaseOrder();
         this._dockTrayBaseOrder.forEach(block => {
             const slot = block.slotElement;
-            if (slot?.parentElement === this.trayBlocksElement) {
-                this.trayBlocksElement.appendChild(slot);
-            }
+            if (!slot || !this.isBlockTrayContainer(slot.parentElement)) return;
+            slot.parentElement.appendChild(slot);
         });
     },
 
@@ -765,7 +1345,7 @@ const ActionWarehouse = {
 
         const hasReservedSlot = this._dockTrayBaseOrder.some(block => {
             const slot = block.slotElement;
-            if (!slot || slot.parentElement !== this.trayBlocksElement) return false;
+            if (!slot || !this.isBlockTrayContainer(slot.parentElement)) return false;
             return slot.classList.contains('is-empty') || !!block._dockReserveEl;
         });
         if (hasReservedSlot) {
@@ -779,7 +1359,8 @@ const ActionWarehouse = {
 
         this._dockTrayBaseOrder.forEach(block => {
             const slot = block.slotElement;
-            if (!slot || slot.parentElement !== this.trayBlocksElement) return;
+            if (!slot || !this.isBlockTrayContainer(slot.parentElement)) return;
+            if (this.isLauncherStripMode() && slot.parentElement === this.launcherStripTrayElement) return;
 
             if (!this.isBlockDockedInTray(block)) {
                 away.push(block);
@@ -794,7 +1375,10 @@ const ActionWarehouse = {
         });
 
         [...relevant, ...irrelevant, ...away].forEach(block => {
-            this.trayBlocksElement.appendChild(block.slotElement);
+            const parent = block.slotElement?.parentElement;
+            if (!parent || !this.isBlockTrayContainer(parent)) return;
+            if (this.isLauncherStripMode() && parent === this.launcherStripTrayElement) return;
+            parent.appendChild(block.slotElement);
         });
 
         if (this.trayScrollElement) {
@@ -832,7 +1416,8 @@ const ActionWarehouse = {
             : `<span class="block-label">${label}</span>`;
         el.innerHTML = isTypology ? typologyHTML : `${glyphHTML}${typologyHTML}`;
         slot.appendChild(el);
-        this.trayBlocksElement.appendChild(slot);
+        const trayParent = this.getBlockTrayParent(def);
+        if (trayParent) trayParent.appendChild(slot);
 
         const block = {
             type: def.type || 'tag',
@@ -1563,6 +2148,11 @@ const ActionWarehouse = {
     startDrag(block, e) {
         const depthUi = this.isDepthUiLevel();
         if (this.dragState || (!depthUi && DepthController.currentLevel !== 1)) return;
+        if (this.isLauncherStripMode() &&
+            block.slotElement?.parentElement === this.launcherStripTrayElement &&
+            !this.launcherStripPinned) {
+            return;
+        }
         if (typeof DepthTransitionOrchestrator !== 'undefined' &&
             DepthTransitionOrchestrator.isRunning()) {
             return;
@@ -2348,6 +2938,9 @@ const ActionWarehouse = {
             this.shouldUseCooccurrenceDockMute();
         if (this.dockElement) {
             this.dockElement.classList.toggle('is-capture-full', full && !suppressFullGray);
+        }
+        if (this.launcherWrapElement) {
+            this.launcherWrapElement.classList.toggle('is-capture-full', full && !suppressFullGray);
         }
         this.renderWarehouseStatistics();
     },

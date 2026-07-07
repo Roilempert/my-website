@@ -350,6 +350,9 @@ Object.assign(ActionWarehouse, {
         if (this.dockElement) {
             this.dockElement.classList.toggle('is-cooccurrence-filter', useCooccurrence);
         }
+        if (this.launcherWrapElement) {
+            this.launcherWrapElement.classList.toggle('is-cooccurrence-filter', useCooccurrence);
+        }
 
         if (!useCooccurrence) {
             this.blocks.forEach(block => {

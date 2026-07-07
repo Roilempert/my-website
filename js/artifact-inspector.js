@@ -123,6 +123,9 @@ const ArtifactInspector = {
         this._openFocusVisualWidth = firstCard.width * (8 / 6);
 
         SpatialNavigation.pause();
+        if (typeof NavigationMap !== 'undefined' && NavigationMap.syncActiveState) {
+            NavigationMap.syncActiveState(DepthController.currentLevel);
+        }
 
         this.panel.innerHTML = this.buildFocusHTML(item);
         this.panel.setAttribute('aria-hidden', 'false');
@@ -818,5 +821,8 @@ const ArtifactInspector = {
         this.activeElement = null;
         this.mode = null;
         SpatialNavigation.resume();
+        if (typeof NavigationMap !== 'undefined' && NavigationMap.syncActiveState) {
+            NavigationMap.syncActiveState(DepthController.currentLevel);
+        }
     }
 };

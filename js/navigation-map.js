@@ -243,26 +243,37 @@ const NavigationMap = {
         layersPanel.addEventListener('pointerdown', (e) => e.stopPropagation());
         layersPanel.addEventListener('click', (e) => e.stopPropagation());
 
-        const mapsPanel = document.createElement('aside');
-        mapsPanel.id = 'site-navigation-maps';
-        mapsPanel.className = 'site-navigation-maps';
-        mapsPanel.dataset.siteLayer = 'navigationMaps';
-        mapsPanel.setAttribute('aria-label', 'מפת ניווט');
+        const mapEnabled = typeof isWarehouseLauncherMapEnabled === 'function'
+            ? isWarehouseLauncherMapEnabled()
+            : true;
 
-        const mapWrap = document.createElement('div');
-        mapWrap.className = 'site-navigation-maps__map-wrap';
+        let mapsPanel = null;
+        let mapWrap = null;
+        let canvas = null;
+        let viewportMarker = null;
 
-        const canvas = document.createElement('canvas');
-        canvas.className = 'site-navigation-maps__map';
-        canvas.setAttribute('aria-hidden', 'true');
+        if (mapEnabled) {
+            mapsPanel = document.createElement('aside');
+            mapsPanel.id = 'site-navigation-maps';
+            mapsPanel.className = 'site-navigation-maps';
+            mapsPanel.dataset.siteLayer = 'navigationMaps';
+            mapsPanel.setAttribute('aria-label', 'מפת ניווט');
 
-        const viewportMarker = document.createElement('div');
-        viewportMarker.className = 'site-navigation-maps__viewport-marker is-hidden';
-        viewportMarker.setAttribute('aria-hidden', 'true');
+            mapWrap = document.createElement('div');
+            mapWrap.className = 'site-navigation-maps__map-wrap';
 
-        mapWrap.appendChild(canvas);
-        mapWrap.appendChild(viewportMarker);
-        mapsPanel.appendChild(mapWrap);
+            canvas = document.createElement('canvas');
+            canvas.className = 'site-navigation-maps__map';
+            canvas.setAttribute('aria-hidden', 'true');
+
+            viewportMarker = document.createElement('div');
+            viewportMarker.className = 'site-navigation-maps__viewport-marker is-hidden';
+            viewportMarker.setAttribute('aria-hidden', 'true');
+
+            mapWrap.appendChild(canvas);
+            mapWrap.appendChild(viewportMarker);
+            mapsPanel.appendChild(mapWrap);
+        }
 
         const layerLevels = getDepthActiveLevels();
         const toggleMode = CONFIG.layerNavigation?.toggleMode !== false;
@@ -317,17 +328,25 @@ const NavigationMap = {
             layersPanel.appendChild(this.layerMarker);
         }
 
-        mapWrap.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
-        mapWrap.addEventListener('pointermove', (e) => this.handlePointerMove(e));
+        if (mapWrap) {
+            mapWrap.addEventListener('pointerdown', (e) => this.handlePointerDown(e));
+            mapWrap.addEventListener('pointermove', (e) => this.handlePointerMove(e));
+        }
 
         document.body.appendChild(layersPanel);
 
-        const mapMount = document.getElementById('warehouse-map-mount');
-        if (mapMount) {
-            mapMount.appendChild(mapsPanel);
-            mapMount.removeAttribute('aria-hidden');
-        } else {
-            document.body.appendChild(mapsPanel);
+        if (mapsPanel) {
+            const launcherMapMount = document.getElementById('warehouse-launcher-map-mount');
+            const mapMount = document.getElementById('warehouse-map-mount');
+            if (launcherMapMount) {
+                launcherMapMount.appendChild(mapsPanel);
+                launcherMapMount.removeAttribute('aria-hidden');
+            } else if (mapMount) {
+                mapMount.appendChild(mapsPanel);
+                mapMount.removeAttribute('aria-hidden');
+            } else {
+                document.body.appendChild(mapsPanel);
+            }
         }
         document.body.classList.add('has-site-navigation');
 
@@ -338,38 +357,41 @@ const NavigationMap = {
         this.canvas = canvas;
         this._activeLevel = DepthController.currentLevel;
 
-        window.addEventListener('scroll', () => this.schedulePanUpdate(), { passive: true });
-        window.addEventListener('resize', () => {
-            this.syncLayerNavMetrics();
-            if (!this.isMapReady()) return;
-            this._contentDirty = true;
-            this.scheduleRender();
-        });
-
-        this._resizeObserver = new ResizeObserver(() => {
-            if (this._resizeScheduled) return;
-            this._resizeScheduled = true;
-            requestAnimationFrame(() => {
-                this._resizeScheduled = false;
+        if (mapsPanel) {
+            window.addEventListener('scroll', () => this.schedulePanUpdate(), { passive: true });
+            window.addEventListener('resize', () => {
+                this.syncLayerNavMetrics();
+                if (!this.isMapReady()) return;
                 this._contentDirty = true;
-                this._referenceBoundsDirty = true;
-                this._depthMapMarkersDirty = true;
-                this.resizeCanvas();
-                if (this.isMapReady()) {
-                    this.scheduleRender();
-                }
+                this.scheduleRender();
             });
-        });
-        this._resizeObserver.observe(mapsPanel);
+
+            this._resizeObserver = new ResizeObserver(() => {
+                if (this._resizeScheduled) return;
+                this._resizeScheduled = true;
+                requestAnimationFrame(() => {
+                    this._resizeScheduled = false;
+                    this._contentDirty = true;
+                    this._referenceBoundsDirty = true;
+                    this._depthMapMarkersDirty = true;
+                    this.resizeCanvas();
+                    if (this.isMapReady()) {
+                        this.scheduleRender();
+                    }
+                });
+            });
+            this._resizeObserver.observe(mapsPanel);
+
+            this.resizeCanvas();
+        }
 
         this.syncActiveState(this._activeLevel);
-        this.resizeCanvas();
         document.fonts?.ready?.then(() => this.syncLayerNavMetrics());
         requestAnimationFrame(() => this.syncLayerNavMetrics());
     },
 
     isMapReady() {
-        return this._bootComplete === true;
+        return !!this.mapsPanel && this._bootComplete === true;
     },
 
     onBootComplete() {

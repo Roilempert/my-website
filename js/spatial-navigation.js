@@ -308,7 +308,7 @@ const SpatialNavigation = {
         if (!(target instanceof Element)) return true;
         if (ArtifactInspector.isActive) return true;
         if (ActionWarehouse.dragState) return true;
-        return !!target.closest('.warehouse-shell, .action-block, .warehouse-reset, .warehouse-launcher, .warehouse-popup-backdrop, .focus-backdrop.active, .site-navigation-layers, .site-navigation-maps');
+        return !!target.closest('.warehouse-shell, .action-block, .warehouse-reset, .warehouse-launcher, .warehouse-launcher-wrap, .warehouse-popup-backdrop, .focus-backdrop.active, .site-navigation-layers, .site-navigation-maps');
     },
 
     canStartPan(e) {

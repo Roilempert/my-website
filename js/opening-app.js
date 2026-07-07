@@ -1,4 +1,4 @@
-/* opening build 20260707014913 */
+/* opening build 20260707032757 */
 /* ==========================================================================
    Opening Background — L1-style molecules with fold-mirror symmetry
    Tag colors from the data sheet; dots + sibling links + subtle hull outline.
@@ -2190,16 +2190,22 @@ const OpeningScreen = {
     }
 };
 /* ==========================================================================
-   Site About — top-left hover panel (opening + Experience 1)
+   Site About — bottom-center pull-up sheet (opening + Experience 1)
    ========================================================================== */
 const SiteAbout = {
     root: null,
+    backdrop: null,
+    sheet: null,
     trigger: null,
     panel: null,
     isOpen: false,
-    isPinned: false,
-    _closeTimer: null,
-    _closeDelayMs: 120,
+    _progress: 0,
+    _openHeight: 0,
+    _tabHeight: 40,
+    _dragging: false,
+    _dragStartY: 0,
+    _dragStartProgress: 0,
+    _onResize: null,
 
     cfg() {
         return CONFIG.about || {};
@@ -2214,6 +2220,14 @@ const SiteAbout = {
         this.root = document.createElement('div');
         this.root.className = 'site-about';
         this.root.dataset.siteLayer = 'about';
+
+        this.backdrop = document.createElement('div');
+        this.backdrop.className = 'site-about__backdrop focus-backdrop';
+        this.backdrop.setAttribute('aria-hidden', 'true');
+        this.backdrop.addEventListener('click', () => this.close());
+
+        this.sheet = document.createElement('div');
+        this.sheet.className = 'site-about__sheet';
 
         this.trigger = document.createElement('button');
         this.trigger.type = 'button';
@@ -2239,81 +2253,137 @@ const SiteAbout = {
             </section>
         `;
 
-        this.root.appendChild(this.trigger);
-        this.root.appendChild(this.panel);
+        this.sheet.appendChild(this.trigger);
+        this.sheet.appendChild(this.panel);
+        this.root.appendChild(this.backdrop);
+        this.root.appendChild(this.sheet);
         document.body.appendChild(this.root);
 
-        this.root.addEventListener('mouseenter', () => this._onPointerEnter());
-        this.root.addEventListener('mouseleave', () => this._onPointerLeave());
-        this.trigger.addEventListener('click', (e) => this._onTriggerClick(e));
+        this.trigger.addEventListener('pointerdown', (e) => this._onPointerDown(e));
+        this.trigger.addEventListener('pointermove', (e) => this._onPointerMove(e));
+        this.trigger.addEventListener('pointerup', (e) => this._onPointerUp(e));
+        this.trigger.addEventListener('pointercancel', (e) => this._onPointerUp(e));
+        this.trigger.addEventListener('click', (e) => e.preventDefault());
         this.trigger.addEventListener('keydown', (e) => this._onTriggerKeyDown(e));
 
         this._onKeyDown = (e) => {
-            if (e.key === 'Escape' && this.isOpen) {
+            if (e.key === 'Escape' && this._progress > 0) {
                 e.preventDefault();
-                this.close(true);
+                this.close();
             }
         };
         window.addEventListener('keydown', this._onKeyDown);
+
+        this._onResize = () => {
+            const wasOpen = this.isOpen;
+            this._measureOpenHeight();
+            this._measureTabHeight();
+            this._progress = wasOpen ? 1 : 0;
+            this._applyProgress(false);
+        };
+        window.addEventListener('resize', this._onResize);
+
+        requestAnimationFrame(() => {
+            this._measureOpenHeight();
+            this._measureTabHeight();
+            this._applyProgress(false);
+        });
     },
 
-    _clearCloseTimer() {
-        if (this._closeTimer !== null) {
-            clearTimeout(this._closeTimer);
-            this._closeTimer = null;
-        }
+    _measureOpenHeight() {
+        const vh = this.cfg().openHeightVh ?? 65;
+        const maxPx = this.cfg().openMaxPx ?? 640;
+        this._openHeight = Math.round(Math.min(window.innerHeight * (vh / 100), maxPx));
+        this.root?.style.setProperty('--site-about-open-height', `${this._openHeight}px`);
     },
 
-    _onPointerEnter() {
-        this._clearCloseTimer();
-        this.open();
+    _measureTabHeight() {
+        if (!this.trigger) return;
+        const h = Math.ceil(this.trigger.getBoundingClientRect().height);
+        this._tabHeight = h > 0 ? h : 40;
+        this.root?.style.setProperty('--site-about-tab-h', `${this._tabHeight}px`);
+
+        const cols = this.cfg().panelCols ?? 12;
+        this.root?.style.setProperty(
+            '--site-about-panel-width',
+            `calc(${cols} * var(--site-grid-cell-w) + ${Math.max(0, cols - 1)} * var(--site-grid-gap))`
+        );
     },
 
-    _onPointerLeave() {
-        if (this.isPinned) return;
-        this._clearCloseTimer();
-        this._closeTimer = setTimeout(() => {
-            this._closeTimer = null;
-            if (!this.isPinned) this.close();
-        }, this._closeDelayMs);
-    },
-
-    _onTriggerClick(e) {
+    _onPointerDown(e) {
+        if (e.button !== 0) return;
         e.preventDefault();
-        e.stopPropagation();
-        if (this.isPinned && this.isOpen) {
-            this.close(true);
-            return;
-        }
-        this.isPinned = true;
-        this.open();
+        this._dragging = true;
+        this._dragStartY = e.clientY;
+        this._dragStartProgress = this._progress;
+        this.root.classList.add('is-dragging');
+        try {
+            this.trigger.setPointerCapture(e.pointerId);
+        } catch (_) { /* ignore */ }
+    },
+
+    _onPointerMove(e) {
+        if (!this._dragging) return;
+        const travel = this._openHeight || 1;
+        const dy = this._dragStartY - e.clientY;
+        this._progress = Math.min(1, Math.max(0, this._dragStartProgress + dy / travel));
+        this._applyProgress(false);
+    },
+
+    _onPointerUp(e) {
+        if (!this._dragging) return;
+        this._dragging = false;
+        this.root.classList.remove('is-dragging');
+        try {
+            this.trigger.releasePointerCapture(e.pointerId);
+        } catch (_) { /* ignore */ }
+
+        const threshold = this.cfg().snapThreshold ?? 0.35;
+        this._progress = this._progress >= threshold ? 1 : 0;
+        this._applyProgress(true);
     },
 
     _onTriggerKeyDown(e) {
         if (e.key === 'Enter' || e.key === ' ') {
             e.preventDefault();
-            this._onTriggerClick(e);
+            this._progress = this.isOpen ? 0 : 1;
+            this._applyProgress(true);
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            this._progress = 1;
+            this._applyProgress(true);
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            this.close();
         }
     },
 
     open() {
-        if (this.isOpen) return;
-        this.isOpen = true;
-        this.syncState();
+        this._progress = 1;
+        this._applyProgress(true);
     },
 
-    close(unpin = false) {
-        if (unpin) this.isPinned = false;
-        if (!this.isOpen) return;
-        this.isOpen = false;
-        this.syncState();
+    close() {
+        this._progress = 0;
+        this._applyProgress(true);
     },
 
-    syncState() {
-        this.root?.classList.toggle('is-open', this.isOpen);
+    _applyProgress(animate) {
+        if (!this.root) return;
+
+        const lift = this._progress * this._openHeight;
+        this.root.style.setProperty('--site-about-lift', `${lift}px`);
+        this.root.style.setProperty('--site-about-progress', String(this._progress));
+        this.isOpen = this._progress >= 1;
+
+        this.root.classList.toggle('is-open', this.isOpen);
+        this.root.classList.toggle('is-revealed', this._progress > 0);
+        this.root.classList.toggle('is-snap', !!animate);
+
+        this.backdrop?.setAttribute('aria-hidden', this._progress <= 0 ? 'true' : 'false');
         this.trigger?.setAttribute('aria-expanded', this.isOpen ? 'true' : 'false');
-        this.panel?.setAttribute('aria-hidden', this.isOpen ? 'false' : 'true');
-        document.body.classList.toggle('is-site-about-open', this.isOpen);
+        this.panel?.setAttribute('aria-hidden', this._progress <= 0 ? 'true' : 'false');
+        document.body.classList.toggle('is-site-about-open', this._progress > 0);
     }
 };
 document.addEventListener('DOMContentLoaded', () => {

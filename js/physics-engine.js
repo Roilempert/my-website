@@ -73,6 +73,28 @@ const PhysicsEngine = {
         this.renderStepTs = now;
     },
 
+    getBreathingOffset(item) {
+        const cfg = CONFIG.physics?.breathing;
+        if (!cfg?.enabled || !this.isActive || this.transitionFrozen) return null;
+        if (item.isFiltered || item.isFilterExiting) return null;
+
+        let amp = cfg.amplitude ?? scale(1.8);
+        if (item.overrideTarget) {
+            amp *= cfg.capturedScale ?? 0.2;
+        } else if (item.onBankGrid) {
+            amp *= cfg.bankScale ?? 0.65;
+        }
+
+        const t = performance.now() * 0.001;
+        const phase = item.noteIndex * 2.399;
+        const speed = cfg.speed ?? 0.55;
+        const vRatio = cfg.verticalRatio ?? 0.82;
+        return {
+            x: Math.sin(t * speed + phase) * amp,
+            y: Math.cos(t * speed * 0.87 + phase * 1.37) * amp * vRatio
+        };
+    },
+
     getDisplayPosition(item) {
         const body = item.body;
         if (!body) return null;
@@ -100,9 +122,13 @@ const PhysicsEngine = {
 
     getItemDrawPosition(item) {
         const pos = this.getDisplayPosition(item);
-        if (pos) return pos;
-        const body = item.body;
-        return body ? { x: body.position.x, y: body.position.y } : null;
+        if (!pos) {
+            const body = item.body;
+            return body ? { x: body.position.x, y: body.position.y } : null;
+        }
+        const breath = this.getBreathingOffset(item);
+        if (!breath) return pos;
+        return { x: pos.x + breath.x, y: pos.y + breath.y };
     },
 
     init() {
@@ -989,6 +1015,10 @@ const PhysicsEngine = {
         this.linkColor = getComputedStyle(document.documentElement)
             .getPropertyValue(CONFIG.warehouse.linkage.line.cssColorVariable).trim() || '#101010';
 
+        const hoverFillVar = CONFIG.outlines?.hoverFillCssVariable || '--color-6';
+        this.hoverFillColor = getComputedStyle(document.documentElement)
+            .getPropertyValue(hoverFillVar).trim() || '#E6E0DA';
+
         this.resizeLinkCanvas();
     },
 
@@ -1106,6 +1136,29 @@ const PhysicsEngine = {
         return cfg.renderPadding ?? cfg.padding;
     },
 
+    getDotFillColor(element) {
+        if (!element) return this.linkColor;
+
+        const raw = element.style.getPropertyValue('--dot-bg').trim()
+            || getComputedStyle(element).getPropertyValue('--dot-bg').trim();
+        if (raw) {
+            if (/^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.test(raw)) return raw;
+            if (raw.startsWith('rgb')) return raw;
+
+            const varName = raw.match(/var\(\s*(--[^,)]+)/)?.[1];
+            if (varName) {
+                const resolved = getComputedStyle(document.documentElement)
+                    .getPropertyValue(varName).trim();
+                if (resolved) return resolved;
+            }
+            return raw;
+        }
+
+        const bg = getComputedStyle(element).backgroundColor;
+        if (bg && bg !== 'rgba(0, 0, 0, 0)' && bg !== 'transparent') return bg;
+        return this.linkColor;
+    },
+
     collectNoteOutlineGroups() {
         const scrollX = window.pageXOffset;
         const scrollY = window.pageYOffset;
@@ -1120,7 +1173,8 @@ const PhysicsEngine = {
             groups.get(item.noteIndex).push({
                 x: pos.x - scrollX,
                 y: pos.y - scrollY,
-                r: dotR
+                r: dotR,
+                color: this.getDotFillColor(item.element)
             });
         });
 
@@ -1174,6 +1228,32 @@ const PhysicsEngine = {
         ctx.restore();
     },
 
+    drawNoteHoverFills() {
+        const noteIndex = this.hoveredNoteIndex;
+        if (noteIndex < 0) return;
+
+        const cfg = CONFIG.outlines;
+        if (cfg.mode === 'off' || this.bodiesData.length === 0) return;
+        if (!this.linkCtx) return;
+        if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
+
+        const groups = this.collectNoteOutlineGroups();
+        const pts = groups.get(noteIndex);
+        if (!pts?.length) return;
+        if (this.shouldCullOutlineGroup(pts)) return;
+
+        const R = pts[0].r + this.getOutlineRenderPadding();
+        const useHull = cfg.mode === 'hull' ||
+                       (cfg.mode === 'compare' && noteIndex % 2 === 0);
+        if (!useHull) return;
+
+        const ctx = this.linkCtx;
+        ctx.save();
+        ctx.fillStyle = this.hoverFillColor;
+        this.fillHullOutline(pts, R, ctx);
+        ctx.restore();
+    },
+
     drawNoteOutlines() {
         const cfg = CONFIG.outlines;
         if (cfg.mode === 'off' || this.bodiesData.length === 0) return;
@@ -1187,8 +1267,6 @@ const PhysicsEngine = {
             if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
             if (this.shouldCullOutlineGroup(pts)) return;
 
-            const isHover = noteIndex === this.hoveredNoteIndex;
-            ctx.lineWidth = isHover ? (cfg.hoverWidth ?? cfg.width * 2.5) : cfg.width;
             const R = pts[0].r + this.getOutlineRenderPadding();
             const useHull = cfg.mode === 'hull' ||
                            (cfg.mode === 'compare' && noteIndex % 2 === 0);
@@ -1459,7 +1537,7 @@ const PhysicsEngine = {
             const origin = this.getLiveWrapperOrigin(item.noteIndex, wrapperOrigins);
             if (!origin) return;
 
-            const pos = this.getDisplayPosition(item);
+            const pos = this.getItemDrawPosition(item);
             if (!pos) return;
 
             const dx = pos.x - origin.x;
@@ -1507,6 +1585,7 @@ const PhysicsEngine = {
 
         if (macroVisualActive) {
             this.drawNoteBackings();
+            this.drawNoteHoverFills();
             this.drawSiblingLinks();
             if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
                 DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
@@ -1524,6 +1603,7 @@ const PhysicsEngine = {
         if (!this.linkCtx) return;
         this.linkCtx.clearRect(0, 0, window.innerWidth, window.innerHeight);
         this.drawNoteBackings();
+        this.drawNoteHoverFills();
         this.drawSiblingLinks();
         if (typeof DepthFocusLinks !== 'undefined' && DepthFocusLinks.shouldDrawMacro()) {
             DepthFocusLinks.drawMacro(this.linkCtx, this.bodiesData);
@@ -1543,8 +1623,10 @@ const PhysicsEngine = {
 
         this.bodiesData.forEach(item => {
             if (item.noteIndex !== noteIndex) return;
-            const x = item.body.position.x - scrollX;
-            const y = item.body.position.y - scrollY;
+            const drawPos = this.getItemDrawPosition(item);
+            if (!drawPos) return;
+            const x = drawPos.x - scrollX;
+            const y = drawPos.y - scrollY;
             minX = Math.min(minX, x - pad);
             minY = Math.min(minY, y - pad);
             maxX = Math.max(maxX, x + pad);
@@ -1592,7 +1674,7 @@ const PhysicsEngine = {
             return false;
         }
         const target = e?.target;
-        if (target?.closest?.('.warehouse-shell, .action-block, .action-warehouse, .warehouse-launcher, .warehouse-reset, .warehouse-popup-backdrop, .depth-block-bar')) return false;
+        if (target?.closest?.('.warehouse-shell, .action-block, .action-warehouse, .warehouse-launcher, .warehouse-launcher-wrap, .warehouse-reset, .warehouse-popup-backdrop, .depth-block-bar')) return false;
         if (typeof isPointOverWarehouseChrome === 'function' &&
             isPointOverWarehouseChrome(e.clientX, e.clientY)) {
             return false;

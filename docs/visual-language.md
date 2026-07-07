@@ -118,6 +118,18 @@ Config: `CONFIG.opening` in `js/config.js`. Module: `js/opening-screen.js`.
 
 **Popup mode (default):** The full dock is **hidden during roaming**. A bottom-right square launcher (`.warehouse-launcher`, color **6**, **5px** radius, **2×** scale) opens the warehouse as a slide-up panel — **40px** from right/bottom; **`arrow.svg`** glyph (color **3**, tracks pointer) centered inside. Active/open: square fill **3**, arrow **1**. Accessible label **כלים** via `aria-label`. Minimap lives inside the popup only — full canvas height when closed. **No screen dimming** when open — transparent backdrop for click-outside dismiss only. **נקה לוח** and L2 deployed block pills stay visible above the launcher when active. Popup stays open while dragging blocks. Close: launcher toggle, Escape, or click outside the panel. Config: `CONFIG.warehouse.popup`.
 
+**Expand-drag launcher (active):** `CONFIG.warehouse.popup.launcherStrip.expandDrag: true` — window-style resize from the bottom-right corner:
+- **Default:** same **80×40** outer shell (color **6**); inner pill (`.warehouse-launcher__pill`, color **3**) with arrow glyph (color **6**); arrow tracks pointer
+- **Hover:** arrow points along the expand **rail** (tilt derived from 12×6 growth ratio)
+- **Open:** drag the color-3 pill along the expand rail until **12 cols × 6 rows**, then snap; handle rests **top-left**; blocks fill to the right edge; arrow points **bottom-right** (retract)
+- **While dragging:** map + blocks clip-reveal inside the growing panel; blocks muted until fully snapped
+- **Close:** drag the pill back along the rail, **click** the arrow button, click outside, or Escape
+- Full panel: minimap (left, below handle) + tag blocks (scroll, full width right) + launcher handle (top-left when open)
+
+**Legacy launcher strip** (`expandDrag: false`): hover peek + click pin — see changelog.
+
+**Blocks-only dock (dev layout):** Set all `CONFIG.warehouse.dock.panels` except the implicit block tray to `false` (`statistics`, `message`, `map`) — body gets `is-warehouse-dock-blocks-only`; only the block tray panel remains inside the shell. Map init is skipped when `panels.map: false`.
+
 **Always-visible layout (legacy):** Set `CONFIG.warehouse.popup.enabled: false` to restore the fixed bottom dock.
 
 - **Shell:** **2 rows** high, cols 1–24 inside padding; transparent outer wrapper with **4 corner decorations** (5×5, color 3, static).
@@ -184,7 +196,8 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 
 ### L1 molecule hover
 
-- Hull outline thickens on hover (`body.is-molecule-hover`)
+- Hull outline **0.4pt** (`CONFIG.outlines.width`); on hover the hull **fills with color 6** (`--color-6`; canvas layer behind DOM dots; `body.is-molecule-hover`)
+- **Idle breathing:** whole-molecule visual drift (`CONFIG.physics.breathing`) — sine offset on draw positions only; physics bodies unchanged; quieter when captured or on bank grid
 - **Title mode** (`moleculeHoverMode: 'title'` — current default): floating `.molecule-hover-title` pinned on hover start at fixed viewport coords; **10px** (`var(--space-10)`) above/outside the hull top corner (RTL `maxX` / LTR `minX`); does not track molecule motion after pin; **truncation rule** (no ellipsis): first title line only (body fallback) → phrase clip within **8 words** (prefer sentence `.!?…`, else clause `,;:—`) → pixel-fit to `.note-h` at `min(28rem, 42vw)` whole words only; `.note-h` scale, transparent background
 - **Blocks / mixed modes** (optional): same floating label with attached-block pill row via `MicroMock.buildTagsRowHTML`; config: `moleculeHoverMode`, `moleculeHoverBlocksPercent`, `moleculeHoverBlocksPerRow`, `moleculeHoverBlocksSingleRowMax`
 - Warehouse hover port (`.warehouse-hover-port`) remains in the message band but is unused for L1 hover
@@ -199,8 +212,7 @@ Single **destination toggle** — one button shows the *other* depth level (not 
 | On L1 | color 3 fill, color 6 symbol, 10px pad, 5px radius | **L2** text blocks · **4.5rem** |
 | On L2 | same | **L1** 6-dot molecule (`layer-nav-molecule-6.svg`) · **4.5rem** |
 
-- **40px** from viewport right edge → `2.5rem`
-- Anchored to shell row 4 at 75% vertical guide
+- **20px** from viewport right and top edges → `var(--space-20)` (`CONFIG.layerNavigation.rightInset`, `toggleTopInset`)
 - Hover: label shifts left 20px (`var(--space-20)`)
 - `CONFIG.layerNavigation.toggleMode: true` — legacy two-stack + spine marker when `false`
 
@@ -275,6 +287,13 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-07 | About sheet: panel matches tab width — single column shape on pull-up; square seam at tab join when open |
+| 2026-07-07 | About sheet: tab + panel move together on pull-up; backdrop darkens like focus popup (`color-3` @ 20%, scales with drag) |
+| 2026-07-07 | About panel: bottom-center pull-up sheet — tab flush to viewport bottom (top corners 5px, bottom 0); drag up to reveal; snap at 35% |
+| 2026-07-07 | Layer navigation toggle inset **40px → 20px** from viewport right and top (`--space-20`) |
+| 2026-07-07 | L1 idle molecule breathing — visual-only sine drift (`CONFIG.physics.breathing`); physics/collision unchanged |
+| 2026-07-07 | L1 molecule hull outline **0.4pt**; hover fills hull with **color 6** (`--color-6`) behind DOM dots instead of thickening stroke |
+| 2026-07-07 | About trigger: color-6 box, `--space-10` padding, 5px radius; hover/open invert to color-3 fill |
 | 2026-07-07 | Layer nav L1 destination icon uses `layer-nav-molecule-6.svg` (loaded from assets) |
 | 2026-07-07 | Added `layer-nav-molecule-6.svg` — 6-dot molecule paste template with reference guide layer |
 | 2026-07-07 | Layer navigation: single destination toggle — on L1 show L2 blocks icon, on L2 show L1 molecule icon; spine marker hidden |
@@ -284,6 +303,12 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 | 2026-07-07 | Depth naming: two navigable levels documented as **L1** (macro) and **L2** (micro); code still uses level index `3` for micro |
 | 2026-07-07 | Layer navigation: Hebrew labels replaced with symbols — molecule (L1) and text blocks (L2); active 4.5rem / inactive 3.25rem icon toggle stack |
 | 2026-07-07 | Warehouse launcher pill width set to 1.5× block unit |
+| 2026-07-07 | Warehouse launcher: **80×40px** pill (`launcherSize`); panel height matches; arrow rotates left on hover/pin |
+| 2026-07-07 | Launcher expand-drag: color-3 pill handle, color-6 arrow; drag up-left to 12×6 snap; hover arrow top-left |
+| 2026-07-07 | Launcher strip hover: muted preview only (whole blocks, no drag); pin restores default; hidden scrollbar |
+| 2026-07-07 | Launcher strip pin: 3-row × 8-col block panel + 4-col minimap; hover stays thin peek; no color change on pin |
+| 2026-07-07 | Launcher strip: hover expands left 6 cols with tag row; click pins; outside/Escape unpins (`CONFIG.warehouse.popup.launcherStrip`) |
+| 2026-07-07 | Dock blocks-only mode: `CONFIG.warehouse.dock.panels` toggles statistics/message/map; tray fills shell (`is-warehouse-dock-blocks-only`) |
 | 2026-07-07 | Warehouse launcher: pill width ×3; `arrow.svg` tracks pointer (rotate toward mouse) |
 | 2026-07-07 | Warehouse launcher shell: hugs pill with 5px padding (no forced square) |
 | 2026-07-07 | Warehouse launcher glyph: `assets/ui/arrow.svg` replaces ^ character (color-1 mask on block pill) |

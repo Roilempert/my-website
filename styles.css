@@ -75,7 +75,7 @@
     --site-type-line: var(--type-ui-line);
 
     --layer-nav-gap: var(--space-10);
-    --layer-nav-right-inset: var(--space-40);
+    --layer-nav-right-inset: var(--space-20);
     --layer-nav-box-pad-x: var(--space-10);
     --layer-nav-box-pad-y-top: calc(var(--space-10) - 4px);
     --layer-nav-box-pad-y-bottom: calc(var(--space-10) + 4px);
@@ -281,6 +281,7 @@ body.view-level-3 .site-grid-cross {
 body.has-site-grain-displace.view-level-1 #app,
 body.has-site-grain-displace.view-level-1 .warehouse-shell,
 body.has-site-grain-displace.view-level-1 .warehouse-launcher,
+body.has-site-grain-displace.view-level-1 .warehouse-launcher-wrap,
 body.has-site-grain-displace.view-level-1 .site-navigation-layers,
 body.has-site-grain-displace.view-level-1 .link-canvas,
 body.has-site-grain-displace.view-level-1 .depth-block-bar,
@@ -288,6 +289,7 @@ body.has-site-grain-displace.view-level-1 .molecule-hover-title.is-visible,
 body.has-site-grain-displace.view-level-3 #app,
 body.has-site-grain-displace.view-level-3 .warehouse-shell,
 body.has-site-grain-displace.view-level-3 .warehouse-launcher,
+body.has-site-grain-displace.view-level-3 .warehouse-launcher-wrap,
 body.has-site-grain-displace.view-level-3 .site-navigation-layers,
 body.has-site-grain-displace.view-level-3 .link-canvas,
 body.has-site-grain-displace.view-level-3 .depth-block-bar,
@@ -1198,7 +1200,7 @@ body.view-level-3 .layer-dot {
 @font-face {
     font-family: "NarkissYairMono";
     font-weight: 400;
-    src: url("assets/fonts/NarkissYair-BoldMono-TRIAL.woff2") format("woff2");
+    src: url("assets/fonts/NarkissYair-RegularMono-TRIAL.woff2") format("woff2");
 }
 
 @font-face {
@@ -1963,89 +1965,128 @@ body.is-depth-v2.view-level-2 .link-canvas {
 }
 
 /* ==========================================================================
-   06a. SITE ABOUT — top hover panel (4th shell col from left)
+   06a. SITE ABOUT — bottom-center pull-up sheet
    ========================================================================== */
 
 .site-about {
     position: fixed;
-    top: var(--site-grid-padding);
-    left: var(--site-grid-padding);
-    z-index: 935;
+    inset: 0;
+    z-index: 1000;
     pointer-events: none;
     box-sizing: border-box;
-}
-
-body.site-grid .site-about {
-    left: var(--site-layer-about-left);
-    transform: none;
 }
 
 body.opening-page .site-about {
     z-index: 11010;
 }
 
-.site-about__trigger {
+.site-about__backdrop {
+    position: fixed;
+    inset: 0;
     display: block;
-    margin: 0;
-    padding: 0;
-    border: none;
-    background: none;
-    color: var(--color-4);
+    background: color-mix(in srgb, var(--color-3) 20%, transparent);
+    opacity: 0;
+    pointer-events: none;
     cursor: pointer;
+    transition: opacity 0.32s ease;
+}
+
+.site-about.is-revealed .site-about__backdrop {
+    opacity: var(--site-about-progress, 0);
     pointer-events: auto;
-    text-align: start;
-    transition: color var(--transition-fast);
+}
+
+.site-about.is-dragging .site-about__backdrop {
+    transition: none;
+}
+
+.site-about__sheet {
+    position: fixed;
+    top: calc(100vh - var(--site-about-tab-h, 2.5rem));
+    left: 50%;
+    display: inline-grid;
+    grid-template-columns: minmax(0, max-content);
+    width: max-content;
+    max-width: min(92vw, calc(6 * var(--site-grid-cell-w) + 5 * var(--site-grid-gap)));
+    transform: translateX(-50%) translateY(calc(-1 * var(--site-about-lift, 0px)));
+    pointer-events: auto;
+    transition: transform 0.32s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+.site-about.is-dragging .site-about__sheet {
+    transition: none;
+}
+
+.site-about__trigger {
+    grid-row: 1;
+    display: block;
+    flex-shrink: 0;
+    margin: 0;
+    padding: var(--space-10);
+    border: none;
+    border-radius: var(--warehouse-radius, 0.3125rem) var(--warehouse-radius, 0.3125rem) 0 0;
+    background: var(--color-6);
+    color: var(--color-3);
+    cursor: grab;
+    touch-action: none;
+    user-select: none;
+    text-align: center;
+    line-height: 1;
+    box-sizing: border-box;
+    width: max-content;
+    transition:
+        color var(--transition-fast),
+        background-color var(--transition-fast);
+}
+
+.site-about.is-dragging .site-about__trigger {
+    cursor: grabbing;
 }
 
 .site-about__trigger:hover,
 .site-about__trigger:focus-visible {
-    color: var(--color-3);
+    background: var(--color-3);
+    color: var(--color-6);
     outline: none;
 }
 
-.site-about.is-open .site-about__trigger {
-    color: var(--color-3);
+.site-about.is-open .site-about__trigger,
+.site-about.is-revealed .site-about__trigger {
+    background: var(--color-3);
+    color: var(--color-6);
+    border-radius: 0;
 }
 
 .site-about__panel {
-    position: absolute;
-    left: 0;
-    right: auto;
-    top: calc(1rem + var(--space-10));
-    width: calc(6 * var(--site-grid-cell-w) + 5 * var(--site-grid-gap));
-    max-width: min(92vw, calc(6 * var(--site-grid-cell-w) + 5 * var(--site-grid-gap)));
-    max-height: calc(100vh - 2 * var(--site-grid-padding) - 3rem);
+    grid-row: 2;
+    width: 100%;
+    min-width: 0;
+    height: var(--site-about-open-height, 0px);
+    overflow: hidden;
+    pointer-events: none;
+    box-sizing: border-box;
+}
+
+.site-about.is-revealed .site-about__panel {
+    pointer-events: auto;
+}
+
+.site-about.is-open .site-about__panel {
     overflow-x: hidden;
     overflow-y: auto;
     -webkit-overflow-scrolling: touch;
     overscroll-behavior: contain;
-    opacity: 0;
-    visibility: hidden;
-    pointer-events: none;
-    transition:
-        opacity 0.22s ease,
-        visibility 0.22s ease;
-}
-
-.site-about.is-open .site-about__panel {
-    opacity: 1;
-    visibility: visible;
-    pointer-events: auto;
-}
-
-/* Invisible bridge — keep hover alive between trigger and panel */
-.site-about.is-open .site-about__panel::before {
-    content: '';
-    position: absolute;
-    left: 0;
-    right: 0;
-    bottom: 100%;
-    height: calc(var(--space-10) + 0.25rem);
-    pointer-events: auto;
 }
 
 .site-about__metadata {
     margin-top: 0;
+    min-height: 100%;
+    width: 100%;
+    max-width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+    border-radius: var(--warehouse-radius, 0.3125rem) var(--warehouse-radius, 0.3125rem) 0 0;
     --inspector-metadata-pad-x: calc(var(--site-grid-gap) * 2);
 }
 
@@ -2118,6 +2159,7 @@ body.view-level-3 .site-navigation-layers.is-dimmed {
     padding: var(--layer-nav-toggle-pad);
     border-radius: var(--layer-nav-toggle-radius);
     box-sizing: border-box;
+    transition: color 0.16s ease, background-color 0.16s ease;
 }
 
 .site-navigation-layers--toggle .site-navigation-layers__toggle .site-navigation-layers__label-symbol {
@@ -2152,6 +2194,7 @@ body.view-level-3 .site-navigation-layers.is-dimmed {
 .site-navigation-layers--toggle .site-navigation-layers__toggle:not(:disabled):hover .site-navigation-layers__label {
     color: var(--color-6);
     background: var(--color-3);
+    border-radius: var(--layer-nav-toggle-radius);
     transform: none;
 }
 
@@ -2163,6 +2206,7 @@ body.view-level-3 .site-navigation-layers.is-dimmed {
 .site-navigation-layers--toggle .site-navigation-layers__toggle.is-active:not(:disabled):hover .site-navigation-layers__label {
     color: var(--color-6);
     background: var(--color-3);
+    border-radius: var(--layer-nav-toggle-radius);
 }
 
 .site-navigation-layers--toggle .site-navigation-layers__title {
@@ -2171,7 +2215,7 @@ body.view-level-3 .site-navigation-layers.is-dimmed {
 
 .site-navigation-layers__title {
     position: fixed;
-    right: var(--layer-nav-right-inset, 2.5rem);
+    right: var(--layer-nav-right-inset, var(--space-20));
     left: auto;
     width: max-content;
     max-width: calc(100vw - 2 * var(--site-grid-padding));
@@ -2249,7 +2293,7 @@ body.view-level-3 .site-navigation-layers.is-dimmed {
 .site-navigation-layers__marker {
     position: fixed;
     right: auto;
-    left: calc(100vw - var(--layer-nav-right-inset, 2.5rem) + var(--layer-nav-marker-gap, 0.625rem));
+    left: calc(100vw - var(--layer-nav-right-inset, var(--space-20)) + var(--layer-nav-marker-gap, 0.625rem));
     top: var(--layer-nav-marker-top, var(--layer-nav-slot-base-top));
     transform: none;
     width: auto;
@@ -2517,13 +2561,12 @@ body.view-level-3 .site-navigation-maps.is-inspector-dimmed {
 
 /* Popup mode — collapsed by default; launcher opens full dock */
 :root {
-    --warehouse-launcher-scale: 2;
+    --warehouse-launcher-width: 80px;
+    --warehouse-launcher-height: 40px;
+    --warehouse-launcher-size: var(--warehouse-launcher-height);
+    --warehouse-launcher-radius: calc(var(--warehouse-launcher-height) / 2);
     --warehouse-launcher-reserve: 3rem;
-    --warehouse-launcher-pad: calc(var(--space-5) * var(--warehouse-launcher-scale));
-    --warehouse-launcher-size: calc(
-        var(--block-height, 26px) * var(--warehouse-launcher-scale) +
-        2 * var(--warehouse-launcher-pad)
-    );
+    --warehouse-launcher-pad: var(--space-5);
 }
 
 .warehouse-launcher {
@@ -2536,11 +2579,11 @@ body.view-level-3 .site-navigation-maps.is-inspector-dimmed {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: var(--warehouse-launcher-size);
-    height: var(--warehouse-launcher-size);
+    width: var(--warehouse-launcher-width);
+    height: var(--warehouse-launcher-height);
     padding: var(--warehouse-launcher-pad);
     border: none;
-    border-radius: calc(var(--space-5) * var(--warehouse-launcher-scale));
+    border-radius: var(--warehouse-launcher-radius);
     background-color: var(--color-6);
     line-height: 1;
     cursor: pointer;
@@ -2553,7 +2596,7 @@ body.view-level-3 .site-navigation-maps.is-inspector-dimmed {
 .warehouse-launcher__glyph {
     display: block;
     flex-shrink: 0;
-    height: calc(var(--block-height, 26px) * 0.29 * var(--warehouse-launcher-scale));
+    height: calc(var(--warehouse-launcher-height) * 0.29);
     width: auto;
     aspect-ratio: 17.71 / 11.65;
     background-color: var(--color-3);
@@ -2562,6 +2605,7 @@ body.view-level-3 .site-navigation-maps.is-inspector-dimmed {
     transform-origin: center center;
     will-change: transform;
     pointer-events: none;
+    transition: transform 0.28s cubic-bezier(0.25, 1, 0.5, 1);
 }
 
 .warehouse-launcher:hover {
@@ -2574,6 +2618,391 @@ body.view-level-3 .site-navigation-maps.is-inspector-dimmed {
 
 .warehouse-launcher.is-active .warehouse-launcher__glyph {
     background-color: var(--color-1);
+}
+
+/* Launcher strip mode — hover peek (thin strip); click pin opens full panel + map */
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-wrap {
+    position: fixed;
+    right: var(--space-40);
+    bottom: var(--space-40);
+    left: auto;
+    z-index: 905;
+    direction: ltr;
+    width: var(--warehouse-launcher-width);
+    height: var(--warehouse-launcher-height);
+    max-width: calc(100vw - 2 * var(--space-40));
+    padding: 0;
+    box-sizing: border-box;
+    overflow: hidden;
+    background-color: var(--color-6);
+    border-radius: var(--warehouse-launcher-radius);
+    pointer-events: auto;
+    transition:
+        width 0.32s cubic-bezier(0.25, 1, 0.5, 1),
+        height 0.32s cubic-bezier(0.25, 1, 0.5, 1);
+}
+
+/* Hover peek — single-row tag strip only (legacy strip, not expand-drag) */
+body.is-warehouse-launcher-strip-mode:not(.is-warehouse-launcher-expand-drag-mode) .warehouse-launcher-wrap:hover:not(.is-pinned) {
+    width: calc(
+        var(--space-10) + var(--warehouse-launcher-strip-width, calc(6 * var(--site-grid-cell-w) + 5 * var(--site-grid-gap))) +
+        var(--space-10) + var(--warehouse-launcher-width)
+    );
+    height: var(--warehouse-launcher-height);
+}
+
+/* Pinned — legacy strip panel (not expand-drag) */
+body.is-warehouse-launcher-strip-mode:not(.is-warehouse-launcher-expand-drag-mode) .warehouse-launcher-wrap.is-pinned {
+    width: calc(
+        var(--space-10) + var(--warehouse-launcher-pin-width) +
+        var(--space-10) + var(--warehouse-launcher-width)
+    );
+    height: var(--warehouse-launcher-pin-height, calc(3 * var(--site-grid-cell-h) + 2 * var(--site-grid-gap)));
+    max-height: calc(100vh - 2 * var(--space-40));
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher {
+    position: absolute;
+    right: 0;
+    top: 0;
+    left: auto;
+    bottom: auto;
+    width: var(--warehouse-launcher-width);
+    height: var(--warehouse-launcher-height);
+    margin: 0;
+    z-index: 2;
+    background-color: var(--color-6);
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher {
+    top: auto;
+    bottom: 0;
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher:hover,
+body.is-warehouse-launcher-strip-mode .warehouse-launcher.is-active {
+    background-color: var(--color-6);
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher.is-active .warehouse-launcher__glyph {
+    background-color: var(--color-3);
+}
+
+/* Map mount — visible only when pinned */
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-map-mount {
+    display: none;
+    position: absolute;
+    left: var(--space-10);
+    top: var(--space-10);
+    bottom: var(--space-10);
+    width: var(--warehouse-launcher-map-width, calc(4 * var(--site-grid-cell-w) + 3 * var(--site-grid-gap)));
+    box-sizing: border-box;
+    background: var(--color-6);
+    border-radius: var(--warehouse-radius, 0.3125rem);
+    overflow: hidden;
+    pointer-events: none;
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher-map-mount {
+    display: block;
+    pointer-events: auto;
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-map-mount .site-navigation-maps,
+body.site-grid.is-warehouse-launcher-strip-mode .warehouse-launcher-map-mount .site-navigation-maps {
+    position: absolute;
+    inset: 0;
+    left: 0;
+    top: 0;
+    bottom: auto;
+    width: 100%;
+    height: 100%;
+    transform: none;
+}
+
+/* Tray — hover: single row peek; pinned: multi-row scroll */
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-strip__tray {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    right: calc(var(--warehouse-launcher-width) + var(--space-10));
+    left: auto;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: nowrap;
+    align-items: center;
+    align-content: center;
+    column-gap: var(--space-10);
+    row-gap: 0;
+    width: var(--warehouse-launcher-strip-width, calc(6 * var(--site-grid-cell-w) + 5 * var(--site-grid-gap)));
+    min-width: var(--warehouse-launcher-strip-width, calc(6 * var(--site-grid-cell-w) + 5 * var(--site-grid-gap)));
+    max-width: var(--warehouse-launcher-strip-width, calc(6 * var(--site-grid-cell-w) + 5 * var(--site-grid-gap)));
+    margin: 0;
+    overflow: hidden;
+    direction: rtl;
+    pointer-events: none;
+    opacity: 1;
+    transition: none;
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-strip__tray .block-slot {
+    flex-shrink: 0;
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-wrap:hover:not(.is-pinned) .warehouse-launcher-strip__tray {
+    pointer-events: none;
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher-strip__tray {
+    pointer-events: auto;
+}
+
+/* Hover preview — whole blocks only; muted, non-interactive */
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-wrap.is-strip-preview:not(.is-pinned) .warehouse-launcher-strip__tray {
+    width: auto;
+    min-width: 0;
+    max-width: calc(100% - var(--warehouse-launcher-width) - var(--space-10) - var(--space-10));
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-wrap.is-strip-preview:not(.is-pinned) .warehouse-launcher-strip__tray .block-slot.is-peek-clipped {
+    display: none;
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-wrap.is-strip-preview:not(.is-pinned) .warehouse-launcher-strip__tray .block-slot:not(.is-empty):not(.is-peek-clipped) .action-block {
+    background-color: var(--color-2);
+    color: var(--color-5);
+    border-color: transparent;
+    pointer-events: none;
+    cursor: default;
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-wrap.is-strip-preview:not(.is-pinned) .warehouse-launcher-strip__tray .block-slot:not(.is-empty):not(.is-peek-clipped) .action-block[data-type="tag"] .block-glyph {
+    background-color: var(--color-5) !important;
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-wrap.is-strip-preview:not(.is-pinned) .warehouse-launcher-strip__tray .block-slot:not(.is-empty):not(.is-peek-clipped) .action-block:hover {
+    background-color: var(--color-2);
+    color: var(--color-5);
+    border-color: transparent;
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher-strip__tray {
+    top: var(--space-10);
+    bottom: var(--space-10);
+    left: calc(var(--space-10) + var(--warehouse-launcher-map-width, calc(4 * var(--site-grid-cell-w) + 3 * var(--site-grid-gap))) + var(--space-10));
+    right: calc(var(--warehouse-launcher-width) + var(--space-10));
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    align-content: flex-start;
+    row-gap: var(--space-10);
+    overflow-x: hidden;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+body.is-warehouse-launcher-strip-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher-strip__tray::-webkit-scrollbar {
+    display: none;
+}
+
+body.is-launcher-strip-pinned .warehouse-popup-backdrop {
+    visibility: visible;
+    pointer-events: auto;
+}
+
+body.is-launcher-expanding .warehouse-popup-backdrop {
+    visibility: visible;
+    pointer-events: none;
+}
+
+/* Expand-drag mode — window-style resize from bottom-right pill handle */
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap {
+    width: var(--warehouse-launcher-width);
+    height: var(--warehouse-launcher-height);
+    transition: none;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-expanding {
+    transition: none;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher {
+    position: absolute;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    left: auto;
+    background-color: var(--color-6);
+    cursor: grab;
+    touch-action: none;
+    will-change: transform;
+    user-select: none;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher.is-grabbed,
+body.is-launcher-expanding .warehouse-launcher {
+    cursor: grabbing !important;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher__pill {
+    position: absolute;
+    inset: var(--warehouse-launcher-pad);
+    z-index: 0;
+    border-radius: calc(var(--warehouse-launcher-radius) - var(--warehouse-launcher-pad));
+    background-color: var(--color-3);
+    touch-action: none;
+    pointer-events: none;
+    transition: background-color 0.15s ease;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher.is-grabbed .warehouse-launcher__pill {
+    background-color: var(--color-1);
+}
+
+body.is-launcher-expanding,
+body.is-launcher-expanding .warehouse-launcher,
+body.is-launcher-expanding .warehouse-launcher__pill {
+    cursor: grabbing !important;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher__glyph {
+    position: relative;
+    z-index: 1;
+    background-color: var(--color-6);
+    pointer-events: none;
+    transition: background-color 0.15s ease;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher.is-grabbed .warehouse-launcher__glyph {
+    background-color: var(--color-3);
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher {
+    left: 0;
+    top: 0;
+    right: auto;
+    bottom: auto;
+    z-index: 3;
+    transform: none !important;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher-map-mount {
+    top: calc(var(--warehouse-launcher-height) + var(--space-10));
+    bottom: var(--space-10);
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher-strip__tray {
+    top: var(--space-10);
+    right: var(--space-10);
+    bottom: var(--space-10);
+    left: calc(var(--space-10) + var(--warehouse-launcher-map-width) + var(--space-10));
+    pointer-events: auto;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher:hover,
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher.is-active {
+    background-color: var(--color-6);
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-map-mount {
+    display: none;
+    position: absolute;
+    left: var(--space-10);
+    top: var(--space-10);
+    bottom: calc(var(--warehouse-launcher-height) + var(--space-10));
+    width: var(--warehouse-launcher-map-width);
+    box-sizing: border-box;
+    background: var(--color-6);
+    border-radius: var(--warehouse-radius, 0.3125rem);
+    overflow: hidden;
+    pointer-events: none;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-showing-content .warehouse-launcher-map-mount {
+    display: block;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher-map-mount {
+    pointer-events: auto;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-strip__tray {
+    position: absolute;
+    top: var(--space-10);
+    bottom: calc(var(--warehouse-launcher-height) + var(--space-10));
+    left: calc(var(--space-10) + var(--warehouse-launcher-map-width) + var(--space-10));
+    right: calc(var(--warehouse-launcher-width) + var(--space-10));
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: flex-start;
+    align-content: flex-start;
+    column-gap: var(--space-10);
+    row-gap: var(--space-10);
+    margin: 0;
+    width: auto;
+    min-width: 0;
+    max-width: none;
+    overflow-x: hidden;
+    overflow-y: auto;
+    direction: rtl;
+    opacity: 0;
+    pointer-events: none;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-strip__tray::-webkit-scrollbar {
+    display: none;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-showing-content .warehouse-launcher-strip__tray {
+    opacity: 1;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher-strip__tray {
+    pointer-events: auto;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-partially-expanded .warehouse-launcher-strip__tray .block-slot:not(.is-empty) .action-block {
+    background-color: var(--color-2);
+    color: var(--color-5);
+    border-color: transparent;
+    pointer-events: none;
+    cursor: default;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-partially-expanded .warehouse-launcher-strip__tray .block-slot:not(.is-empty) .action-block[data-type="tag"] .block-glyph {
+    background-color: var(--color-5) !important;
+}
+
+.warehouse-launcher-wrap.is-capture-full .warehouse-launcher-strip__tray .block-slot:not(.is-empty) .action-block,
+.warehouse-launcher-wrap.is-cooccurrence-filter .warehouse-launcher-strip__tray .block-slot:not(.is-empty) .action-block.is-dock-irrelevant {
+    background-color: var(--color-2);
+    color: var(--color-5);
+    border-color: transparent;
+}
+
+.warehouse-launcher-wrap.is-capture-full .warehouse-launcher-strip__tray .block-slot:not(.is-empty) .action-block[data-type="tag"] .block-glyph,
+.warehouse-launcher-wrap.is-cooccurrence-filter .warehouse-launcher-strip__tray .block-slot:not(.is-empty) .action-block.is-dock-irrelevant[data-type="tag"] .block-glyph {
+    background-color: var(--color-5) !important;
+}
+
+.warehouse-launcher-wrap.is-capture-full .warehouse-launcher-strip__tray .block-slot:not(.is-empty) .action-block:hover,
+.warehouse-launcher-wrap.is-cooccurrence-filter .warehouse-launcher-strip__tray .block-slot:not(.is-empty) .action-block.is-dock-irrelevant:hover {
+    background-color: var(--color-2);
+    color: var(--color-5);
+    border-color: transparent;
+}
+
+.warehouse-launcher-wrap.is-capture-full .warehouse-launcher-strip__tray .block-slot:not(.is-empty) .action-block[data-type="tag"]:hover,
+.warehouse-launcher-wrap.is-cooccurrence-filter .warehouse-launcher-strip__tray .block-slot:not(.is-empty) .action-block.is-dock-irrelevant[data-type="tag"]:hover {
+    border-color: transparent;
 }
 
 .warehouse-popup-backdrop {
@@ -2889,6 +3318,51 @@ body.site-grid .warehouse-shell {
     background: var(--color-6);
     border-radius: var(--warehouse-radius, 0.3125rem);
     overflow: hidden;
+}
+
+/* Blocks-only dock — hide statistics, message band, and map; tray fills the shell */
+body.is-warehouse-dock-blocks-only .warehouse-map,
+body.is-warehouse-dock-blocks-only .warehouse-statistics,
+body.is-warehouse-dock-blocks-only .warehouse-message-band,
+body.is-warehouse-dock-blocks-only .warehouse-panel-corners--dock,
+body.is-warehouse-dock-blocks-only .warehouse-panel-corners--map {
+    display: none !important;
+}
+
+body.is-warehouse-dock-blocks-only .warehouse-dock {
+    flex: 1 1 100%;
+    --warehouse-message-row-h: 0;
+    --warehouse-block-panel-h: 100%;
+}
+
+body.is-warehouse-dock-blocks-only .warehouse-dock::before,
+body.is-warehouse-dock-blocks-only .action-warehouse::before {
+    display: none;
+}
+
+body.is-warehouse-dock-blocks-only .action-warehouse {
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 100%;
+}
+
+body.view-level-1.is-warehouse-dock-blocks-only .warehouse-reset,
+body.view-level-2.is-warehouse-dock-blocks-only .warehouse-reset,
+body.view-level-3.is-warehouse-dock-blocks-only .warehouse-reset {
+    left: 0;
+}
+
+body.view-level-2.is-warehouse-dock-blocks-only .depth-block-bar.has-blocks,
+body.view-level-3.is-warehouse-dock-blocks-only .depth-block-bar.has-blocks {
+    right: 0;
+    max-width: 100%;
+}
+
+body.view-level-2.is-warehouse-dock-blocks-only .depth-block-bar__drop-zone,
+body.view-level-3.is-warehouse-dock-blocks-only .depth-block-bar__drop-zone {
+    left: 0;
+    right: 0;
 }
 
 .warehouse-map::before {
