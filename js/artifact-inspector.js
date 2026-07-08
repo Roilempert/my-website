@@ -11,6 +11,7 @@ const ArtifactInspector = {
     _openAnimTimer: null,
     _openSyntheticCard: false,
     _forceReadableOpen: false,
+    _openedFromMacro: false,
 
     init() {
         this.backdrop = document.createElement('div');
@@ -55,7 +56,7 @@ const ArtifactInspector = {
         return true;
     },
 
-    open(noteWrapperNode) {
+    open(noteWrapperNode, opts) {
         if (this.isActive) return;
         if (!this.isOpenableWrapper(noteWrapperNode)) return;
 
@@ -64,6 +65,7 @@ const ArtifactInspector = {
             && NoteCensor.isNoteStudyUnlocked(noteWrapperNode);
 
         this._forceReadableOpen = studyOpen;
+        this._openedFromMacro = !!(opts && opts.fromMacro);
         this.openPopup(noteWrapperNode);
     },
 
@@ -98,7 +100,7 @@ const ArtifactInspector = {
         if (this.isActive) {
             this.close();
         } else {
-            this.open(wrapper);
+            this.open(wrapper, { fromMacro: true });
         }
         return true;
     },
@@ -559,7 +561,7 @@ const ArtifactInspector = {
         const tagsHtml = typeof MicroMock !== 'undefined'
             ? MicroMock.buildTagsRowHTML(item, tagOptions)
             : '';
-        const relatedHtml = this.buildRelatedNotesHTML(item);
+        const relatedHtml = this._openedFromMacro ? this.buildRelatedNotesHTML(item) : '';
         return `
             <div class="artifact-inspector-focus">
                 <div class="micro-mock__note artifact-inspector-focus__note">
@@ -591,7 +593,7 @@ const ArtifactInspector = {
 
             const notes = section.items.map((item) => {
                 const html = typeof MicroMock !== 'undefined'
-                    ? MicroMock.buildCardHTML(item)
+                    ? MicroMock.buildCardHTML(item, { focusScale: true })
                     : '';
                 return `<div class="artifact-inspector-related__note">${html}</div>`;
             }).join('');
@@ -606,7 +608,7 @@ const ArtifactInspector = {
 
         return `
             <section class="artifact-inspector-related">
-                <h2 class="artifact-inspector-related__title general-h">פתקים קשורים</h2>
+                <h2 class="artifact-inspector-related__title general-t">באותו נושא:</h2>
                 ${blocks}
             </section>
         `;
@@ -621,7 +623,7 @@ const ArtifactInspector = {
 
         const emit = (mask) => {
             const tags = focusTags.filter((_, i) => (mask >> i) & 1);
-            if (!tags.length) return;
+            if (tags.length < 2) return;
             const key = tags.slice().sort().join('\0');
             if (subsets.some(s => s.key === key)) return;
 
@@ -722,6 +724,7 @@ const ArtifactInspector = {
         this._openFocusVisualWidth = null;
         this._openSyntheticCard = false;
         this._forceReadableOpen = false;
+        this._openedFromMacro = false;
         this.isActive = false;
         this.activeElement = null;
         this.mode = null;

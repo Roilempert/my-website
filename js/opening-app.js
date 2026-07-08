@@ -1,4 +1,4 @@
-/* opening build 20260708021523 */
+/* opening build 20260708122527 */
 /* ==========================================================================
    Opening Background — L1-style molecules with fold-mirror symmetry
    Tag colors from the data sheet; dots + sibling links + subtle hull outline.
@@ -326,6 +326,10 @@ const OpeningBackground = {
     _isOpeningArtHost(host) {
         return !!(host?.classList?.contains('opening-screen__art')
             || host?.closest?.('#opening-screen'));
+    },
+
+    _isOpeningArtTransparent(cfg) {
+        return cfg?.transparent === true;
     },
 
     _shouldDeferOpeningBlobs() {
@@ -950,6 +954,20 @@ const OpeningBackground = {
         ctx.arc(glyphCx, 0, glyphR, 0, Math.PI * 2);
         ctx.fill();
 
+        // White row after the glyph to mimic a line of text.
+        const rowH = height * (cfg.pillTextRowHeightRatio ?? 0.16);
+        const rowGap = (height / blockH) * (cfg.pillTextRowGap ?? 4);
+        const rowStartX = glyphCx + glyphR + rowGap;
+        const rowEndX = x + width - padX;
+        const rowW = rowEndX - rowStartX;
+        if (rowW > rowH) {
+            ctx.globalAlpha = cfg.pillTextRowAlpha ?? 0.92;
+            ctx.fillStyle = this._resolveCssColor(cfg.pillTextRowColor ?? '#FFFFFF', '#FFFFFF');
+            this._roundRectPath(ctx, rowStartX, -rowH * 0.5, rowW, rowH, rowH * 0.5);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+
         ctx.restore();
     },
 
@@ -994,7 +1012,7 @@ const OpeningBackground = {
     },
 
     _contentBlurPx(cfg, w, h) {
-        if (typeof cfg.contentBlurPx === 'number' && cfg.contentBlurPx > 0) {
+        if (typeof cfg.contentBlurPx === 'number') {
             return cfg.contentBlurPx;
         }
         const minDim = Math.min(w, h);
@@ -1094,21 +1112,30 @@ const OpeningBackground = {
         const drawAtmosphere = this._shouldDrawAtmosphere(cfg);
 
         if (source === 'content' && drawCrisp) {
-            const dpr = ctx.canvas.width / Math.max(1, w);
-            const bctx = this._ensureContentBuffer(w, h, dpr);
-            if (bctx) {
-                bctx.clearRect(0, 0, w, h);
-                this._drawCrispBlobs(bctx, cfg);
-
-                const blurPx = this._contentBlurPx(cfg, w, h);
+            const blurPx = this._contentBlurPx(cfg, w, h);
+            if (blurPx <= 0) {
                 ctx.save();
-                ctx.globalCompositeOperation = cfg.blobBlendMode ?? 'multiply';
+                ctx.globalCompositeOperation = 'source-over';
                 ctx.globalAlpha = cfg.blobLayerAlpha ?? 1;
-                ctx.filter = `blur(${blurPx}px)`;
-                ctx.drawImage(this._contentBuffer, 0, 0, w, h);
-                ctx.filter = 'none';
+                this._drawCrispBlobs(ctx, cfg);
                 ctx.globalAlpha = 1;
                 ctx.restore();
+            } else {
+                const dpr = ctx.canvas.width / Math.max(1, w);
+                const bctx = this._ensureContentBuffer(w, h, dpr);
+                if (bctx) {
+                    bctx.clearRect(0, 0, w, h);
+                    this._drawCrispBlobs(bctx, cfg);
+
+                    ctx.save();
+                    ctx.globalCompositeOperation = cfg.blobBlendMode ?? 'multiply';
+                    ctx.globalAlpha = cfg.blobLayerAlpha ?? 1;
+                    ctx.filter = `blur(${blurPx}px)`;
+                    ctx.drawImage(this._contentBuffer, 0, 0, w, h);
+                    ctx.filter = 'none';
+                    ctx.globalAlpha = 1;
+                    ctx.restore();
+                }
             }
         } else {
             if (drawCrisp) {
@@ -1204,7 +1231,7 @@ const OpeningBackground = {
         ctx.globalCompositeOperation = 'source-over';
     },
 
-    _buildScatterMolecules(w, h, targetCount, rand, cfg) {
+    _buildScatterMolecules(w, h, targetCount, rand, cfg, safeRect = null) {
         const minDim = Math.min(w, h);
         const radiusMin = minDim * (cfg.radiusMin ?? 0.04);
         const radiusMax = minDim * (cfg.radiusMax ?? 0.14);
@@ -1217,22 +1244,34 @@ const OpeningBackground = {
         const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
         const blobs = [];
 
+        const maxAttempts = cfg.scatterMaxAttempts ?? 32;
+
         for (let i = 0; i < uniqueCount; i++) {
             const scale = rand() * (radiusMax - radiusMin) + radiusMin;
             let cx;
             let cy;
+            let placed = false;
 
-            if (useMirror) {
-                const insetRatio = cfg.scatterMirrorInset ?? 0.04;
-                const reach = cfg.scatterMirrorReach ?? 1;
-                const inset = spread * insetRatio;
-                const range = Math.max(inset, (spread - inset) * reach);
-                cx = centerX + inset + rand() * range;
-                cy = centerY - inset - rand() * range;
-            } else {
-                cx = centerX + (rand() - 0.5) * 2 * spread;
-                cy = centerY + (rand() - 0.5) * 2 * spread;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                if (useMirror) {
+                    const insetRatio = cfg.scatterMirrorInset ?? 0.04;
+                    const reach = cfg.scatterMirrorReach ?? 1;
+                    const inset = spread * insetRatio;
+                    const range = Math.max(inset, (spread - inset) * reach);
+                    cx = centerX + inset + rand() * range;
+                    cy = centerY - inset - rand() * range;
+                } else {
+                    cx = centerX + (rand() - 0.5) * 2 * spread;
+                    cy = centerY + (rand() - 0.5) * 2 * spread;
+                }
+
+                if (!safeRect || !this._pointInSafeRect(cx, cy, scale, safeRect)) {
+                    placed = true;
+                    break;
+                }
             }
+
+            if (!placed) continue;
 
             const colorRand = this._rand((this._layoutSeed + i * 7919) >>> 0);
             const spec = this._sampleMoleculeSpec(colorRand, cfg, i);
@@ -1247,7 +1286,7 @@ const OpeningBackground = {
         return blobs;
     },
 
-    _buildScatterPills(w, h, targetCount, rand, cfg) {
+    _buildScatterPills(w, h, targetCount, rand, cfg, safeRect = null) {
         const minDim = Math.min(w, h);
         const spread = minDim * (cfg.scatterSpread ?? 0.28);
         const centerX = w * (cfg.scatterCenterX ?? 0.5);
@@ -1258,26 +1297,76 @@ const OpeningBackground = {
         const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
         const pills = [];
 
+        const maxAttempts = cfg.scatterMaxAttempts ?? 32;
+
         for (let i = 0; i < uniqueCount; i++) {
             let cx;
             let cy;
+            let placed = false;
+            const hitR = minDim * 0.05;
 
-            if (useMirror) {
-                const insetRatio = cfg.scatterMirrorInset ?? 0.06;
-                const reach = cfg.scatterMirrorReach ?? 0.92;
-                const inset = spread * insetRatio;
-                const range = Math.max(inset, (spread - inset) * reach);
-                cx = centerX + inset + rand() * range;
-                cy = centerY - inset - rand() * range;
-            } else {
-                cx = centerX + (rand() - 0.5) * 2 * spread;
-                cy = centerY + (rand() - 0.5) * 2 * spread;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                if (useMirror) {
+                    const insetRatio = cfg.scatterMirrorInset ?? 0.06;
+                    const reach = cfg.scatterMirrorReach ?? 0.92;
+                    const inset = spread * insetRatio;
+                    const range = Math.max(inset, (spread - inset) * reach);
+                    cx = centerX + inset + rand() * range;
+                    cy = centerY - inset - rand() * range;
+                } else {
+                    cx = centerX + (rand() - 0.5) * 2 * spread;
+                    cy = centerY + (rand() - 0.5) * 2 * spread;
+                }
+
+                if (!safeRect || !this._pointInSafeRect(cx, cy, hitR, safeRect)) {
+                    placed = true;
+                    break;
+                }
             }
+
+            if (!placed) continue;
 
             pills.push(this._buildPillBlock(cx, cy, minDim, rand, cfg, i));
         }
 
         return pills;
+    },
+
+    _getOpeningTitleSafeRect() {
+        if (!this._isOpeningArt()) return null;
+
+        const frameCfg = CONFIG?.opening?.titleSafeFrame || {};
+        if (frameCfg.enabled === false) return null;
+
+        const title = document.querySelector('#opening-screen .opening-screen__title');
+        if (!title) return null;
+
+        const padX = frameCfg.padX ?? 40;
+        const padY = frameCfg.padY ?? 30;
+        const r = title.getBoundingClientRect();
+
+        return {
+            left: r.left - padX,
+            top: r.top - padY,
+            right: r.right + padX,
+            bottom: r.bottom + padY
+        };
+    },
+
+    _pointInSafeRect(cx, cy, radius, rect) {
+        if (!rect) return false;
+        return cx + radius > rect.left
+            && cx - radius < rect.right
+            && cy + radius > rect.top
+            && cy - radius < rect.bottom;
+    },
+
+    _blobHitsSafeRect(blob, rect) {
+        if (!rect) return false;
+        const cx = blob.cx + (blob.offsetDx ?? 0);
+        const cy = blob.cy + (blob.offsetDy ?? 0);
+        const r = blob.gradientR ?? blob.membraneR ?? (blob.kind === 'pill' ? (blob.height ?? 20) * 0.55 : 20);
+        return this._pointInSafeRect(cx, cy, r, rect);
     },
 
     _assignMouseFactors(blob, rand) {
@@ -1300,12 +1389,18 @@ const OpeningBackground = {
             this._prepareOpeningMoleculePlan(cfg);
         }
 
-        const uniqueBlobs = this._buildScatterMolecules(w, h, cfg.blobCount ?? 48, rand, cfg);
+        const safeRect = this._getOpeningTitleSafeRect();
+        const uniqueBlobs = this._buildScatterMolecules(w, h, cfg.blobCount ?? 48, rand, cfg, safeRect);
         const pillTarget = cfg.pillCount ?? 0;
         const uniquePills = pillTarget > 0
-            ? this._buildScatterPills(w, h, pillTarget, rand, cfg)
+            ? this._buildScatterPills(w, h, pillTarget, rand, cfg, safeRect)
             : [];
         const drawBlobs = [];
+
+        const pushBlob = (instance) => {
+            if (safeRect && this._blobHitsSafeRect(instance, safeRect)) return;
+            drawBlobs.push(instance);
+        };
 
         uniqueBlobs.forEach((blob) => {
             const mirrored = mirrorFolds >= 2
@@ -1313,7 +1408,7 @@ const OpeningBackground = {
                 : [blob];
 
             mirrored.forEach((instance) => {
-                drawBlobs.push(this._initMoleculeDotPhysics(
+                pushBlob(this._initMoleculeDotPhysics(
                     this._assignMouseFactors(instance, rand),
                     rand
                 ));
@@ -1331,7 +1426,7 @@ const OpeningBackground = {
                 : [pill];
 
             mirrored.forEach((instance) => {
-                drawBlobs.push(this._assignMouseFactors(instance, rand));
+                pushBlob(this._assignMouseFactors(instance, rand));
             });
         });
 
@@ -1365,11 +1460,15 @@ const OpeningBackground = {
     },
 
     _updateBlobHovers(cfg) {
-        if (!this._drawBlobs || !this._pointerActive) return false;
+        if (!this._drawBlobs) return false;
+        if (!this._pointerActive) return false;
 
+        // Note: the title safe frame only filters INITIAL placement (see
+        // _buildLayoutBlobs). Molecules are free to drift into that zone at
+        // runtime — no repel — so cursor pushes are never undone.
+        const minDim = Math.min(this._w, this._h);
         const localX = this._pointerClient.x;
         const localY = this._pointerClient.y;
-        const minDim = Math.min(this._w, this._h);
         let moved = false;
 
         for (let i = 0; i < this._drawBlobs.length; i++) {
@@ -1505,6 +1604,11 @@ const OpeningBackground = {
     },
 
     _fillBackground(ctx, w, h, cfg, openingArt) {
+        if (openingArt && this._isOpeningArtTransparent(cfg)) {
+            ctx.clearRect(0, 0, w, h);
+            return;
+        }
+
         if (openingArt) {
             ctx.fillStyle = this._resolveCssColor(cfg.bgColor ?? 'var(--color-5)', '#F2F0EE');
         } else {
@@ -1611,7 +1715,10 @@ const OpeningBackground = {
 
     _signalArtReady() {
         if (this._artReady || !this._isOpeningArt()) return;
-        if (!this._drawBlobs?.length || !this._getTagColorEntries().length) return;
+
+        const openingCfg = this._openingCfg();
+        const grainOnly = openingCfg.mode === 'grain';
+        if (!grainOnly && (!this._drawBlobs?.length || !this._getTagColorEntries().length)) return;
 
         this._artReady = true;
         requestAnimationFrame(() => {
@@ -1624,7 +1731,12 @@ const OpeningBackground = {
     },
 
     onDataReady() {
-        if (!this._mounted || !this._shouldBuildBlobs()) {
+        if (!this._mounted) return;
+
+        if (!this._shouldBuildBlobs()) {
+            const { w, h } = this._viewportSize();
+            this.render(w, h);
+            this._signalArtReady();
             return;
         }
 
@@ -1642,6 +1754,12 @@ const OpeningBackground = {
         this._signalArtReady();
     },
 
+    refitOpeningLayout() {
+        if (!this._mounted || !this._isOpeningArt()) return;
+        const { w, h } = this._viewportSize();
+        this.render(w, h);
+    },
+
     render(w, h) {
         this._rebuildLayout(w, h);
         this._paintAll();
@@ -1654,6 +1772,10 @@ const OpeningBackground = {
         if (!host || this._surfaces.has(host)) return false;
 
         const role = this._hostRole(host);
+        const openingArt = this._isOpeningArtHost(host);
+        const openingCfg = openingArt ? this._openingCfg() : null;
+        const useAlpha = role === 'wash'
+            || (openingArt && this._isOpeningArtTransparent(openingCfg));
         const canvas = document.createElement('canvas');
         canvas.className = role === 'wash'
             ? 'site-background__canvas site-background__canvas--wash opening-screen__bg-canvas'
@@ -1661,7 +1783,7 @@ const OpeningBackground = {
         canvas.setAttribute('aria-hidden', 'true');
         host.prepend(canvas);
 
-        const ctx = canvas.getContext('2d', { alpha: role === 'wash' });
+        const ctx = canvas.getContext('2d', { alpha: useAlpha });
         if (!ctx) return false;
 
         this._surfaces.set(host, { host, role, canvas, ctx });
@@ -1801,11 +1923,134 @@ const OpeningBackground = {
     }
 };
 /* ==========================================================================
+   Opening — L1 molecule hover phrase helpers (mirrors physics hover label logic)
+   ========================================================================== */
+const OpeningHoverLabel = {
+    parseCSVToArray(csvText) {
+        const rows = [];
+        let currentRow = [];
+        let currentCell = '';
+        let insideQuotes = false;
+
+        for (let i = 0; i < csvText.length; i++) {
+            const char = csvText[i];
+            const nextChar = csvText[i + 1];
+
+            if (char === '"') {
+                if (insideQuotes && nextChar === '"') {
+                    currentCell += '"';
+                    i++;
+                } else {
+                    insideQuotes = !insideQuotes;
+                }
+            } else if (char === ',' && !insideQuotes) {
+                currentRow.push(currentCell.trim());
+                currentCell = '';
+            } else if ((char === '\n' || char === '\r') && !insideQuotes) {
+                if (char === '\r' && nextChar === '\n') i++;
+                currentRow.push(currentCell.trim());
+                if (currentRow.join('').trim() !== '') rows.push(currentRow);
+                currentRow = [];
+                currentCell = '';
+            } else {
+                currentCell += char;
+            }
+        }
+
+        if (currentCell.length || currentRow.length) {
+            currentRow.push(currentCell.trim());
+            if (currentRow.join('').trim() !== '') rows.push(currentRow);
+        }
+
+        return rows;
+    },
+
+    resolveColumnsFromHeader(headerRow) {
+        const aliases = {
+            title: 'title',
+            body: 'body'
+        };
+        const cols = { title: 6, body: 7 };
+        headerRow.forEach((cell, index) => {
+            const key = aliases[String(cell || '').trim().toLowerCase()];
+            if (key) cols[key] = index;
+        });
+        return cols;
+    },
+
+    clipAtPhraseBoundary(line, maxWords) {
+        const words = line.split(/\s+/).filter(Boolean);
+        if (words.length <= maxWords) return line;
+
+        const windowText = words.slice(0, maxWords).join(' ');
+        const breakPatterns = [
+            /[.!?…](?=\s|$)/g,
+            /[,;:—–-](?=\s|$)/g
+        ];
+
+        for (const pattern of breakPatterns) {
+            let lastEnd = -1;
+            let match;
+            pattern.lastIndex = 0;
+            while ((match = pattern.exec(windowText)) !== null) {
+                lastEnd = match.index + match[0].length;
+            }
+            if (lastEnd > 0) {
+                const candidate = windowText.slice(0, lastEnd).trim();
+                if (candidate.split(/\s+/).filter(Boolean).length >= 2) return candidate;
+            }
+        }
+
+        return windowText;
+    },
+
+    resolveHoverLine(title, body, maxWords = 8) {
+        const titleLine = String(title || '').trim().split(/\r?\n/)[0].trim();
+        if (titleLine) {
+            return {
+                text: this.clipAtPhraseBoundary(titleLine, maxWords),
+                role: 'title'
+            };
+        }
+
+        const bodyLine = String(body || '').trim().split(/\r?\n/)[0].trim();
+        if (bodyLine) {
+            return {
+                text: this.clipAtPhraseBoundary(bodyLine, maxWords),
+                role: 'body'
+            };
+        }
+
+        return null;
+    },
+
+    extractFromMainCsv(csvText, maxWords = 8) {
+        const rows = this.parseCSVToArray(csvText);
+        if (!rows.length) return [];
+
+        const cols = this.resolveColumnsFromHeader(rows[0]);
+        const lines = [];
+        const seen = new Set();
+
+        rows.slice(1).forEach((columns) => {
+            const title = (columns[cols.title] || '').replace(/^#+\s*/, '').replace(/_/g, ' ').trim();
+            const body = (columns[cols.body] || '').replace(/_/g, ' ').trim();
+            const hover = this.resolveHoverLine(title, body, maxWords);
+            if (!hover?.text || seen.has(hover.text)) return;
+            seen.add(hover.text);
+            lines.push(hover);
+        });
+
+        return lines;
+    }
+};
+/* ==========================================================================
    Opening page — static palette (tag colors + sample molecules for background art)
    ========================================================================== */
 const OpeningData = {
     items: [],
     tagColorsMap: new Map(),
+    hoverLines: [],
 
     async init() {
         const url = CONFIG.opening?.dataUrl || 'data/opening-palette.json';
@@ -1822,7 +2067,34 @@ const OpeningData = {
             clearTimeout(timer);
         }
 
+        await this._loadHoverLines();
+
         window.AppState = { items: this.items, tagColorsMap: this.tagColorsMap };
+    },
+
+    async _loadHoverLines() {
+        const miniCfg = CONFIG.opening?.miniTitle || {};
+        if (miniCfg.enabled === false) {
+            this.hoverLines = [];
+            return;
+        }
+
+        const url = miniCfg.notesUrl
+            || CONFIG.data?.local?.main
+            || 'data/main.csv';
+        const maxWords = miniCfg.maxWords ?? CONFIG.depth?.moleculeHoverMaxWords ?? 8;
+
+        try {
+            const response = await fetch(url, { cache: 'force-cache' });
+            if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
+            const csv = await response.text();
+            if (typeof OpeningHoverLabel !== 'undefined') {
+                this.hoverLines = OpeningHoverLabel.extractFromMainCsv(csv, maxWords);
+            }
+        } catch (err) {
+            console.warn('Opening hover lines failed:', err);
+            this.hoverLines = [];
+        }
     },
 
     ingest(data) {
@@ -1887,6 +2159,8 @@ const OpeningScreen = {
     _warmupStarted: false,
     _preloadStarted: false,
     _onResize: null,
+    _miniTitleTimer: null,
+    _miniTitleIndex: -1,
 
     cfg() {
         return CONFIG.opening || {};
@@ -1992,7 +2266,6 @@ const OpeningScreen = {
 
         this._applyLabels();
         this._mountCorners();
-        this._fitOpeningTitle();
 
         this._onResize = () => this._fitOpeningTitle();
         window.addEventListener('resize', this._onResize);
@@ -2007,13 +2280,28 @@ const OpeningScreen = {
         this.el.classList.add('is-visible', 'is-art-pending');
         const fadeMs = this.cfg().artFadeDurationMs ?? 600;
         this.el.style.setProperty('--opening-art-fade-duration', `${fadeMs}ms`);
-        this._startTitleTypewriter();
+
+        requestAnimationFrame(() => {
+            this._fitOpeningTitle();
+            this._startTitleTypewriter();
+        });
         this._scheduleContinueEnable();
+        this._scheduleArtReadyFallback();
+    },
+
+    _scheduleArtReadyFallback() {
+        const ms = this.cfg().artReadyFallbackMs ?? 12000;
+        clearTimeout(this._revealFallbackTimer);
+        this._revealFallbackTimer = setTimeout(() => {
+            if (!this.artReady) this.onArtReady();
+        }, ms);
     },
 
     onArtReady() {
         if (this.skipped || this.artReady) return;
         this.artReady = true;
+        clearTimeout(this._revealFallbackTimer);
+        this._revealFallbackTimer = null;
         this._tryRevealArt();
     },
 
@@ -2023,7 +2311,7 @@ const OpeningScreen = {
         const title = this.el?.querySelector('.opening-screen__title');
         title?.classList.remove('is-typing', 'is-cursor-wait');
         title?.classList.add('is-title-typed');
-        this._fitOpeningTitle();
+        this._startMiniTitleRotation();
         this._tryRevealArt();
     },
 
@@ -2077,6 +2365,37 @@ const OpeningScreen = {
         };
     },
 
+    _titleChars() {
+        return [...(this._titleFullText || '')];
+    },
+
+    _renderTitleChars(title, visibleCount) {
+        const chars = this._titleChars();
+        if (!title || !chars.length) return;
+
+        title.textContent = '';
+        const frag = document.createDocumentFragment();
+
+        // Zero-width caret placed at the current typing boundary. It never
+        // occupies layout width, so revealing letters or hiding it at the end
+        // causes no reflow, and it always sits next to the letter being typed.
+        const caret = document.createElement('span');
+        caret.className = 'opening-screen__title-cursor';
+        caret.setAttribute('aria-hidden', 'true');
+
+        chars.forEach((ch, index) => {
+            if (index === visibleCount) frag.appendChild(caret);
+            const span = document.createElement('span');
+            span.className = 'opening-screen__title-char';
+            span.textContent = ch;
+            if (index >= visibleCount) span.classList.add('is-pending');
+            frag.appendChild(span);
+        });
+        if (visibleCount >= chars.length) frag.appendChild(caret);
+
+        title.appendChild(frag);
+    },
+
     _fitOpeningTitle() {
         const title = this.el?.querySelector('.opening-screen__title');
         if (!title) return;
@@ -2084,7 +2403,7 @@ const OpeningScreen = {
         const text = (this._titleFullText || this.cfg().labels?.title || title.textContent || '').trim();
         if (!text) return;
 
-        const savedText = title.textContent;
+        const visibleCount = title.querySelectorAll('.opening-screen__title-char:not(.is-pending)').length;
         title.textContent = text;
         title.style.fontSize = '';
         title.style.letterSpacing = '0px';
@@ -2093,7 +2412,7 @@ const OpeningScreen = {
         const reducePx = reducePt * (96 / 72);
         const maxWidth = title.clientWidth;
         if (maxWidth <= 0) {
-            title.textContent = savedText;
+            this._renderTitleChars(title, visibleCount);
             return;
         }
 
@@ -2125,7 +2444,147 @@ const OpeningScreen = {
             }
         }
 
-        title.textContent = savedText;
+        title.textContent = text;
+
+        const lineHeight = 0.88;
+        title.style.minHeight = `${targetPx * lineHeight}px`;
+        this.el?.style.setProperty('--opening-title-font-size', `${targetPx}px`);
+        this.el?.style.setProperty('--opening-title-line-height', String(lineHeight));
+        this._renderTitleChars(title, visibleCount);
+        if (typeof OpeningBackground !== 'undefined' && OpeningBackground.refitOpeningLayout) {
+            OpeningBackground.refitOpeningLayout();
+        }
+    },
+
+    _miniTitleEl() {
+        return this.el?.querySelector('.opening-screen__mini-title');
+    },
+
+    _miniTitleCfg() {
+        return this.cfg().miniTitle || {};
+    },
+
+    _miniTitleMeasureCtx: null,
+
+    _getMiniTitleMeasureCtx() {
+        if (!this._miniTitleMeasureCtx) {
+            const canvas = document.createElement('canvas');
+            this._miniTitleMeasureCtx = canvas.getContext('2d');
+        }
+        return this._miniTitleMeasureCtx;
+    },
+
+    _getMiniTitleFont() {
+        const root = getComputedStyle(document.documentElement);
+        const weight = root.getPropertyValue('--type-display-weight').trim() || '400';
+        const size = root.getPropertyValue('--type-display-size').trim() || '1.6667rem';
+        const family = root.getPropertyValue('--type-family-note-h').trim() || 'TheBasics-Dots, sans-serif';
+        return `normal ${weight} ${size} ${family}`;
+    },
+
+    _getMiniTitleMaxWidthPx() {
+        const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+        return Math.min(28 * rootPx, window.innerWidth * 0.42);
+    },
+
+    _miniTitleQuarter: -1,
+
+    _miniTitleQuarters() {
+        return [
+            { x: 28, y: 30 },
+            { x: 72, y: 30 },
+            { x: 28, y: 70 },
+            { x: 72, y: 70 }
+        ];
+    },
+
+    _placeMiniTitleRandomly(el) {
+        if (!el) return;
+        const quarters = this._miniTitleQuarters();
+        let next = Math.floor(Math.random() * quarters.length);
+        if (next === this._miniTitleQuarter && quarters.length > 1) {
+            next = (next + 1) % quarters.length;
+        }
+        this._miniTitleQuarter = next;
+
+        const q = quarters[next];
+        el.style.left = `${q.x}%`;
+        el.style.top = `${q.y}%`;
+        el.style.transform = 'translate(-50%, -50%)';
+    },
+
+    _fitMiniTitleToWidth(text, maxWidth) {
+        if (!text || maxWidth <= 0) return text || '';
+
+        const ctx = this._getMiniTitleMeasureCtx();
+        ctx.font = this._getMiniTitleFont();
+
+        if (ctx.measureText(text).width <= maxWidth) return text;
+
+        const words = text.split(/\s+/).filter(Boolean);
+        let result = '';
+        for (const word of words) {
+            const candidate = result ? `${result} ${word}` : word;
+            if (ctx.measureText(candidate).width > maxWidth) break;
+            result = candidate;
+        }
+
+        return result || words[0] || '';
+    },
+
+    _pickRandomHoverLine() {
+        const lines = OpeningData?.hoverLines || [];
+        if (!lines.length) return null;
+        if (lines.length === 1) return lines[0];
+
+        let next = Math.floor(Math.random() * lines.length);
+        if (next === this._miniTitleIndex) {
+            next = (next + 1) % lines.length;
+        }
+        this._miniTitleIndex = next;
+        return lines[next];
+    },
+
+    _setMiniTitle(hover) {
+        const el = this._miniTitleEl();
+        if (!el) return;
+
+        if (!hover?.text) {
+            el.textContent = '';
+            el.classList.remove('is-visible', 'note-title', 'note-body');
+            el.hidden = true;
+            return;
+        }
+
+        el.hidden = false;
+        el.classList.toggle('note-title', hover.role !== 'body');
+        el.classList.toggle('note-body', hover.role === 'body');
+        const maxWidth = this._getMiniTitleMaxWidthPx();
+        el.textContent = this._fitMiniTitleToWidth(hover.text, maxWidth);
+        this._placeMiniTitleRandomly(el);
+        el.classList.add('is-visible');
+    },
+
+    _showMiniTitle() {
+        if (this._miniTitleCfg().enabled === false) return;
+        this._setMiniTitle(this._pickRandomHoverLine());
+    },
+
+    _startMiniTitleRotation() {
+        if (this._miniTitleCfg().enabled === false) return;
+
+        clearInterval(this._miniTitleTimer);
+        this._showMiniTitle();
+
+        const rotateMs = this._miniTitleCfg().rotateMs ?? 4500;
+        if (rotateMs > 0) {
+            this._miniTitleTimer = setInterval(() => this._showMiniTitle(), rotateMs);
+        }
+    },
+
+    _stopMiniTitleRotation() {
+        clearInterval(this._miniTitleTimer);
+        this._miniTitleTimer = null;
     },
 
     _applyLabels() {
@@ -2137,6 +2596,7 @@ const OpeningScreen = {
             this._titleFullText = labels.title || title.textContent || '';
             title.textContent = '';
             title.setAttribute('aria-label', this._titleFullText);
+            this._renderTitleChars(title, 0);
         }
         if (subtitle && labels.subtitle) subtitle.textContent = labels.subtitle;
         if (btn && labels.continue) {
@@ -2160,9 +2620,9 @@ const OpeningScreen = {
 
         this._cancelTitleTypewriter();
         this.titleTyped = false;
-        title.textContent = '';
         title.classList.remove('is-title-typed', 'is-typing');
         title.classList.add('is-cursor-wait');
+        this._renderTitleChars(title, 0);
 
         const generation = this._titleTypewriterGen;
         const cursorWaitMs = this.cfg().titleCursorWaitMs ?? 1800;
@@ -2179,7 +2639,7 @@ const OpeningScreen = {
             const step = () => {
                 if (generation !== this._titleTypewriterGen) return;
                 index += 1;
-                title.textContent = text.slice(0, index);
+                this._renderTitleChars(title, index);
                 if (index < text.length) {
                     this._titleTypewriterTimer = setTimeout(step, msPerChar);
                 } else {
@@ -2216,6 +2676,8 @@ const OpeningScreen = {
             OpeningBackground.onDataReady();
         }
 
+        if (this.titleTyped) this._startMiniTitleRotation();
+
         if (this.userDismissed && !this.bootFlushed) {
             this._enterSite();
         }
@@ -2232,6 +2694,9 @@ const OpeningScreen = {
         this.dismissing = true;
         this.userDismissed = true;
         this._cancelTitleTypewriter();
+        this._stopMiniTitleRotation();
+        clearTimeout(this._revealFallbackTimer);
+        this._revealFallbackTimer = null;
         if (this._onResize) {
             window.removeEventListener('resize', this._onResize);
             this._onResize = null;
@@ -2262,6 +2727,330 @@ const OpeningScreen = {
             target += `${sep}showReel=autostart`;
         }
         window.location.assign(target);
+    }
+};
+/* ==========================================================================
+   Opening Threshold — drag block to surface, molecule capture payoff
+   ========================================================================== */
+const OpeningThreshold = {
+    mounted: false,
+    ready: false,
+    completing: false,
+    dragging: false,
+    el: null,
+    surfaceEl: null,
+    hintEl: null,
+    blockEl: null,
+    slotEl: null,
+    tagColor: null,
+    tagName: null,
+    moleculeIndex: null,
+    _pointerId: null,
+    _dragX: 0,
+    _dragY: 0,
+    _autoTimer: null,
+    _keyHandler: null,
+    _boundMove: null,
+    _boundUp: null,
+    _boundCancel: null,
+
+    cfg() {
+        return CONFIG.opening?.threshold || {};
+    },
+
+    isEnabled() {
+        return this.cfg().enabled !== false;
+    },
+
+    mount(openingEl) {
+        if (!openingEl || !this.isEnabled()) return;
+        this.el = openingEl.querySelector('.opening-threshold');
+        if (!this.el) return;
+
+        this.surfaceEl = this.el.querySelector('.opening-threshold__surface');
+        this.hintEl = this.el.querySelector('.opening-threshold__hint');
+        this.blockEl = this.el.querySelector('.opening-threshold__block');
+        this.slotEl = this.el.querySelector('.opening-threshold__slot');
+
+        const hint = this.cfg().hintText
+            || CONFIG.opening?.labels?.continue
+            || 'גררו לכניסה';
+        if (this.hintEl) this.hintEl.textContent = hint;
+        if (this.el) this.el.setAttribute('aria-label', hint);
+
+        if (this.blockEl) {
+            this.blockEl.addEventListener('pointerdown', (e) => this._onPointerDown(e));
+        }
+
+        this.mounted = true;
+    },
+
+    enable() {
+        if (!this.mounted || this.ready || !this.isEnabled()) return;
+        if (!this._populateTag()) return;
+
+        this.ready = true;
+        this.el?.classList.add('is-ready');
+        this.blockEl?.removeAttribute('disabled');
+
+        if (this.cfg().allowKeyboardEnter !== false) {
+            this._keyHandler = (e) => {
+                if (e.key === 'Enter' && !this.completing && !this.dragging) {
+                    e.preventDefault();
+                    this._runCapture({ auto: true });
+                }
+            };
+            window.addEventListener('keydown', this._keyHandler);
+        }
+
+        this._scheduleAutoComplete();
+    },
+
+    _scheduleAutoComplete() {
+        const ms = this.cfg().autoCompleteMs;
+        if (!ms || ms <= 0) return;
+        clearTimeout(this._autoTimer);
+        this._autoTimer = setTimeout(() => {
+            if (!this.completing && !this.dragging) {
+                this._runCapture({ auto: true });
+            }
+        }, ms);
+    },
+
+    _populateTag() {
+        const options = typeof OpeningBackground !== 'undefined'
+            ? OpeningBackground.getThresholdTagOptions()
+            : [];
+        if (!options.length) return false;
+
+        const cfg = this.cfg();
+        let pick = options[0];
+        if (typeof cfg.tagIndex === 'number' && options[cfg.tagIndex]) {
+            pick = options[cfg.tagIndex];
+        } else {
+            pick = this._pickClosestToContent(options) || pick;
+        }
+
+        this.tagColor = pick.tagColor;
+        this.tagName = this._resolveTagName(pick.tagColor);
+        this.moleculeIndex = pick.moleculeIndex;
+
+        if (this.blockEl) {
+            const glyph = this.blockEl.querySelector('.block-glyph');
+            const label = this.blockEl.querySelector('.block-label');
+            if (glyph) glyph.style.backgroundColor = pick.tagColor;
+            if (label) label.textContent = this.tagName;
+            this.blockEl.style.setProperty('--block-tag-color', pick.tagColor);
+            this.blockEl.setAttribute('aria-label', `${this.tagName} — ${this.hintEl?.textContent || ''}`);
+        }
+
+        return true;
+    },
+
+    _pickClosestToContent(options) {
+        const content = document.querySelector('#opening-screen .opening-screen__content');
+        if (!content || typeof OpeningBackground === 'undefined') return options[0];
+
+        const anchor = content.getBoundingClientRect();
+        const targetX = anchor.left + anchor.width * 0.5;
+        const targetY = anchor.top + anchor.height * 0.35;
+        let best = options[0];
+        let bestDist = Infinity;
+
+        options.forEach((opt) => {
+            const pt = OpeningBackground.moleculeCenterToClient(opt.moleculeIndex);
+            if (!pt) return;
+            const dist = Math.hypot(pt.x - targetX, pt.y - targetY);
+            if (dist < bestDist) {
+                bestDist = dist;
+                best = opt;
+            }
+        });
+
+        return best;
+    },
+
+    _resolveTagName(color) {
+        const norm = String(color || '').trim().toLowerCase();
+        if (typeof OpeningData !== 'undefined' && OpeningData.tagColorsMap?.size) {
+            for (const [name, hex] of OpeningData.tagColorsMap) {
+                if (String(hex).trim().toLowerCase() === norm) return name;
+            }
+        }
+        return 'תגית';
+    },
+
+    _onPointerDown(e) {
+        if (!this.ready || this.completing || this.blockEl?.disabled) return;
+        if (e.button !== 0) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const rect = this.blockEl.getBoundingClientRect();
+        this._dragX = e.clientX - rect.left;
+        this._dragY = e.clientY - rect.top;
+        this.dragging = true;
+        this._pointerId = e.pointerId;
+
+        this.blockEl.classList.add('is-dragging');
+        this.el?.classList.add('is-dragging');
+        this._setDragPosition(e.clientX, e.clientY);
+
+        this._boundMove = (ev) => this._onPointerMove(ev);
+        this._boundUp = (ev) => this._onPointerUp(ev);
+        this._boundCancel = (ev) => this._onPointerUp(ev);
+
+        try {
+            this.blockEl.setPointerCapture(e.pointerId);
+        } catch (_) { /* synthetic events may fail capture */ }
+
+        document.addEventListener('pointermove', this._boundMove);
+        document.addEventListener('pointerup', this._boundUp);
+        document.addEventListener('pointercancel', this._boundCancel);
+    },
+
+    _onPointerMove(e) {
+        if (!this.dragging) return;
+        if (this._pointerId != null && e.pointerId !== this._pointerId) return;
+        this._setDragPosition(e.clientX, e.clientY);
+        this._updateSurfaceHover();
+    },
+
+    _setDragPosition(clientX, clientY) {
+        if (!this.blockEl) return;
+        const x = clientX - this._dragX;
+        const y = clientY - this._dragY;
+        this.blockEl.style.transform = `translate(${x}px, ${y}px)`;
+    },
+
+    _updateSurfaceHover() {
+        if (!this.surfaceEl || !this.blockEl) return;
+        const over = this._isOverSurface();
+        this.el?.classList.toggle('is-over-surface', over);
+    },
+
+    _blockCenter() {
+        if (!this.blockEl) return null;
+        const r = this.blockEl.getBoundingClientRect();
+        return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+    },
+
+    _isOverSurface() {
+        const center = this._blockCenter();
+        const surface = this.surfaceEl?.getBoundingClientRect();
+        if (!center || !surface) return false;
+
+        const pad = this.cfg().surfaceRadiusPx ?? 48;
+        const cx = surface.left + surface.width / 2;
+        const cy = surface.top + surface.height / 2;
+        const rx = surface.width / 2 + pad;
+        const ry = surface.height / 2 + pad;
+        const dx = (center.x - cx) / rx;
+        const dy = (center.y - cy) / ry;
+        return (dx * dx + dy * dy) <= 1;
+    },
+
+    _onPointerUp(e) {
+        if (!this.dragging) return;
+        if (this._pointerId != null && e.pointerId !== this._pointerId) return;
+
+        const overSurface = this._isOverSurface();
+
+        this.dragging = false;
+        this._pointerId = null;
+        this.el?.classList.remove('is-over-surface');
+
+        document.removeEventListener('pointermove', this._boundMove);
+        document.removeEventListener('pointerup', this._boundUp);
+        document.removeEventListener('pointercancel', this._boundCancel);
+        this._boundMove = null;
+        this._boundUp = null;
+        this._boundCancel = null;
+
+        try {
+            this.blockEl?.releasePointerCapture(e.pointerId);
+        } catch (_) { /* ignore */ }
+
+        if (overSurface) {
+            this._snapToSurface();
+            this.blockEl?.classList.remove('is-dragging');
+            this.el?.classList.remove('is-dragging');
+            this._runCapture({ auto: false });
+        } else {
+            this.blockEl?.classList.remove('is-dragging');
+            this.el?.classList.remove('is-dragging');
+            this._returnToDock();
+        }
+    },
+
+    _snapToSurface() {
+        const surface = this.surfaceEl?.getBoundingClientRect();
+        const block = this.blockEl?.getBoundingClientRect();
+        if (!surface || !block || !this.blockEl) return;
+
+        const x = surface.left + surface.width / 2 - block.width / 2;
+        const y = surface.top + surface.height / 2 - block.height / 2;
+        this.blockEl.style.transition = 'transform 180ms ease';
+        this.blockEl.style.transform = `translate(${x}px, ${y}px)`;
+        this.el?.classList.add('is-captured');
+    },
+
+    _returnToDock() {
+        if (!this.blockEl || !this.slotEl) return;
+        const slot = this.slotEl.getBoundingClientRect();
+        const block = this.blockEl.getBoundingClientRect();
+        const x = slot.left + (slot.width - block.width) / 2;
+        const y = slot.top + (slot.height - block.height) / 2;
+
+        this.blockEl.style.transition = 'transform 220ms ease';
+        this.blockEl.style.transform = `translate(${x}px, ${y}px)`;
+
+        const reset = () => {
+            this.blockEl.style.transition = '';
+            this.blockEl.style.transform = '';
+            this.blockEl.removeEventListener('transitionend', reset);
+        };
+        this.blockEl.addEventListener('transitionend', reset);
+    },
+
+    async _runCapture({ auto }) {
+        if (this.completing) return;
+        this.completing = true;
+        clearTimeout(this._autoTimer);
+        this._autoTimer = null;
+
+        if (auto && !this.el?.classList.contains('is-captured')) {
+            this._snapToSurface();
+        }
+
+        const center = this._blockCenter();
+        const reduced = window.matchMedia?.('(prefers-reduced-motion: reduce)')?.matches;
+
+        if (!reduced && center && typeof OpeningBackground !== 'undefined') {
+            await OpeningBackground.playThresholdCapture({
+                moleculeIndex: this.moleculeIndex,
+                tagColor: this.tagColor,
+                clientX: center.x,
+                clientY: center.y,
+                durationMs: this.cfg().captureDurationMs ?? 650
+            });
+        }
+
+        const hold = this.cfg().holdBeforeExitMs ?? 400;
+        setTimeout(() => {
+            if (typeof OpeningScreen !== 'undefined' && OpeningScreen.onThresholdComplete) {
+                OpeningScreen.onThresholdComplete();
+            }
+        }, hold);
+    },
+
+    destroy() {
+        clearTimeout(this._autoTimer);
+        if (this._keyHandler) {
+            window.removeEventListener('keydown', this._keyHandler);
+            this._keyHandler = null;
+        }
     }
 };
 /* ==========================================================================
@@ -2862,6 +3651,24 @@ const SiteAbout = {
         headline.style.letterSpacing = `${((maxWidth - naturalWidth) / (units - 1)) * spacingBoost}px`;
     },
 
+    _cssVarPx(varName) {
+        const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+        const n = parseFloat(raw);
+        if (!Number.isFinite(n)) return 0;
+        if (raw.endsWith('rem')) {
+            return n * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16);
+        }
+        return n;
+    },
+
+    _shellRowTopPx(rowStart1Based) {
+        const pad = this._shellPaddingPx();
+        const cellH = this._cssVarPx('--site-grid-cell-h');
+        const gap = this._cssVarPx('--site-grid-gap');
+        const rowOffset = Math.max(0, (rowStart1Based ?? 3) - 1);
+        return pad + rowOffset * (cellH + gap);
+    },
+
     _measureDimensions() {
         this._measureTabHeight();
         this._fitMainTitle();
@@ -2910,7 +3717,15 @@ const SiteAbout = {
         }
 
         const target = contentHeight > 0 ? contentHeight : vhFallback;
-        this._openHeight = Math.round(Math.min(Math.max(target, vhFallback), configMax, viewportCap));
+        const tabRow = this.cfg().tabTopRowStart;
+        let maxHeight = viewportCap;
+
+        if (tabRow) {
+            const panelTopPx = this._shellRowTopPx(tabRow) + this._tabHeight;
+            maxHeight = Math.round(window.innerHeight - pad - panelTopPx);
+        }
+
+        this._openHeight = Math.round(Math.min(Math.max(target, vhFallback), configMax, maxHeight));
         this.root?.style.setProperty('--site-about-panel-height', `${this._openHeight}px`);
     },
 
@@ -2976,6 +3791,13 @@ const SiteAbout = {
     },
 
     _measureOpenLift() {
+        const tabRow = this.cfg().tabTopRowStart;
+        if (tabRow) {
+            const tabTopPx = this._shellRowTopPx(tabRow);
+            this._openLift = Math.max(0, Math.round(window.innerHeight - this._tabHeight - tabTopPx));
+            return;
+        }
+
         this._openLift = Math.max(0, Math.round(
             (window.innerHeight + this._openHeight - this._tabHeight) / 2
         ));
@@ -3064,6 +3886,28 @@ const SiteAbout = {
         this._applyProgress(true);
     },
 
+    // Freeze the canvas physics/render while the panel is open, to cut background
+    // computation. Restores the runner to the current depth level on close.
+    _setBackgroundFrozen(frozen) {
+        if (this._bgFrozen === frozen) return;
+        this._bgFrozen = frozen;
+
+        if (typeof PhysicsEngine === 'undefined') return;
+
+        if (frozen) {
+            PhysicsEngine.aboutFrozen = true;
+            if (typeof PhysicsEngine.setMacroPhysicsActive === 'function') {
+                PhysicsEngine.setMacroPhysicsActive(false);
+            }
+        } else {
+            PhysicsEngine.aboutFrozen = false;
+            const level = (typeof DepthController !== 'undefined' && DepthController.currentLevel) || 1;
+            if (typeof PhysicsEngine.setMacroPhysicsActive === 'function') {
+                PhysicsEngine.setMacroPhysicsActive(level === 1);
+            }
+        }
+    },
+
     _applyProgress(animate) {
         if (!this.root) return;
 
@@ -3080,6 +3924,8 @@ const SiteAbout = {
         this.trigger?.setAttribute('aria-expanded', this.isOpen ? 'true' : 'false');
         this.panel?.setAttribute('aria-hidden', this._progress <= 0 ? 'true' : 'false');
         document.body.classList.toggle('is-site-about-open', this._progress > 0);
+
+        this._setBackgroundFrozen(this._progress > 0);
 
         if (this._progress > 0) {
             requestAnimationFrame(() => this._fitMainTitle());

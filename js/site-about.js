@@ -183,6 +183,24 @@ const SiteAbout = {
         headline.style.letterSpacing = `${((maxWidth - naturalWidth) / (units - 1)) * spacingBoost}px`;
     },
 
+    _cssVarPx(varName) {
+        const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+        const n = parseFloat(raw);
+        if (!Number.isFinite(n)) return 0;
+        if (raw.endsWith('rem')) {
+            return n * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16);
+        }
+        return n;
+    },
+
+    _shellRowTopPx(rowStart1Based) {
+        const pad = this._shellPaddingPx();
+        const cellH = this._cssVarPx('--site-grid-cell-h');
+        const gap = this._cssVarPx('--site-grid-gap');
+        const rowOffset = Math.max(0, (rowStart1Based ?? 3) - 1);
+        return pad + rowOffset * (cellH + gap);
+    },
+
     _measureDimensions() {
         this._measureTabHeight();
         this._fitMainTitle();
@@ -231,7 +249,15 @@ const SiteAbout = {
         }
 
         const target = contentHeight > 0 ? contentHeight : vhFallback;
-        this._openHeight = Math.round(Math.min(Math.max(target, vhFallback), configMax, viewportCap));
+        const tabRow = this.cfg().tabTopRowStart;
+        let maxHeight = viewportCap;
+
+        if (tabRow) {
+            const panelTopPx = this._shellRowTopPx(tabRow) + this._tabHeight;
+            maxHeight = Math.round(window.innerHeight - pad - panelTopPx);
+        }
+
+        this._openHeight = Math.round(Math.min(Math.max(target, vhFallback), configMax, maxHeight));
         this.root?.style.setProperty('--site-about-panel-height', `${this._openHeight}px`);
     },
 
@@ -297,6 +323,13 @@ const SiteAbout = {
     },
 
     _measureOpenLift() {
+        const tabRow = this.cfg().tabTopRowStart;
+        if (tabRow) {
+            const tabTopPx = this._shellRowTopPx(tabRow);
+            this._openLift = Math.max(0, Math.round(window.innerHeight - this._tabHeight - tabTopPx));
+            return;
+        }
+
         this._openLift = Math.max(0, Math.round(
             (window.innerHeight + this._openHeight - this._tabHeight) / 2
         ));
@@ -385,6 +418,28 @@ const SiteAbout = {
         this._applyProgress(true);
     },
 
+    // Freeze the canvas physics/render while the panel is open, to cut background
+    // computation. Restores the runner to the current depth level on close.
+    _setBackgroundFrozen(frozen) {
+        if (this._bgFrozen === frozen) return;
+        this._bgFrozen = frozen;
+
+        if (typeof PhysicsEngine === 'undefined') return;
+
+        if (frozen) {
+            PhysicsEngine.aboutFrozen = true;
+            if (typeof PhysicsEngine.setMacroPhysicsActive === 'function') {
+                PhysicsEngine.setMacroPhysicsActive(false);
+            }
+        } else {
+            PhysicsEngine.aboutFrozen = false;
+            const level = (typeof DepthController !== 'undefined' && DepthController.currentLevel) || 1;
+            if (typeof PhysicsEngine.setMacroPhysicsActive === 'function') {
+                PhysicsEngine.setMacroPhysicsActive(level === 1);
+            }
+        }
+    },
+
     _applyProgress(animate) {
         if (!this.root) return;
 
@@ -401,6 +456,8 @@ const SiteAbout = {
         this.trigger?.setAttribute('aria-expanded', this.isOpen ? 'true' : 'false');
         this.panel?.setAttribute('aria-hidden', this._progress <= 0 ? 'true' : 'false');
         document.body.classList.toggle('is-site-about-open', this._progress > 0);
+
+        this._setBackgroundFrozen(this._progress > 0);
 
         if (this._progress > 0) {
             requestAnimationFrame(() => this._fitMainTitle());

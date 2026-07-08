@@ -49,7 +49,10 @@ cd "$ROOT/js"
 echo "Built js/app.js ($(wc -l < app.js | tr -d ' ') lines)"
 if [ -f "$ROOT/experience.html" ]; then
   tmp="$(mktemp)"
-  sed "s|src=\"js/app.js[^\"]*\"|src=\"js/app.js?v=$BUILD_ID\"|" "$ROOT/experience.html" > "$tmp"
+  sed \
+    -e "s|src=\"js/app.js[^\"]*\"|src=\"js/app.js?v=$BUILD_ID\"|" \
+    -e "s|href=\"styles.css[^\"]*\"|href=\"styles.css?v=$BUILD_ID\"|" \
+    "$ROOT/experience.html" > "$tmp"
   mv "$tmp" "$ROOT/experience.html"
-  echo "Updated experience.html cache bust → ?v=$BUILD_ID"
+  echo "Updated experience.html cache bust → ?v=$BUILD_ID (app.js + styles.css)"
 fi

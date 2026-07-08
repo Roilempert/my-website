@@ -24,6 +24,8 @@ const OpeningScreen = {
     _warmupStarted: false,
     _preloadStarted: false,
     _onResize: null,
+    _miniTitleTimer: null,
+    _miniTitleIndex: -1,
 
     cfg() {
         return CONFIG.opening || {};
@@ -129,7 +131,6 @@ const OpeningScreen = {
 
         this._applyLabels();
         this._mountCorners();
-        this._fitOpeningTitle();
 
         this._onResize = () => this._fitOpeningTitle();
         window.addEventListener('resize', this._onResize);
@@ -144,13 +145,28 @@ const OpeningScreen = {
         this.el.classList.add('is-visible', 'is-art-pending');
         const fadeMs = this.cfg().artFadeDurationMs ?? 600;
         this.el.style.setProperty('--opening-art-fade-duration', `${fadeMs}ms`);
-        this._startTitleTypewriter();
+
+        requestAnimationFrame(() => {
+            this._fitOpeningTitle();
+            this._startTitleTypewriter();
+        });
         this._scheduleContinueEnable();
+        this._scheduleArtReadyFallback();
+    },
+
+    _scheduleArtReadyFallback() {
+        const ms = this.cfg().artReadyFallbackMs ?? 12000;
+        clearTimeout(this._revealFallbackTimer);
+        this._revealFallbackTimer = setTimeout(() => {
+            if (!this.artReady) this.onArtReady();
+        }, ms);
     },
 
     onArtReady() {
         if (this.skipped || this.artReady) return;
         this.artReady = true;
+        clearTimeout(this._revealFallbackTimer);
+        this._revealFallbackTimer = null;
         this._tryRevealArt();
     },
 
@@ -160,7 +176,7 @@ const OpeningScreen = {
         const title = this.el?.querySelector('.opening-screen__title');
         title?.classList.remove('is-typing', 'is-cursor-wait');
         title?.classList.add('is-title-typed');
-        this._fitOpeningTitle();
+        this._startMiniTitleRotation();
         this._tryRevealArt();
     },
 
@@ -214,6 +230,37 @@ const OpeningScreen = {
         };
     },
 
+    _titleChars() {
+        return [...(this._titleFullText || '')];
+    },
+
+    _renderTitleChars(title, visibleCount) {
+        const chars = this._titleChars();
+        if (!title || !chars.length) return;
+
+        title.textContent = '';
+        const frag = document.createDocumentFragment();
+
+        // Zero-width caret placed at the current typing boundary. It never
+        // occupies layout width, so revealing letters or hiding it at the end
+        // causes no reflow, and it always sits next to the letter being typed.
+        const caret = document.createElement('span');
+        caret.className = 'opening-screen__title-cursor';
+        caret.setAttribute('aria-hidden', 'true');
+
+        chars.forEach((ch, index) => {
+            if (index === visibleCount) frag.appendChild(caret);
+            const span = document.createElement('span');
+            span.className = 'opening-screen__title-char';
+            span.textContent = ch;
+            if (index >= visibleCount) span.classList.add('is-pending');
+            frag.appendChild(span);
+        });
+        if (visibleCount >= chars.length) frag.appendChild(caret);
+
+        title.appendChild(frag);
+    },
+
     _fitOpeningTitle() {
         const title = this.el?.querySelector('.opening-screen__title');
         if (!title) return;
@@ -221,7 +268,7 @@ const OpeningScreen = {
         const text = (this._titleFullText || this.cfg().labels?.title || title.textContent || '').trim();
         if (!text) return;
 
-        const savedText = title.textContent;
+        const visibleCount = title.querySelectorAll('.opening-screen__title-char:not(.is-pending)').length;
         title.textContent = text;
         title.style.fontSize = '';
         title.style.letterSpacing = '0px';
@@ -230,7 +277,7 @@ const OpeningScreen = {
         const reducePx = reducePt * (96 / 72);
         const maxWidth = title.clientWidth;
         if (maxWidth <= 0) {
-            title.textContent = savedText;
+            this._renderTitleChars(title, visibleCount);
             return;
         }
 
@@ -262,7 +309,147 @@ const OpeningScreen = {
             }
         }
 
-        title.textContent = savedText;
+        title.textContent = text;
+
+        const lineHeight = 0.88;
+        title.style.minHeight = `${targetPx * lineHeight}px`;
+        this.el?.style.setProperty('--opening-title-font-size', `${targetPx}px`);
+        this.el?.style.setProperty('--opening-title-line-height', String(lineHeight));
+        this._renderTitleChars(title, visibleCount);
+        if (typeof OpeningBackground !== 'undefined' && OpeningBackground.refitOpeningLayout) {
+            OpeningBackground.refitOpeningLayout();
+        }
+    },
+
+    _miniTitleEl() {
+        return this.el?.querySelector('.opening-screen__mini-title');
+    },
+
+    _miniTitleCfg() {
+        return this.cfg().miniTitle || {};
+    },
+
+    _miniTitleMeasureCtx: null,
+
+    _getMiniTitleMeasureCtx() {
+        if (!this._miniTitleMeasureCtx) {
+            const canvas = document.createElement('canvas');
+            this._miniTitleMeasureCtx = canvas.getContext('2d');
+        }
+        return this._miniTitleMeasureCtx;
+    },
+
+    _getMiniTitleFont() {
+        const root = getComputedStyle(document.documentElement);
+        const weight = root.getPropertyValue('--type-display-weight').trim() || '400';
+        const size = root.getPropertyValue('--type-display-size').trim() || '1.6667rem';
+        const family = root.getPropertyValue('--type-family-note-h').trim() || 'TheBasics-Dots, sans-serif';
+        return `normal ${weight} ${size} ${family}`;
+    },
+
+    _getMiniTitleMaxWidthPx() {
+        const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+        return Math.min(28 * rootPx, window.innerWidth * 0.42);
+    },
+
+    _miniTitleQuarter: -1,
+
+    _miniTitleQuarters() {
+        return [
+            { x: 28, y: 30 },
+            { x: 72, y: 30 },
+            { x: 28, y: 70 },
+            { x: 72, y: 70 }
+        ];
+    },
+
+    _placeMiniTitleRandomly(el) {
+        if (!el) return;
+        const quarters = this._miniTitleQuarters();
+        let next = Math.floor(Math.random() * quarters.length);
+        if (next === this._miniTitleQuarter && quarters.length > 1) {
+            next = (next + 1) % quarters.length;
+        }
+        this._miniTitleQuarter = next;
+
+        const q = quarters[next];
+        el.style.left = `${q.x}%`;
+        el.style.top = `${q.y}%`;
+        el.style.transform = 'translate(-50%, -50%)';
+    },
+
+    _fitMiniTitleToWidth(text, maxWidth) {
+        if (!text || maxWidth <= 0) return text || '';
+
+        const ctx = this._getMiniTitleMeasureCtx();
+        ctx.font = this._getMiniTitleFont();
+
+        if (ctx.measureText(text).width <= maxWidth) return text;
+
+        const words = text.split(/\s+/).filter(Boolean);
+        let result = '';
+        for (const word of words) {
+            const candidate = result ? `${result} ${word}` : word;
+            if (ctx.measureText(candidate).width > maxWidth) break;
+            result = candidate;
+        }
+
+        return result || words[0] || '';
+    },
+
+    _pickRandomHoverLine() {
+        const lines = OpeningData?.hoverLines || [];
+        if (!lines.length) return null;
+        if (lines.length === 1) return lines[0];
+
+        let next = Math.floor(Math.random() * lines.length);
+        if (next === this._miniTitleIndex) {
+            next = (next + 1) % lines.length;
+        }
+        this._miniTitleIndex = next;
+        return lines[next];
+    },
+
+    _setMiniTitle(hover) {
+        const el = this._miniTitleEl();
+        if (!el) return;
+
+        if (!hover?.text) {
+            el.textContent = '';
+            el.classList.remove('is-visible', 'note-title', 'note-body');
+            el.hidden = true;
+            return;
+        }
+
+        el.hidden = false;
+        el.classList.toggle('note-title', hover.role !== 'body');
+        el.classList.toggle('note-body', hover.role === 'body');
+        const maxWidth = this._getMiniTitleMaxWidthPx();
+        el.textContent = this._fitMiniTitleToWidth(hover.text, maxWidth);
+        this._placeMiniTitleRandomly(el);
+        el.classList.add('is-visible');
+    },
+
+    _showMiniTitle() {
+        if (this._miniTitleCfg().enabled === false) return;
+        this._setMiniTitle(this._pickRandomHoverLine());
+    },
+
+    _startMiniTitleRotation() {
+        if (this._miniTitleCfg().enabled === false) return;
+
+        clearInterval(this._miniTitleTimer);
+        this._showMiniTitle();
+
+        const rotateMs = this._miniTitleCfg().rotateMs ?? 4500;
+        if (rotateMs > 0) {
+            this._miniTitleTimer = setInterval(() => this._showMiniTitle(), rotateMs);
+        }
+    },
+
+    _stopMiniTitleRotation() {
+        clearInterval(this._miniTitleTimer);
+        this._miniTitleTimer = null;
     },
 
     _applyLabels() {
@@ -274,6 +461,7 @@ const OpeningScreen = {
             this._titleFullText = labels.title || title.textContent || '';
             title.textContent = '';
             title.setAttribute('aria-label', this._titleFullText);
+            this._renderTitleChars(title, 0);
         }
         if (subtitle && labels.subtitle) subtitle.textContent = labels.subtitle;
         if (btn && labels.continue) {
@@ -297,9 +485,9 @@ const OpeningScreen = {
 
         this._cancelTitleTypewriter();
         this.titleTyped = false;
-        title.textContent = '';
         title.classList.remove('is-title-typed', 'is-typing');
         title.classList.add('is-cursor-wait');
+        this._renderTitleChars(title, 0);
 
         const generation = this._titleTypewriterGen;
         const cursorWaitMs = this.cfg().titleCursorWaitMs ?? 1800;
@@ -316,7 +504,7 @@ const OpeningScreen = {
             const step = () => {
                 if (generation !== this._titleTypewriterGen) return;
                 index += 1;
-                title.textContent = text.slice(0, index);
+                this._renderTitleChars(title, index);
                 if (index < text.length) {
                     this._titleTypewriterTimer = setTimeout(step, msPerChar);
                 } else {
@@ -353,6 +541,8 @@ const OpeningScreen = {
             OpeningBackground.onDataReady();
         }
 
+        if (this.titleTyped) this._startMiniTitleRotation();
+
         if (this.userDismissed && !this.bootFlushed) {
             this._enterSite();
         }
@@ -369,6 +559,9 @@ const OpeningScreen = {
         this.dismissing = true;
         this.userDismissed = true;
         this._cancelTitleTypewriter();
+        this._stopMiniTitleRotation();
+        clearTimeout(this._revealFallbackTimer);
+        this._revealFallbackTimer = null;
         if (this._onResize) {
             window.removeEventListener('resize', this._onResize);
             this._onResize = null;

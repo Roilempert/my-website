@@ -126,7 +126,7 @@ const DepthTransitionOrchestrator = {
                 !(typeof NoteCensor !== 'undefined' && NoteCensor.blocksNoteFocus())) {
                 requestAnimationFrame(() => {
                     if (DepthController.currentLevel === 3) {
-                        ArtifactInspector.open(wrapper);
+                        ArtifactInspector.open(wrapper, { fromMacro: true });
                     }
                 });
             }

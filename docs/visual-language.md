@@ -103,13 +103,18 @@ Ceremonial onboarding threshold before Experience 1. Single **כניסה** conti
 | Property | Value |
 |----------|--------|
 | Layer | `#opening-screen`, fixed inset `--site-grid-padding`, `z-index: 11000` |
-| Background | `--color-5`; L1 molecule canvas art (blurred) fades in after title types |
-| Load sequence | Blank bg → slow cursor blink → title types → molecules fade in (text above art, beige canvas) |
-| Text layer | Above molecules (`z-index: 3`); canvas uses `--color-5` fill |
-| Silhouette art | L1-style molecules + pills (`OpeningBackground`), not meso grid |
-| Title | `.main-t` width-fit (`הדברים`), `--color-3`, RTL — `titleCursorWaitMs` then slow typewriter; shares `CONFIG.about` title fit limits |
-| Subtitle | `.general-t`, `--color-3` — `רשימת קניות, הודעת פרידה, מתכון לספינג׳. המילים שנכתבות בטלפון.` |
-| Content layout | Full shell width (`calc(100% - 2 * --site-grid-padding)`); no content panel/padding box |
+| Background | `--color-5` on shell; transparent art canvas; crisp L1 molecules fade in after title types |
+| Load sequence | Blank bg → slow cursor blink → title types → molecules fade in (title/subtitle/button above art) |
+| Text layer | Title/subtitle/button `z-index: 3`; mini-title **behind** art at `z-index: 1` |
+| Silhouette art | L1-style molecules + pills (`OpeningBackground`), not meso grid; pills carry a **white row** mimicking a line of text next to the tag glyph |
+| Title safe frame scope | **Initial placement only** — molecules never spawn over the title, but at runtime they may drift into the zone (cursor push is not undone) |
+| Title | `.main-t` width-fit across **12 shell cols**, `--color-3`, `הדברים` — `titleCursorWaitMs` then slow typewriter; `CONFIG.opening.titleFit` |
+| Subtitle | `.general-t`, `--color-3` — in content stack above button; hidden until `is-art-ready`, fades in **with the molecules** after title types |
+| Mini title | `.opening-screen__mini-title` — random L1 hover phrases from `data/main.csv`; **behind** art; L1 word-fit (no ellipsis); jumps to a **random quarter** each rotation; revealed when mouse moves shapes |
+| Content layout | **12 cols** centered; title + subtitle + button above art; mini-title is a separate background layer |
+| Title caret | `.opening-screen__title-cursor` — zero-width span at the current typing boundary; baseline-anchored bar nudged ~0.5em left of the typed text; blinks during wait/typing; no reflow when typing ends |
+| Title safe frame | Molecules avoid padded rect around `.opening-screen__title` (`CONFIG.opening.titleSafeFrame`; padX 18, padY 14) |
+| Background | Molecules blurred + grained but saturated (`contentBlurPx: 3.5`, `grainAlpha: 14`, `blobBlendMode: source-over`, `blobLayerAlpha: 1`); GPU `saturate/contrast` on canvas |
 | Continue | `.general-t` pill — fill `--color-3`, text `--color-1`, radius `--space-5`, pad `--space-10` / `--space-30` |
 | Corners | `decoration-corner-tr.svg` × 4 (warehouse pattern) |
 | Dev bypass | `?skipOpening=1` persists skip in `localStorage`; `?opening=1` resets. **Do not use skip on exhibition iMac.** |
@@ -285,7 +290,8 @@ SVG assets: `layer-nav-molecule-2.svg`, `layer-nav-blocks.svg`, `layer-nav-molec
 - Focused note starts at the beginning of shell row 2 when the popup opens
 - **No separate metadata panel** — author, date (MM YYYY, `0000`/empty → `לא ידוע`), and typology (`מבנה`, Hebrew via `typologyLabels`) in a **single RTL row** at the bottom of the focus card (`.note-card__focus-footer.general-d`, **10pt**, no background band); category labels (`.note-card__focus-label`) **color 2**, values **color 3**
 - **Focus note ID:** vertical lane text **color 2** (not background); sticky like L2 — JS sync inside scaled focus card (`NoteIdSticky`), CSS sticky elsewhere in inspector
-- **Related notes:** one section per tag subset of focus note that **exists on at least one other note**; omit unused combinations; 2 notes per row, 40px gap
+- **Focus title + tags:** extra **20px** right padding (`padding-right: var(--space-20)`) on `.note-title` and `.micro-mock__tags` inside the focus card
+- **Related notes (L1 macro origin only):** title **באותו נושא:** at regular text size (`general-t`); shown only when focus opened from L1 (`fromMacro`); one section per **2+ tag combination** of the focus note that exists on at least one other note; omit unused combinations and single-tag subsets; panel **color 6** fill, **5px** radius, **20px** padding, **40px** (`--space-40`) gap from focus note; suggestion cards rendered like the focus note (`focusScale`) — **one per row**, capped to focus-note width (8 cols) and centered; note ID **color 2** with **10px** left inset (`--note-id-inset`); **no** scroll-sticky ID animation (excluded from `NoteIdSticky`)
 - **Censored theme:** grid cards stay redacted; **focus inspector is never censored** — full title, body, footer, and tag pills when opened (study-unlock gate still applies to open from grid)
 
 ---
@@ -315,6 +321,8 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-08 | Related notes panel: title **באותו נושא:** at regular text size; suggestion cards enlarged to focus-note style (`focusScale`), **one per row** at focus width; ID **color 2**, **10px** left inset, sticky animation removed; **40px** gap from focus note |
+| 2026-07-08 | Focus inspector: title + tags **20px** right padding; related notes **color 6** panel (5px radius, 20px pad); suggestions **L1 macro origin only**, **2+ tag combinations** only |
 | 2026-07-08 | Expand-drag panel **12×4** — **3×2 map** + **9 col** blocks (row 2 under arrow); blocks **20px** end inset, **10px** left shift, scroll flush top |
 | 2026-07-08 | L3 note card: bottom pad **20px**; title↔body and body↔details gaps **30px** (`--space-30`) |
 | 2026-07-08 | Expand-drag panel **10×3** grid — **2 col** compact map (1 row) + **8 col** blocks from row 2; one handle row reserved at top |
@@ -322,6 +330,16 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 | 2026-07-08 | L2 censored grid: metadata footer hidden on cards (focus inspector only); tag row **10px** gap from card |
 | 2026-07-08 | L2 censored word cover: **scaleY** shrink from bottom (sink behind ledge); restore = reverse grow |
 | 2026-07-08 | L2 solo words (no matches): probe line stretches out on hover/click and retracts — same hairline style as match links |
+| 2026-07-08 | About open bg tuned to opening-scene feel: **more blur** (44px, plain `blur` — dropped displacement filter), **less grain** (overlay opacity 0.18, coarser 200px tile) |
+| 2026-07-08 | About open: stronger background — blur **12→28px** (`--site-about-bg-blur`); added film-grain overlay on backdrop (`::after` feTurbulence, `overlay` blend, 0.55 opacity) |
+| 2026-07-08 | About columns: logo **1** + details **6** + text **5** (was details 5 / text 5) |
+| 2026-07-08 | About open: canvas **frozen** (`PhysicsEngine.aboutFrozen` pauses runner + `syncLoop`) + **blur/grain wash** on `#app` (`--site-about-bg-blur` 12px); logo **+5px** right; body **row break** after אותם.; title **−20pt** (auto letter-spacing widens); text width **−10px** (thinner left) |
+| 2026-07-08 | About open: **tab top anchored to shell row 2 top** (`tabTopRowStart`; replaces `openRowStart`); project text **+10px** left (`margin-right`); panel metadata **all 4 corners 5px** radius |
+| 2026-07-08 | About details block shifted **10px** toward logo (`margin-left: -var(--space-10)`) |
+| 2026-07-08 | About logo **+20%** again (`0.75×` cell-w) |
+| 2026-07-08 | About body **5 cols** wide (was 5.5); logo **+20%** (`0.624×` cell-w); metadata `overflow: visible` (no logo crop) |
+| 2026-07-08 | About open: panel top at **shell row 3**; height **content-hugging** + **40px** bottom pad (no viewport fill); text alignment reverted (5.5 cols, end-aligned right) |
+| 2026-07-08 | About open: panel top at **shell row 2**; **40px** bottom content pad; metadata **bottom-only 5px** radius; logo smaller (no crop); `.general-t` line-height **1.2rem** in panel; text left edge at shell **col 2** |
 | 2026-07-08 | About body width **5.5 cols** (end-aligned); logo enlarged; title letter-spacing **+2%** (`titleLetterSpacingBoost` 1.581) |
 | 2026-07-08 | About layout RTL: **text right** (cols 7–12), **details center** (2–6), **logo left** (1); categories **color 3**; intro line break after חזותית; body sentences merged (no gap) |
 | 2026-07-08 | About layout: logo **physical left** (col 1); text cols 2–7; details cols 8–12; credit rows **5-subcol grid** (category right 2, output left 3, no wrap); credits **`.general-t`** (1rem) not `.general-d` |
@@ -336,6 +354,10 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 | 2026-07-08 | Focus footer: restored `מבנה` typology metadata row (Hebrew label via `typologyLabels`); typology blocks remain removed |
 | 2026-07-08 | **Removed typology blocks** — dock pills, L2 attached pills, pattern underline CSS, and all capture/filter/orbit logic for typology block type |
 | 2026-07-08 | Focus footer: `.general-d` 10pt, no background; date empty/`0000` → `לא ידוע` |
+| 2026-07-08 | Opening polish v4: **larger molecules** (`radiusMin 0.06 / radiusMax 0.16`), wider scatter (`scatterSpread 0.64`); **ambient dot motion** on (`dotMotion: true`, `dotAmbientAmp 0.45`); caret nudged **left of typed text** (`translateX(calc(-50% - 0.5em))`); **subtitle fades in with molecules** at `is-art-ready` (hidden until title typed) |
+| 2026-07-08 | Opening polish v3: more molecules (`blobCount: 36`); decorative pills gain a **white text row** (`pillTextRow*`); title safe frame is **placement-only** (no runtime repel — molecules may drift into it); stronger cursor push (`mouseHoverMaxShift: 0.045`, radius 1.45); title caret **baseline-anchored** (sits higher, aligned with letters) |
+| 2026-07-08 | Opening polish v2: keep saturation but **blur + grain back** (`contentBlurPx: 3.5`, `grainAlpha: 14`, still `source-over`); mini-title jumps to a **random quarter** each rotation; title caret is **zero-width, aligned to typing position** (no end-of-type reflow) |
+| 2026-07-08 | Opening polish: vivid crisp shapes (`source-over`, no blur); mini-title **behind** art (z-index 1); wider scatter; smaller title safe frame; L1-style word-fit (no ellipsis) |
 | 2026-07-08 | Focus inspector: tag pills + footer metadata locked to single row (`flex-wrap: nowrap`) |
 | 2026-07-08 | Focus inspector: removed metadata panel; author/date in color-5 card footer; focus ID lane color-5 fill |
 | 2026-07-08 | Expand-drag launcher arrow points **down** when menu open (pinned); **up** when collapsed |
@@ -343,6 +365,11 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 | 2026-07-08 | Expand-drag launcher default/hover colors **flipped** — default outer **6** / inner **3** / arrow **6**; hover+grab outer **3** / inner **6** / arrow **3** |
 | 2026-07-08 | Expand-drag launcher shell **86×46** with **5px** pad (`--space-5`); handle motion **vertical-only** via bottom anchor + `translateY` (no diagonal snap to `top: 0`) |
 | 2026-07-08 | Expand-drag open: handle **top-center**; blocks tray below handle row; **row 2** reserves empty launcher-width slot at row start; default launcher colors outer **3** / inner **6** / arrow **3**, reversed on hover+grab |
+| 2026-07-08 | Opening: blur restored; subtitle back in content stack; **mini title** rotates random L1 hover phrases; title safe frame kept |
+| 2026-07-08 | Opening: title **safe frame** for molecule placement; subtitle **behind** art layer (revealed on blob move) |
+| 2026-07-08 | Opening: crisp molecules (no blur/grain); subtitle **−10px**; title typewriter uses hidden char spans (stable row/letter-spacing) |
+| 2026-07-08 | Opening: **12-col** title track; molecules restored (light blur + grain); entry button unblocks via art-ready + 12s fallback |
+| 2026-07-08 | Opening: title **8 cols** width-fit (smaller max); subtitle tight + stable layout (reserved title height); heavier type cursor; **grain-only** bg (no blobs/blur) |
 | 2026-07-08 | Opening screen: title **הדברים** `.main-t` width-fit (matches about panel); subtitle updated; no content panel box — full-bleed type on canvas |
 | 2026-07-08 | Warehouse expand-drag: handle travels **vertical center axis only** (no horizontal drift); arrow fixed **up** in expand-drag mode |
 | 2026-07-08 | Note ID sticky: rides with card until natural top crosses **m**, then pins; bottom clamp at **m** |

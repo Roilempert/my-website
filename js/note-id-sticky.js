@@ -21,6 +21,7 @@ const NoteIdSticky = {
     },
 
     isFocusCard(card) {
+        if (card?.closest('.artifact-inspector-related')) return false;
         return !!card?.closest(
             '.artifact-inspector-panel, .artifact-inspector-flyer, .artifact-inspector-card-measure-probe'
         );

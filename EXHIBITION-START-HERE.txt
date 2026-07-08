@@ -52,7 +52,10 @@ The new launcher works without the scripts/ folder.
 3. RIGHT-CLICK  Start Local Server.command  →  Open  →  Open
 4. Read the Terminal window — it now shows the real error
 
-If it says Python/Ruby missing:
+The launcher tries Python, then Ruby, then Perl (Perl is built into
+every Mac, so it should always start even on a fresh machine).
+
+Only if it says Python/Ruby/Perl ALL missing:
   This Mac needs "Command Line Tools" installed once (ask someone with a keyboard).
 
 

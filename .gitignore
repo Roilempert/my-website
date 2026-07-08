@@ -13,3 +13,6 @@
 /site-*.png
 /site-full.png
 /site-viewport.png
+
+# Playwright MCP capture artifacts (agent test output — not part of the site)
+/.playwright-mcp/

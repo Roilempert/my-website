@@ -1,4 +1,4 @@
-/* app build 20260708025734 */
+/* app build 20260708113231 */
 /* ==========================================================================
    01. SYSTEM BOOTSTRAP
    ========================================================================== */
@@ -3380,6 +3380,7 @@ const NoteIdSticky = {
     },
 
     isFocusCard(card) {
+        if (card?.closest('.artifact-inspector-related')) return false;
         return !!card?.closest(
             '.artifact-inspector-panel, .artifact-inspector-flyer, .artifact-inspector-card-measure-probe'
         );
@@ -6540,7 +6541,7 @@ const RenderEngine = {
                     if (!(typeof NoteCensor !== 'undefined' && NoteCensor.blocksNoteFocus())) {
                         requestAnimationFrame(() => {
                             if (DepthController.currentLevel === 3) {
-                                ArtifactInspector.open(wrapper);
+                                ArtifactInspector.open(wrapper, { fromMacro: true });
                             }
                         });
                     }
@@ -7469,7 +7470,7 @@ const DepthTransitionOrchestrator = {
                 !(typeof NoteCensor !== 'undefined' && NoteCensor.blocksNoteFocus())) {
                 requestAnimationFrame(() => {
                     if (DepthController.currentLevel === 3) {
-                        ArtifactInspector.open(wrapper);
+                        ArtifactInspector.open(wrapper, { fromMacro: true });
                     }
                 });
             }
@@ -14029,6 +14030,7 @@ const ArtifactInspector = {
     _openAnimTimer: null,
     _openSyntheticCard: false,
     _forceReadableOpen: false,
+    _openedFromMacro: false,
 
     init() {
         this.backdrop = document.createElement('div');
@@ -14073,7 +14075,7 @@ const ArtifactInspector = {
         return true;
     },
 
-    open(noteWrapperNode) {
+    open(noteWrapperNode, opts) {
         if (this.isActive) return;
         if (!this.isOpenableWrapper(noteWrapperNode)) return;
 
@@ -14082,6 +14084,7 @@ const ArtifactInspector = {
             && NoteCensor.isNoteStudyUnlocked(noteWrapperNode);
 
         this._forceReadableOpen = studyOpen;
+        this._openedFromMacro = !!(opts && opts.fromMacro);
         this.openPopup(noteWrapperNode);
     },
 
@@ -14116,7 +14119,7 @@ const ArtifactInspector = {
         if (this.isActive) {
             this.close();
         } else {
-            this.open(wrapper);
+            this.open(wrapper, { fromMacro: true });
         }
         return true;
     },
@@ -14577,7 +14580,7 @@ const ArtifactInspector = {
         const tagsHtml = typeof MicroMock !== 'undefined'
             ? MicroMock.buildTagsRowHTML(item, tagOptions)
             : '';
-        const relatedHtml = this.buildRelatedNotesHTML(item);
+        const relatedHtml = this._openedFromMacro ? this.buildRelatedNotesHTML(item) : '';
         return `
             <div class="artifact-inspector-focus">
                 <div class="micro-mock__note artifact-inspector-focus__note">
@@ -14609,7 +14612,7 @@ const ArtifactInspector = {
 
             const notes = section.items.map((item) => {
                 const html = typeof MicroMock !== 'undefined'
-                    ? MicroMock.buildCardHTML(item)
+                    ? MicroMock.buildCardHTML(item, { focusScale: true })
                     : '';
                 return `<div class="artifact-inspector-related__note">${html}</div>`;
             }).join('');
@@ -14624,7 +14627,7 @@ const ArtifactInspector = {
 
         return `
             <section class="artifact-inspector-related">
-                <h2 class="artifact-inspector-related__title general-h">פתקים קשורים</h2>
+                <h2 class="artifact-inspector-related__title general-t">באותו נושא:</h2>
                 ${blocks}
             </section>
         `;
@@ -14639,7 +14642,7 @@ const ArtifactInspector = {
 
         const emit = (mask) => {
             const tags = focusTags.filter((_, i) => (mask >> i) & 1);
-            if (!tags.length) return;
+            if (tags.length < 2) return;
             const key = tags.slice().sort().join('\0');
             if (subsets.some(s => s.key === key)) return;
 
@@ -14740,6 +14743,7 @@ const ArtifactInspector = {
         this._openFocusVisualWidth = null;
         this._openSyntheticCard = false;
         this._forceReadableOpen = false;
+        this._openedFromMacro = false;
         this.isActive = false;
         this.activeElement = null;
         this.mode = null;
@@ -14934,6 +14938,24 @@ const SiteAbout = {
         headline.style.letterSpacing = `${((maxWidth - naturalWidth) / (units - 1)) * spacingBoost}px`;
     },
 
+    _cssVarPx(varName) {
+        const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+        const n = parseFloat(raw);
+        if (!Number.isFinite(n)) return 0;
+        if (raw.endsWith('rem')) {
+            return n * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16);
+        }
+        return n;
+    },
+
+    _shellRowTopPx(rowStart1Based) {
+        const pad = this._shellPaddingPx();
+        const cellH = this._cssVarPx('--site-grid-cell-h');
+        const gap = this._cssVarPx('--site-grid-gap');
+        const rowOffset = Math.max(0, (rowStart1Based ?? 3) - 1);
+        return pad + rowOffset * (cellH + gap);
+    },
+
     _measureDimensions() {
         this._measureTabHeight();
         this._fitMainTitle();
@@ -14982,7 +15004,15 @@ const SiteAbout = {
         }
 
         const target = contentHeight > 0 ? contentHeight : vhFallback;
-        this._openHeight = Math.round(Math.min(Math.max(target, vhFallback), configMax, viewportCap));
+        const tabRow = this.cfg().tabTopRowStart;
+        let maxHeight = viewportCap;
+
+        if (tabRow) {
+            const panelTopPx = this._shellRowTopPx(tabRow) + this._tabHeight;
+            maxHeight = Math.round(window.innerHeight - pad - panelTopPx);
+        }
+
+        this._openHeight = Math.round(Math.min(Math.max(target, vhFallback), configMax, maxHeight));
         this.root?.style.setProperty('--site-about-panel-height', `${this._openHeight}px`);
     },
 
@@ -15048,6 +15078,13 @@ const SiteAbout = {
     },
 
     _measureOpenLift() {
+        const tabRow = this.cfg().tabTopRowStart;
+        if (tabRow) {
+            const tabTopPx = this._shellRowTopPx(tabRow);
+            this._openLift = Math.max(0, Math.round(window.innerHeight - this._tabHeight - tabTopPx));
+            return;
+        }
+
         this._openLift = Math.max(0, Math.round(
             (window.innerHeight + this._openHeight - this._tabHeight) / 2
         ));
@@ -15136,6 +15173,28 @@ const SiteAbout = {
         this._applyProgress(true);
     },
 
+    // Freeze the canvas physics/render while the panel is open, to cut background
+    // computation. Restores the runner to the current depth level on close.
+    _setBackgroundFrozen(frozen) {
+        if (this._bgFrozen === frozen) return;
+        this._bgFrozen = frozen;
+
+        if (typeof PhysicsEngine === 'undefined') return;
+
+        if (frozen) {
+            PhysicsEngine.aboutFrozen = true;
+            if (typeof PhysicsEngine.setMacroPhysicsActive === 'function') {
+                PhysicsEngine.setMacroPhysicsActive(false);
+            }
+        } else {
+            PhysicsEngine.aboutFrozen = false;
+            const level = (typeof DepthController !== 'undefined' && DepthController.currentLevel) || 1;
+            if (typeof PhysicsEngine.setMacroPhysicsActive === 'function') {
+                PhysicsEngine.setMacroPhysicsActive(level === 1);
+            }
+        }
+    },
+
     _applyProgress(animate) {
         if (!this.root) return;
 
@@ -15152,6 +15211,8 @@ const SiteAbout = {
         this.trigger?.setAttribute('aria-expanded', this.isOpen ? 'true' : 'false');
         this.panel?.setAttribute('aria-hidden', this._progress <= 0 ? 'true' : 'false');
         document.body.classList.toggle('is-site-about-open', this._progress > 0);
+
+        this._setBackgroundFrozen(this._progress > 0);
 
         if (this._progress > 0) {
             requestAnimationFrame(() => this._fitMainTitle());
@@ -15182,6 +15243,7 @@ const PhysicsEngine = {
     repulsionHoldNoteIndex: -1,
     moleculeClickIntent: null,
     transitionFrozen: false,
+    aboutFrozen: false,
     runnerEnabled: false,
     syncLoopLastTs: 0,
     navPhysicsTickLastTs: 0,
@@ -16749,6 +16811,9 @@ const PhysicsEngine = {
 
     syncLoop() {
         requestAnimationFrame(() => this.syncLoop());
+
+        // About panel open: canvas is frozen + blurred behind the sheet — skip all recompute/draw.
+        if (this.aboutFrozen) return;
 
         if (MacroMesoBridge.isAnimating() && !MacroMesoBridge.isZoomOutActive()) return;
 
@@ -23994,6 +24059,10 @@ const OpeningBackground = {
             || host?.closest?.('#opening-screen'));
     },
 
+    _isOpeningArtTransparent(cfg) {
+        return cfg?.transparent === true;
+    },
+
     _shouldDeferOpeningBlobs() {
         return this._isOpeningArt()
             && this._shouldBuildBlobs()
@@ -24616,6 +24685,20 @@ const OpeningBackground = {
         ctx.arc(glyphCx, 0, glyphR, 0, Math.PI * 2);
         ctx.fill();
 
+        // White row after the glyph to mimic a line of text.
+        const rowH = height * (cfg.pillTextRowHeightRatio ?? 0.16);
+        const rowGap = (height / blockH) * (cfg.pillTextRowGap ?? 4);
+        const rowStartX = glyphCx + glyphR + rowGap;
+        const rowEndX = x + width - padX;
+        const rowW = rowEndX - rowStartX;
+        if (rowW > rowH) {
+            ctx.globalAlpha = cfg.pillTextRowAlpha ?? 0.92;
+            ctx.fillStyle = this._resolveCssColor(cfg.pillTextRowColor ?? '#FFFFFF', '#FFFFFF');
+            this._roundRectPath(ctx, rowStartX, -rowH * 0.5, rowW, rowH, rowH * 0.5);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+
         ctx.restore();
     },
 
@@ -24660,7 +24743,7 @@ const OpeningBackground = {
     },
 
     _contentBlurPx(cfg, w, h) {
-        if (typeof cfg.contentBlurPx === 'number' && cfg.contentBlurPx > 0) {
+        if (typeof cfg.contentBlurPx === 'number') {
             return cfg.contentBlurPx;
         }
         const minDim = Math.min(w, h);
@@ -24760,21 +24843,30 @@ const OpeningBackground = {
         const drawAtmosphere = this._shouldDrawAtmosphere(cfg);
 
         if (source === 'content' && drawCrisp) {
-            const dpr = ctx.canvas.width / Math.max(1, w);
-            const bctx = this._ensureContentBuffer(w, h, dpr);
-            if (bctx) {
-                bctx.clearRect(0, 0, w, h);
-                this._drawCrispBlobs(bctx, cfg);
-
-                const blurPx = this._contentBlurPx(cfg, w, h);
+            const blurPx = this._contentBlurPx(cfg, w, h);
+            if (blurPx <= 0) {
                 ctx.save();
-                ctx.globalCompositeOperation = cfg.blobBlendMode ?? 'multiply';
+                ctx.globalCompositeOperation = 'source-over';
                 ctx.globalAlpha = cfg.blobLayerAlpha ?? 1;
-                ctx.filter = `blur(${blurPx}px)`;
-                ctx.drawImage(this._contentBuffer, 0, 0, w, h);
-                ctx.filter = 'none';
+                this._drawCrispBlobs(ctx, cfg);
                 ctx.globalAlpha = 1;
                 ctx.restore();
+            } else {
+                const dpr = ctx.canvas.width / Math.max(1, w);
+                const bctx = this._ensureContentBuffer(w, h, dpr);
+                if (bctx) {
+                    bctx.clearRect(0, 0, w, h);
+                    this._drawCrispBlobs(bctx, cfg);
+
+                    ctx.save();
+                    ctx.globalCompositeOperation = cfg.blobBlendMode ?? 'multiply';
+                    ctx.globalAlpha = cfg.blobLayerAlpha ?? 1;
+                    ctx.filter = `blur(${blurPx}px)`;
+                    ctx.drawImage(this._contentBuffer, 0, 0, w, h);
+                    ctx.filter = 'none';
+                    ctx.globalAlpha = 1;
+                    ctx.restore();
+                }
             }
         } else {
             if (drawCrisp) {
@@ -24870,7 +24962,7 @@ const OpeningBackground = {
         ctx.globalCompositeOperation = 'source-over';
     },
 
-    _buildScatterMolecules(w, h, targetCount, rand, cfg) {
+    _buildScatterMolecules(w, h, targetCount, rand, cfg, safeRect = null) {
         const minDim = Math.min(w, h);
         const radiusMin = minDim * (cfg.radiusMin ?? 0.04);
         const radiusMax = minDim * (cfg.radiusMax ?? 0.14);
@@ -24883,22 +24975,34 @@ const OpeningBackground = {
         const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
         const blobs = [];
 
+        const maxAttempts = cfg.scatterMaxAttempts ?? 32;
+
         for (let i = 0; i < uniqueCount; i++) {
             const scale = rand() * (radiusMax - radiusMin) + radiusMin;
             let cx;
             let cy;
+            let placed = false;
 
-            if (useMirror) {
-                const insetRatio = cfg.scatterMirrorInset ?? 0.04;
-                const reach = cfg.scatterMirrorReach ?? 1;
-                const inset = spread * insetRatio;
-                const range = Math.max(inset, (spread - inset) * reach);
-                cx = centerX + inset + rand() * range;
-                cy = centerY - inset - rand() * range;
-            } else {
-                cx = centerX + (rand() - 0.5) * 2 * spread;
-                cy = centerY + (rand() - 0.5) * 2 * spread;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                if (useMirror) {
+                    const insetRatio = cfg.scatterMirrorInset ?? 0.04;
+                    const reach = cfg.scatterMirrorReach ?? 1;
+                    const inset = spread * insetRatio;
+                    const range = Math.max(inset, (spread - inset) * reach);
+                    cx = centerX + inset + rand() * range;
+                    cy = centerY - inset - rand() * range;
+                } else {
+                    cx = centerX + (rand() - 0.5) * 2 * spread;
+                    cy = centerY + (rand() - 0.5) * 2 * spread;
+                }
+
+                if (!safeRect || !this._pointInSafeRect(cx, cy, scale, safeRect)) {
+                    placed = true;
+                    break;
+                }
             }
+
+            if (!placed) continue;
 
             const colorRand = this._rand((this._layoutSeed + i * 7919) >>> 0);
             const spec = this._sampleMoleculeSpec(colorRand, cfg, i);
@@ -24913,7 +25017,7 @@ const OpeningBackground = {
         return blobs;
     },
 
-    _buildScatterPills(w, h, targetCount, rand, cfg) {
+    _buildScatterPills(w, h, targetCount, rand, cfg, safeRect = null) {
         const minDim = Math.min(w, h);
         const spread = minDim * (cfg.scatterSpread ?? 0.28);
         const centerX = w * (cfg.scatterCenterX ?? 0.5);
@@ -24924,26 +25028,76 @@ const OpeningBackground = {
         const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
         const pills = [];
 
+        const maxAttempts = cfg.scatterMaxAttempts ?? 32;
+
         for (let i = 0; i < uniqueCount; i++) {
             let cx;
             let cy;
+            let placed = false;
+            const hitR = minDim * 0.05;
 
-            if (useMirror) {
-                const insetRatio = cfg.scatterMirrorInset ?? 0.06;
-                const reach = cfg.scatterMirrorReach ?? 0.92;
-                const inset = spread * insetRatio;
-                const range = Math.max(inset, (spread - inset) * reach);
-                cx = centerX + inset + rand() * range;
-                cy = centerY - inset - rand() * range;
-            } else {
-                cx = centerX + (rand() - 0.5) * 2 * spread;
-                cy = centerY + (rand() - 0.5) * 2 * spread;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                if (useMirror) {
+                    const insetRatio = cfg.scatterMirrorInset ?? 0.06;
+                    const reach = cfg.scatterMirrorReach ?? 0.92;
+                    const inset = spread * insetRatio;
+                    const range = Math.max(inset, (spread - inset) * reach);
+                    cx = centerX + inset + rand() * range;
+                    cy = centerY - inset - rand() * range;
+                } else {
+                    cx = centerX + (rand() - 0.5) * 2 * spread;
+                    cy = centerY + (rand() - 0.5) * 2 * spread;
+                }
+
+                if (!safeRect || !this._pointInSafeRect(cx, cy, hitR, safeRect)) {
+                    placed = true;
+                    break;
+                }
             }
+
+            if (!placed) continue;
 
             pills.push(this._buildPillBlock(cx, cy, minDim, rand, cfg, i));
         }
 
         return pills;
+    },
+
+    _getOpeningTitleSafeRect() {
+        if (!this._isOpeningArt()) return null;
+
+        const frameCfg = CONFIG?.opening?.titleSafeFrame || {};
+        if (frameCfg.enabled === false) return null;
+
+        const title = document.querySelector('#opening-screen .opening-screen__title');
+        if (!title) return null;
+
+        const padX = frameCfg.padX ?? 40;
+        const padY = frameCfg.padY ?? 30;
+        const r = title.getBoundingClientRect();
+
+        return {
+            left: r.left - padX,
+            top: r.top - padY,
+            right: r.right + padX,
+            bottom: r.bottom + padY
+        };
+    },
+
+    _pointInSafeRect(cx, cy, radius, rect) {
+        if (!rect) return false;
+        return cx + radius > rect.left
+            && cx - radius < rect.right
+            && cy + radius > rect.top
+            && cy - radius < rect.bottom;
+    },
+
+    _blobHitsSafeRect(blob, rect) {
+        if (!rect) return false;
+        const cx = blob.cx + (blob.offsetDx ?? 0);
+        const cy = blob.cy + (blob.offsetDy ?? 0);
+        const r = blob.gradientR ?? blob.membraneR ?? (blob.kind === 'pill' ? (blob.height ?? 20) * 0.55 : 20);
+        return this._pointInSafeRect(cx, cy, r, rect);
     },
 
     _assignMouseFactors(blob, rand) {
@@ -24966,12 +25120,18 @@ const OpeningBackground = {
             this._prepareOpeningMoleculePlan(cfg);
         }
 
-        const uniqueBlobs = this._buildScatterMolecules(w, h, cfg.blobCount ?? 48, rand, cfg);
+        const safeRect = this._getOpeningTitleSafeRect();
+        const uniqueBlobs = this._buildScatterMolecules(w, h, cfg.blobCount ?? 48, rand, cfg, safeRect);
         const pillTarget = cfg.pillCount ?? 0;
         const uniquePills = pillTarget > 0
-            ? this._buildScatterPills(w, h, pillTarget, rand, cfg)
+            ? this._buildScatterPills(w, h, pillTarget, rand, cfg, safeRect)
             : [];
         const drawBlobs = [];
+
+        const pushBlob = (instance) => {
+            if (safeRect && this._blobHitsSafeRect(instance, safeRect)) return;
+            drawBlobs.push(instance);
+        };
 
         uniqueBlobs.forEach((blob) => {
             const mirrored = mirrorFolds >= 2
@@ -24979,7 +25139,7 @@ const OpeningBackground = {
                 : [blob];
 
             mirrored.forEach((instance) => {
-                drawBlobs.push(this._initMoleculeDotPhysics(
+                pushBlob(this._initMoleculeDotPhysics(
                     this._assignMouseFactors(instance, rand),
                     rand
                 ));
@@ -24997,7 +25157,7 @@ const OpeningBackground = {
                 : [pill];
 
             mirrored.forEach((instance) => {
-                drawBlobs.push(this._assignMouseFactors(instance, rand));
+                pushBlob(this._assignMouseFactors(instance, rand));
             });
         });
 
@@ -25031,11 +25191,15 @@ const OpeningBackground = {
     },
 
     _updateBlobHovers(cfg) {
-        if (!this._drawBlobs || !this._pointerActive) return false;
+        if (!this._drawBlobs) return false;
+        if (!this._pointerActive) return false;
 
+        // Note: the title safe frame only filters INITIAL placement (see
+        // _buildLayoutBlobs). Molecules are free to drift into that zone at
+        // runtime — no repel — so cursor pushes are never undone.
+        const minDim = Math.min(this._w, this._h);
         const localX = this._pointerClient.x;
         const localY = this._pointerClient.y;
-        const minDim = Math.min(this._w, this._h);
         let moved = false;
 
         for (let i = 0; i < this._drawBlobs.length; i++) {
@@ -25171,6 +25335,11 @@ const OpeningBackground = {
     },
 
     _fillBackground(ctx, w, h, cfg, openingArt) {
+        if (openingArt && this._isOpeningArtTransparent(cfg)) {
+            ctx.clearRect(0, 0, w, h);
+            return;
+        }
+
         if (openingArt) {
             ctx.fillStyle = this._resolveCssColor(cfg.bgColor ?? 'var(--color-5)', '#F2F0EE');
         } else {
@@ -25277,7 +25446,10 @@ const OpeningBackground = {
 
     _signalArtReady() {
         if (this._artReady || !this._isOpeningArt()) return;
-        if (!this._drawBlobs?.length || !this._getTagColorEntries().length) return;
+
+        const openingCfg = this._openingCfg();
+        const grainOnly = openingCfg.mode === 'grain';
+        if (!grainOnly && (!this._drawBlobs?.length || !this._getTagColorEntries().length)) return;
 
         this._artReady = true;
         requestAnimationFrame(() => {
@@ -25290,7 +25462,12 @@ const OpeningBackground = {
     },
 
     onDataReady() {
-        if (!this._mounted || !this._shouldBuildBlobs()) {
+        if (!this._mounted) return;
+
+        if (!this._shouldBuildBlobs()) {
+            const { w, h } = this._viewportSize();
+            this.render(w, h);
+            this._signalArtReady();
             return;
         }
 
@@ -25308,6 +25485,12 @@ const OpeningBackground = {
         this._signalArtReady();
     },
 
+    refitOpeningLayout() {
+        if (!this._mounted || !this._isOpeningArt()) return;
+        const { w, h } = this._viewportSize();
+        this.render(w, h);
+    },
+
     render(w, h) {
         this._rebuildLayout(w, h);
         this._paintAll();
@@ -25320,6 +25503,10 @@ const OpeningBackground = {
         if (!host || this._surfaces.has(host)) return false;
 
         const role = this._hostRole(host);
+        const openingArt = this._isOpeningArtHost(host);
+        const openingCfg = openingArt ? this._openingCfg() : null;
+        const useAlpha = role === 'wash'
+            || (openingArt && this._isOpeningArtTransparent(openingCfg));
         const canvas = document.createElement('canvas');
         canvas.className = role === 'wash'
             ? 'site-background__canvas site-background__canvas--wash opening-screen__bg-canvas'
@@ -25327,7 +25514,7 @@ const OpeningBackground = {
         canvas.setAttribute('aria-hidden', 'true');
         host.prepend(canvas);
 
-        const ctx = canvas.getContext('2d', { alpha: role === 'wash' });
+        const ctx = canvas.getContext('2d', { alpha: useAlpha });
         if (!ctx) return false;
 
         this._surfaces.set(host, { host, role, canvas, ctx });

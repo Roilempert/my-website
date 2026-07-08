@@ -327,6 +327,10 @@ const OpeningBackground = {
             || host?.closest?.('#opening-screen'));
     },
 
+    _isOpeningArtTransparent(cfg) {
+        return cfg?.transparent === true;
+    },
+
     _shouldDeferOpeningBlobs() {
         return this._isOpeningArt()
             && this._shouldBuildBlobs()
@@ -949,6 +953,20 @@ const OpeningBackground = {
         ctx.arc(glyphCx, 0, glyphR, 0, Math.PI * 2);
         ctx.fill();
 
+        // White row after the glyph to mimic a line of text.
+        const rowH = height * (cfg.pillTextRowHeightRatio ?? 0.16);
+        const rowGap = (height / blockH) * (cfg.pillTextRowGap ?? 4);
+        const rowStartX = glyphCx + glyphR + rowGap;
+        const rowEndX = x + width - padX;
+        const rowW = rowEndX - rowStartX;
+        if (rowW > rowH) {
+            ctx.globalAlpha = cfg.pillTextRowAlpha ?? 0.92;
+            ctx.fillStyle = this._resolveCssColor(cfg.pillTextRowColor ?? '#FFFFFF', '#FFFFFF');
+            this._roundRectPath(ctx, rowStartX, -rowH * 0.5, rowW, rowH, rowH * 0.5);
+            ctx.fill();
+            ctx.globalAlpha = 1;
+        }
+
         ctx.restore();
     },
 
@@ -993,7 +1011,7 @@ const OpeningBackground = {
     },
 
     _contentBlurPx(cfg, w, h) {
-        if (typeof cfg.contentBlurPx === 'number' && cfg.contentBlurPx > 0) {
+        if (typeof cfg.contentBlurPx === 'number') {
             return cfg.contentBlurPx;
         }
         const minDim = Math.min(w, h);
@@ -1093,21 +1111,30 @@ const OpeningBackground = {
         const drawAtmosphere = this._shouldDrawAtmosphere(cfg);
 
         if (source === 'content' && drawCrisp) {
-            const dpr = ctx.canvas.width / Math.max(1, w);
-            const bctx = this._ensureContentBuffer(w, h, dpr);
-            if (bctx) {
-                bctx.clearRect(0, 0, w, h);
-                this._drawCrispBlobs(bctx, cfg);
-
-                const blurPx = this._contentBlurPx(cfg, w, h);
+            const blurPx = this._contentBlurPx(cfg, w, h);
+            if (blurPx <= 0) {
                 ctx.save();
-                ctx.globalCompositeOperation = cfg.blobBlendMode ?? 'multiply';
+                ctx.globalCompositeOperation = 'source-over';
                 ctx.globalAlpha = cfg.blobLayerAlpha ?? 1;
-                ctx.filter = `blur(${blurPx}px)`;
-                ctx.drawImage(this._contentBuffer, 0, 0, w, h);
-                ctx.filter = 'none';
+                this._drawCrispBlobs(ctx, cfg);
                 ctx.globalAlpha = 1;
                 ctx.restore();
+            } else {
+                const dpr = ctx.canvas.width / Math.max(1, w);
+                const bctx = this._ensureContentBuffer(w, h, dpr);
+                if (bctx) {
+                    bctx.clearRect(0, 0, w, h);
+                    this._drawCrispBlobs(bctx, cfg);
+
+                    ctx.save();
+                    ctx.globalCompositeOperation = cfg.blobBlendMode ?? 'multiply';
+                    ctx.globalAlpha = cfg.blobLayerAlpha ?? 1;
+                    ctx.filter = `blur(${blurPx}px)`;
+                    ctx.drawImage(this._contentBuffer, 0, 0, w, h);
+                    ctx.filter = 'none';
+                    ctx.globalAlpha = 1;
+                    ctx.restore();
+                }
             }
         } else {
             if (drawCrisp) {
@@ -1203,7 +1230,7 @@ const OpeningBackground = {
         ctx.globalCompositeOperation = 'source-over';
     },
 
-    _buildScatterMolecules(w, h, targetCount, rand, cfg) {
+    _buildScatterMolecules(w, h, targetCount, rand, cfg, safeRect = null) {
         const minDim = Math.min(w, h);
         const radiusMin = minDim * (cfg.radiusMin ?? 0.04);
         const radiusMax = minDim * (cfg.radiusMax ?? 0.14);
@@ -1216,22 +1243,34 @@ const OpeningBackground = {
         const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
         const blobs = [];
 
+        const maxAttempts = cfg.scatterMaxAttempts ?? 32;
+
         for (let i = 0; i < uniqueCount; i++) {
             const scale = rand() * (radiusMax - radiusMin) + radiusMin;
             let cx;
             let cy;
+            let placed = false;
 
-            if (useMirror) {
-                const insetRatio = cfg.scatterMirrorInset ?? 0.04;
-                const reach = cfg.scatterMirrorReach ?? 1;
-                const inset = spread * insetRatio;
-                const range = Math.max(inset, (spread - inset) * reach);
-                cx = centerX + inset + rand() * range;
-                cy = centerY - inset - rand() * range;
-            } else {
-                cx = centerX + (rand() - 0.5) * 2 * spread;
-                cy = centerY + (rand() - 0.5) * 2 * spread;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                if (useMirror) {
+                    const insetRatio = cfg.scatterMirrorInset ?? 0.04;
+                    const reach = cfg.scatterMirrorReach ?? 1;
+                    const inset = spread * insetRatio;
+                    const range = Math.max(inset, (spread - inset) * reach);
+                    cx = centerX + inset + rand() * range;
+                    cy = centerY - inset - rand() * range;
+                } else {
+                    cx = centerX + (rand() - 0.5) * 2 * spread;
+                    cy = centerY + (rand() - 0.5) * 2 * spread;
+                }
+
+                if (!safeRect || !this._pointInSafeRect(cx, cy, scale, safeRect)) {
+                    placed = true;
+                    break;
+                }
             }
+
+            if (!placed) continue;
 
             const colorRand = this._rand((this._layoutSeed + i * 7919) >>> 0);
             const spec = this._sampleMoleculeSpec(colorRand, cfg, i);
@@ -1246,7 +1285,7 @@ const OpeningBackground = {
         return blobs;
     },
 
-    _buildScatterPills(w, h, targetCount, rand, cfg) {
+    _buildScatterPills(w, h, targetCount, rand, cfg, safeRect = null) {
         const minDim = Math.min(w, h);
         const spread = minDim * (cfg.scatterSpread ?? 0.28);
         const centerX = w * (cfg.scatterCenterX ?? 0.5);
@@ -1257,26 +1296,76 @@ const OpeningBackground = {
         const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
         const pills = [];
 
+        const maxAttempts = cfg.scatterMaxAttempts ?? 32;
+
         for (let i = 0; i < uniqueCount; i++) {
             let cx;
             let cy;
+            let placed = false;
+            const hitR = minDim * 0.05;
 
-            if (useMirror) {
-                const insetRatio = cfg.scatterMirrorInset ?? 0.06;
-                const reach = cfg.scatterMirrorReach ?? 0.92;
-                const inset = spread * insetRatio;
-                const range = Math.max(inset, (spread - inset) * reach);
-                cx = centerX + inset + rand() * range;
-                cy = centerY - inset - rand() * range;
-            } else {
-                cx = centerX + (rand() - 0.5) * 2 * spread;
-                cy = centerY + (rand() - 0.5) * 2 * spread;
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                if (useMirror) {
+                    const insetRatio = cfg.scatterMirrorInset ?? 0.06;
+                    const reach = cfg.scatterMirrorReach ?? 0.92;
+                    const inset = spread * insetRatio;
+                    const range = Math.max(inset, (spread - inset) * reach);
+                    cx = centerX + inset + rand() * range;
+                    cy = centerY - inset - rand() * range;
+                } else {
+                    cx = centerX + (rand() - 0.5) * 2 * spread;
+                    cy = centerY + (rand() - 0.5) * 2 * spread;
+                }
+
+                if (!safeRect || !this._pointInSafeRect(cx, cy, hitR, safeRect)) {
+                    placed = true;
+                    break;
+                }
             }
+
+            if (!placed) continue;
 
             pills.push(this._buildPillBlock(cx, cy, minDim, rand, cfg, i));
         }
 
         return pills;
+    },
+
+    _getOpeningTitleSafeRect() {
+        if (!this._isOpeningArt()) return null;
+
+        const frameCfg = CONFIG?.opening?.titleSafeFrame || {};
+        if (frameCfg.enabled === false) return null;
+
+        const title = document.querySelector('#opening-screen .opening-screen__title');
+        if (!title) return null;
+
+        const padX = frameCfg.padX ?? 40;
+        const padY = frameCfg.padY ?? 30;
+        const r = title.getBoundingClientRect();
+
+        return {
+            left: r.left - padX,
+            top: r.top - padY,
+            right: r.right + padX,
+            bottom: r.bottom + padY
+        };
+    },
+
+    _pointInSafeRect(cx, cy, radius, rect) {
+        if (!rect) return false;
+        return cx + radius > rect.left
+            && cx - radius < rect.right
+            && cy + radius > rect.top
+            && cy - radius < rect.bottom;
+    },
+
+    _blobHitsSafeRect(blob, rect) {
+        if (!rect) return false;
+        const cx = blob.cx + (blob.offsetDx ?? 0);
+        const cy = blob.cy + (blob.offsetDy ?? 0);
+        const r = blob.gradientR ?? blob.membraneR ?? (blob.kind === 'pill' ? (blob.height ?? 20) * 0.55 : 20);
+        return this._pointInSafeRect(cx, cy, r, rect);
     },
 
     _assignMouseFactors(blob, rand) {
@@ -1299,12 +1388,18 @@ const OpeningBackground = {
             this._prepareOpeningMoleculePlan(cfg);
         }
 
-        const uniqueBlobs = this._buildScatterMolecules(w, h, cfg.blobCount ?? 48, rand, cfg);
+        const safeRect = this._getOpeningTitleSafeRect();
+        const uniqueBlobs = this._buildScatterMolecules(w, h, cfg.blobCount ?? 48, rand, cfg, safeRect);
         const pillTarget = cfg.pillCount ?? 0;
         const uniquePills = pillTarget > 0
-            ? this._buildScatterPills(w, h, pillTarget, rand, cfg)
+            ? this._buildScatterPills(w, h, pillTarget, rand, cfg, safeRect)
             : [];
         const drawBlobs = [];
+
+        const pushBlob = (instance) => {
+            if (safeRect && this._blobHitsSafeRect(instance, safeRect)) return;
+            drawBlobs.push(instance);
+        };
 
         uniqueBlobs.forEach((blob) => {
             const mirrored = mirrorFolds >= 2
@@ -1312,7 +1407,7 @@ const OpeningBackground = {
                 : [blob];
 
             mirrored.forEach((instance) => {
-                drawBlobs.push(this._initMoleculeDotPhysics(
+                pushBlob(this._initMoleculeDotPhysics(
                     this._assignMouseFactors(instance, rand),
                     rand
                 ));
@@ -1330,7 +1425,7 @@ const OpeningBackground = {
                 : [pill];
 
             mirrored.forEach((instance) => {
-                drawBlobs.push(this._assignMouseFactors(instance, rand));
+                pushBlob(this._assignMouseFactors(instance, rand));
             });
         });
 
@@ -1364,11 +1459,15 @@ const OpeningBackground = {
     },
 
     _updateBlobHovers(cfg) {
-        if (!this._drawBlobs || !this._pointerActive) return false;
+        if (!this._drawBlobs) return false;
+        if (!this._pointerActive) return false;
 
+        // Note: the title safe frame only filters INITIAL placement (see
+        // _buildLayoutBlobs). Molecules are free to drift into that zone at
+        // runtime — no repel — so cursor pushes are never undone.
+        const minDim = Math.min(this._w, this._h);
         const localX = this._pointerClient.x;
         const localY = this._pointerClient.y;
-        const minDim = Math.min(this._w, this._h);
         let moved = false;
 
         for (let i = 0; i < this._drawBlobs.length; i++) {
@@ -1504,6 +1603,11 @@ const OpeningBackground = {
     },
 
     _fillBackground(ctx, w, h, cfg, openingArt) {
+        if (openingArt && this._isOpeningArtTransparent(cfg)) {
+            ctx.clearRect(0, 0, w, h);
+            return;
+        }
+
         if (openingArt) {
             ctx.fillStyle = this._resolveCssColor(cfg.bgColor ?? 'var(--color-5)', '#F2F0EE');
         } else {
@@ -1610,7 +1714,10 @@ const OpeningBackground = {
 
     _signalArtReady() {
         if (this._artReady || !this._isOpeningArt()) return;
-        if (!this._drawBlobs?.length || !this._getTagColorEntries().length) return;
+
+        const openingCfg = this._openingCfg();
+        const grainOnly = openingCfg.mode === 'grain';
+        if (!grainOnly && (!this._drawBlobs?.length || !this._getTagColorEntries().length)) return;
 
         this._artReady = true;
         requestAnimationFrame(() => {
@@ -1623,7 +1730,12 @@ const OpeningBackground = {
     },
 
     onDataReady() {
-        if (!this._mounted || !this._shouldBuildBlobs()) {
+        if (!this._mounted) return;
+
+        if (!this._shouldBuildBlobs()) {
+            const { w, h } = this._viewportSize();
+            this.render(w, h);
+            this._signalArtReady();
             return;
         }
 
@@ -1641,6 +1753,12 @@ const OpeningBackground = {
         this._signalArtReady();
     },
 
+    refitOpeningLayout() {
+        if (!this._mounted || !this._isOpeningArt()) return;
+        const { w, h } = this._viewportSize();
+        this.render(w, h);
+    },
+
     render(w, h) {
         this._rebuildLayout(w, h);
         this._paintAll();
@@ -1653,6 +1771,10 @@ const OpeningBackground = {
         if (!host || this._surfaces.has(host)) return false;
 
         const role = this._hostRole(host);
+        const openingArt = this._isOpeningArtHost(host);
+        const openingCfg = openingArt ? this._openingCfg() : null;
+        const useAlpha = role === 'wash'
+            || (openingArt && this._isOpeningArtTransparent(openingCfg));
         const canvas = document.createElement('canvas');
         canvas.className = role === 'wash'
             ? 'site-background__canvas site-background__canvas--wash opening-screen__bg-canvas'
@@ -1660,7 +1782,7 @@ const OpeningBackground = {
         canvas.setAttribute('aria-hidden', 'true');
         host.prepend(canvas);
 
-        const ctx = canvas.getContext('2d', { alpha: role === 'wash' });
+        const ctx = canvas.getContext('2d', { alpha: useAlpha });
         if (!ctx) return false;
 
         this._surfaces.set(host, { host, role, canvas, ctx });

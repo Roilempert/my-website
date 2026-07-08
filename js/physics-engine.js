@@ -22,6 +22,7 @@ const PhysicsEngine = {
     repulsionHoldNoteIndex: -1,
     moleculeClickIntent: null,
     transitionFrozen: false,
+    aboutFrozen: false,
     runnerEnabled: false,
     syncLoopLastTs: 0,
     navPhysicsTickLastTs: 0,
@@ -1589,6 +1590,9 @@ const PhysicsEngine = {
 
     syncLoop() {
         requestAnimationFrame(() => this.syncLoop());
+
+        // About panel open: canvas is frozen + blurred behind the sheet — skip all recompute/draw.
+        if (this.aboutFrozen) return;
 
         if (MacroMesoBridge.isAnimating() && !MacroMesoBridge.isZoomOutActive()) return;
 

@@ -8,8 +8,10 @@ cd "$ROOT/js"
   echo "/* opening build $BUILD_ID */"
     cat \
     opening-background.js \
+    opening-hover-label.js \
     opening-data.js \
     opening-screen.js \
+    opening-threshold.js \
     show-reel.js \
     site-about.js \
     opening-bootstrap.js
