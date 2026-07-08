@@ -5898,7 +5898,7 @@ body.opening-page #opening-screen {
 }
 
 #opening-screen .opening-screen__bg-canvas {
-    filter: saturate(1.12) contrast(1.05);
+    filter: saturate(1.12) contrast(1.05) blur(3px);
 }
 
 .opening-screen__content .opening-screen__continue {

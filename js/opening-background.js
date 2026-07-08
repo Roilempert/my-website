@@ -294,7 +294,6 @@ const OpeningBackground = {
 
         for (let i = 0; i < count; i++) {
             if (cursor >= pool.length) {
-                console.warn('OpeningBackground: tag color pool exhausted, reusing from start');
                 cursor = 0;
             }
             colors.push(pool[cursor++]);

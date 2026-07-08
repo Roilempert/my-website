@@ -278,7 +278,7 @@ const CONFIG = {
             transparent: true,
             bgColor: 'var(--color-5)',
             blurScale: 0.028,
-            contentBlurPx: 3.5,
+            contentBlurPx: 0,
             glowAlpha: 0.07,
             pillGlowAlpha: 0.42,
             dotVisualScale: 0.85,
