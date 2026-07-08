@@ -275,6 +275,10 @@ const AppState = {
         if (typeof DepthV2 !== 'undefined') {
             DepthV2.afterNotesRender();
         }
+
+        if (typeof MicroMock !== 'undefined' && MicroMock.schedulePrewarm) {
+            MicroMock.schedulePrewarm();
+        }
     },
 
     syncNoteDomFromItems() {
@@ -284,11 +288,6 @@ const AppState = {
             if (!item) return;
 
             if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
-                if (item.typology) {
-                    wrapper.dataset.typology = item.typology;
-                } else {
-                    delete wrapper.dataset.typology;
-                }
                 if (typeof TextDirection !== 'undefined') {
                     TextDirection.applyToWrapper(wrapper, item.textDirection);
                 }
@@ -309,12 +308,6 @@ const AppState = {
             if (bodyEl) bodyEl.textContent = item.body || '';
             if (idEl) idEl.textContent = item.id || '';
 
-            if (item.typology) {
-                wrapper.dataset.typology = item.typology;
-            } else {
-                delete wrapper.dataset.typology;
-            }
-
             if (typeof TextDirection !== 'undefined') {
                 TextDirection.applyToWrapper(wrapper, item.textDirection);
             }
@@ -328,11 +321,18 @@ const AppState = {
                 MicroMock.applyToWrapper(wrapper, item);
             }
         });
+
     },
 
     async refreshDataFromSheet() {
         await this.buildDataPipeline();
+        if (typeof MicroMock !== 'undefined' && MicroMock.invalidatePrewarm) {
+            MicroMock.invalidatePrewarm();
+        }
         this.syncNoteDomFromItems();
+        if (typeof MicroMock !== 'undefined' && MicroMock.schedulePrewarm) {
+            MicroMock.schedulePrewarm();
+        }
         return this.items;
     },
 

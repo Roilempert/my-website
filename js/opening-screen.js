@@ -23,6 +23,7 @@ const OpeningScreen = {
     _artMounted: false,
     _warmupStarted: false,
     _preloadStarted: false,
+    _onResize: null,
 
     cfg() {
         return CONFIG.opening || {};
@@ -109,7 +110,7 @@ const OpeningScreen = {
         const loads = [
             document.fonts.load('700 58px NarkissYair'),
             document.fonts.load('700 1rem NarkissYairMono'),
-            document.fonts.load('400 2rem TheBasicsDots'),
+            document.fonts.load('400 1.6667rem TheBasicsDots'),
             document.fonts.load('400 1.125rem FrankRuhl')
         ];
 
@@ -128,6 +129,10 @@ const OpeningScreen = {
 
         this._applyLabels();
         this._mountCorners();
+        this._fitOpeningTitle();
+
+        this._onResize = () => this._fitOpeningTitle();
+        window.addEventListener('resize', this._onResize);
 
         this.continueBtn = this.el.querySelector('.opening-screen__continue');
 
@@ -155,6 +160,7 @@ const OpeningScreen = {
         const title = this.el?.querySelector('.opening-screen__title');
         title?.classList.remove('is-typing', 'is-cursor-wait');
         title?.classList.add('is-title-typed');
+        this._fitOpeningTitle();
         this._tryRevealArt();
     },
 
@@ -196,6 +202,67 @@ const OpeningScreen = {
         }
         this.continueBtn.disabled = false;
         this.continueBtn.classList.add('is-ready');
+    },
+
+    _titleFitCfg() {
+        const opening = this.cfg().titleFit || {};
+        const about = CONFIG.about || {};
+        return {
+            minPx: opening.minPx ?? about.titleMinPx ?? 24,
+            maxPx: opening.maxPx ?? about.titleMaxPx ?? 400,
+            reducePt: opening.reducePt ?? about.titleReducePt ?? 20
+        };
+    },
+
+    _fitOpeningTitle() {
+        const title = this.el?.querySelector('.opening-screen__title');
+        if (!title) return;
+
+        const text = (this._titleFullText || this.cfg().labels?.title || title.textContent || '').trim();
+        if (!text) return;
+
+        const savedText = title.textContent;
+        title.textContent = text;
+        title.style.fontSize = '';
+        title.style.letterSpacing = '0px';
+
+        const { minPx, maxPx, reducePt } = this._titleFitCfg();
+        const reducePx = reducePt * (96 / 72);
+        const maxWidth = title.clientWidth;
+        if (maxWidth <= 0) {
+            title.textContent = savedText;
+            return;
+        }
+
+        let lo = minPx;
+        let hi = maxPx;
+        let best = minPx;
+
+        while (lo <= hi) {
+            const mid = Math.floor((lo + hi) / 2);
+            title.style.fontSize = `${mid}px`;
+            title.style.letterSpacing = '0px';
+            if (title.scrollWidth <= maxWidth) {
+                best = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+
+        const targetPx = Math.max(minPx, best - reducePx);
+        title.style.fontSize = `${targetPx}px`;
+        title.style.letterSpacing = '0px';
+
+        const units = [...text].length;
+        if (units > 1) {
+            const naturalWidth = title.scrollWidth;
+            if (naturalWidth < maxWidth) {
+                title.style.letterSpacing = `${(maxWidth - naturalWidth) / (units - 1)}px`;
+            }
+        }
+
+        title.textContent = savedText;
     },
 
     _applyLabels() {
@@ -302,6 +369,10 @@ const OpeningScreen = {
         this.dismissing = true;
         this.userDismissed = true;
         this._cancelTitleTypewriter();
+        if (this._onResize) {
+            window.removeEventListener('resize', this._onResize);
+            this._onResize = null;
+        }
 
         const exitMs = this.cfg().exitDurationMs ?? 600;
         this.el?.classList.add('is-exiting');

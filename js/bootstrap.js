@@ -27,6 +27,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     try {
+        if (typeof WordClusterCache !== 'undefined') WordClusterCache.init();
+    } catch (err) {
+        console.error('WordClusterCache.init failed:', err);
+    }
+
+    try {
         if (typeof NoteCensor !== 'undefined') NoteCensor.init();
     } catch (err) {
         console.error('NoteCensor.init failed:', err);
@@ -47,6 +53,7 @@ document.addEventListener('DOMContentLoaded', () => {
     SilhouetteEngine.init();
     SpatialNavigation.init();
     ArtifactInspector.init();
+    if (typeof NoteIdSticky !== 'undefined') NoteIdSticky.init();
     ActionWarehouse.init();
 
     try {
@@ -104,5 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.warn('NavigationMap.onBootComplete failed:', mapErr);
             }
         })
-        .finally(() => clearTimeout(safetyTimer));
+        .finally(() => {
+            clearTimeout(safetyTimer);
+        });
 });

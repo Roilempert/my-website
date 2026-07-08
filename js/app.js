@@ -1,4 +1,4 @@
-/* app build 20260707162843 */
+/* app build 20260708025734 */
 /* ==========================================================================
    01. SYSTEM BOOTSTRAP
    ========================================================================== */
@@ -354,6 +354,10 @@ const AppState = {
         if (typeof DepthV2 !== 'undefined') {
             DepthV2.afterNotesRender();
         }
+
+        if (typeof MicroMock !== 'undefined' && MicroMock.schedulePrewarm) {
+            MicroMock.schedulePrewarm();
+        }
     },
 
     syncNoteDomFromItems() {
@@ -363,11 +367,6 @@ const AppState = {
             if (!item) return;
 
             if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
-                if (item.typology) {
-                    wrapper.dataset.typology = item.typology;
-                } else {
-                    delete wrapper.dataset.typology;
-                }
                 if (typeof TextDirection !== 'undefined') {
                     TextDirection.applyToWrapper(wrapper, item.textDirection);
                 }
@@ -388,12 +387,6 @@ const AppState = {
             if (bodyEl) bodyEl.textContent = item.body || '';
             if (idEl) idEl.textContent = item.id || '';
 
-            if (item.typology) {
-                wrapper.dataset.typology = item.typology;
-            } else {
-                delete wrapper.dataset.typology;
-            }
-
             if (typeof TextDirection !== 'undefined') {
                 TextDirection.applyToWrapper(wrapper, item.textDirection);
             }
@@ -407,11 +400,18 @@ const AppState = {
                 MicroMock.applyToWrapper(wrapper, item);
             }
         });
+
     },
 
     async refreshDataFromSheet() {
         await this.buildDataPipeline();
+        if (typeof MicroMock !== 'undefined' && MicroMock.invalidatePrewarm) {
+            MicroMock.invalidatePrewarm();
+        }
         this.syncNoteDomFromItems();
+        if (typeof MicroMock !== 'undefined' && MicroMock.schedulePrewarm) {
+            MicroMock.schedulePrewarm();
+        }
         return this.items;
     },
 
@@ -1813,23 +1813,125 @@ const MesoSilhouetteCache = {
     }
 };
 /* ==========================================================================
+   WORD NORMALIZE — shared surface cleanup (build script mirrors these rules)
+   ========================================================================== */
+
+/** Strip niqqud, edge punctuation, and geresh/gershayim from a word token. */
+const TRAILING_WORD_PUNCT = new RegExp('[\\]"\'«»„"",.:;!?…–—/)}]+$', 'gu');
+
+function normalizeWordSurface(text) {
+    return String(text || '')
+        .replace(/[\u0591-\u05C7]/g, '')
+        .replace(/[\u05F3\u05F4]/g, '')
+        .replace(/^["'«»„""]+/gu, '')
+        .replace(TRAILING_WORD_PUNCT, '')
+        .trim();
+}
+
+/** Split visible text into word tokens (whitespace-separated), normalized. */
+function tokenizeNormalizedWords(text) {
+    return String(text || '')
+        .split(/\s+/)
+        .map((word) => normalizeWordSurface(word))
+        .filter(Boolean);
+}
+/* ==========================================================================
+   WORD CLUSTER CACHE — preloaded morphological match groups (L2 censored study)
+   ========================================================================== */
+const WordClusterCache = {
+    data: null,
+    surfaceToCluster: null,
+    ready: Promise.resolve(false),
+    loaded: false,
+
+    init() {
+        const cfg = CONFIG?.theme?.wordClusterCache || {};
+        if (cfg.enabled === false || !cfg.url) {
+            this.ready = Promise.resolve(false);
+            return this.ready;
+        }
+
+        this.ready = fetch(cfg.url, { cache: cfg.fetchCache || 'default' })
+            .then((res) => {
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return res.json();
+            })
+            .then((data) => {
+                this.ingest(data);
+                if (this.loaded &&
+                    typeof NoteCensor !== 'undefined' &&
+                    NoteCensor.isActive?.()) {
+                    NoteCensor.invalidateWordLayout();
+                }
+                return this.loaded;
+            })
+            .catch((err) => {
+                console.warn('Word cluster cache unavailable, using exact match only', err);
+                this.clear();
+                return false;
+            });
+
+        return this.ready;
+    },
+
+    clear() {
+        this.data = null;
+        this.surfaceToCluster = null;
+        this.loaded = false;
+    },
+
+    ingest(data) {
+        this.clear();
+        const expectedVersion = CONFIG?.theme?.wordClusterCache?.version;
+        const cacheVersion = data?.meta?.cacheVersion;
+        if (expectedVersion != null && cacheVersion != null &&
+            Number(cacheVersion) !== Number(expectedVersion)) {
+            console.warn(`Word cluster cache version mismatch: expected ${expectedVersion}, got ${cacheVersion}`);
+            return;
+        }
+
+        const map = data?.surfaceToCluster;
+        if (!map || typeof map !== 'object') return;
+
+        this.surfaceToCluster = new Map(Object.entries(map));
+        this.data = data;
+        this.loaded = this.surfaceToCluster.size > 0;
+    },
+
+    /** Normalize then resolve cluster id; fallback keeps exact-match behavior. */
+    clusterKey(surface) {
+        const normalized = typeof normalizeWordSurface === 'function'
+            ? normalizeWordSurface(surface)
+            : String(surface || '').trim();
+        if (!normalized) return '';
+
+        if (this.loaded && this.surfaceToCluster?.has(normalized)) {
+            return this.surfaceToCluster.get(normalized);
+        }
+        return `exact:${normalized}`;
+    }
+};
+/* ==========================================================================
    Note censor — L3 redacted theme (same grid/cards as original, bars not text)
    ========================================================================== */
 const NoteCensor = {
-    _boundRevealMove: null,
     _wordIndex: null,
     _linkSvg: null,
     _linkAnimToken: 0,
     _activeSourceWord: null,
     _activeKey: null,
     _activeRoutes: [],
-    _dwellTimer: null,
-    _dwellWord: null,
+    _boundWordClick: null,
     _committedKeys: null,
     _persistedRoutes: null,
     _persistedSources: null,
     _retractingRoutes: null,
     _wordNoteIndex: null,
+    _soloHoverWord: null,
+    _soloHoverRoutes: null,
+    _soloProbeTimer: null,
+    _boundWordHoverOver: null,
+    _boundWordHoverOut: null,
 
     _initPersistState() {
         if (!this._committedKeys) {
@@ -1839,69 +1941,95 @@ const NoteCensor = {
         }
     },
 
-    _dwellMs() {
-        return this.cfg().dwellMs ?? 1000;
-    },
-
     _isCommitted(key) {
         this._initPersistState();
         return !!key && this._committedKeys.has(key);
     },
 
-    _cancelDwell() {
-        if (this._dwellTimer) {
-            clearTimeout(this._dwellTimer);
-            this._dwellTimer = null;
+    hasCommittedWord() {
+        this._initPersistState();
+        return this._committedKeys.size > 0;
+    },
+
+    /** Public entry for spatial tap / pointer commit paths. */
+    commitWordElement(sourceWord) {
+        this._commitWord(sourceWord);
+    },
+
+    commitWordAt(clientX, clientY) {
+        const word = this.hitWordAt(clientX, clientY);
+        if (!word) return false;
+        this._commitWord(word);
+        return true;
+    },
+
+    _commitWord(sourceWord) {
+        if (!sourceWord?.isConnected || !this.isActive()) return;
+
+        const key = this._wordKey(sourceWord);
+        if (!key || this._isCommitted(key)) return;
+
+
+        this._releaseActiveHover(true);
+        this._activeSourceWord = sourceWord;
+        this._activeKey = key;
+        this._uncoverMatches(key);
+
+        this._cancelLinkAnimations();
+        this._clearActiveRouteGroups();
+
+        const matches = this._wordsForKey(key);
+        this._releaseSoloHover(true);
+
+        if (matches.length > 1) {
+            this._buildActiveRoutes(sourceWord, matches);
+        } else {
+            this._playSoloProbe(sourceWord, { persist: true });
         }
-        this._dwellWord = null;
-    },
-
-    _startDwell(word) {
-        this._cancelDwell();
-        if (!word || this._isCommitted(this._wordKey(word))) return;
-        this._dwellWord = word;
-        this._dwellTimer = setTimeout(() => {
-            this._dwellTimer = null;
-            this._commitActiveHover();
-        }, this._dwellMs());
-    },
-
-    _commitActiveHover() {
-        if (!this._activeSourceWord || this._dwellWord !== this._activeSourceWord) return;
 
         this._initPersistState();
-        const key = this._activeKey;
-        const sourceWord = this._activeSourceWord;
-        if (!key || !sourceWord) return;
-
         this._committedKeys.add(key);
         this._persistedSources.set(key, sourceWord);
 
-        const cfg = this._linkCfg();
-        this._linkAnimToken += 1;
-        const token = this._linkAnimToken;
+        if (matches.length > 1) {
+            const cfg = this._linkCfg();
+            this._linkAnimToken += 1;
+            const token = this._linkAnimToken;
 
-        const routes = this._activeRoutes.slice();
-        this._activeRoutes = [];
+            const routes = this._activeRoutes.slice();
+            this._activeRoutes = [];
 
-        routes.forEach((route) => {
-            route.key = key;
-            route.sourceWord = sourceWord;
-            route.isPersisted = true;
-            this._persistedRoutes.push(route);
-            this._completeRouteStretch(route.trail, token, cfg);
-        });
+            routes.forEach((route) => {
+                route.key = key;
+                route.sourceWord = sourceWord;
+                route.isPersisted = true;
+                this._persistedRoutes.push(route);
+                this._completeRouteStretch(route.trail, token, cfg);
+            });
+        }
 
-        this._cancelDwell();
         this._activeSourceWord = null;
         this._activeKey = null;
         this._wordsForKey(key).forEach((word) => word.classList.add('is-word-committed'));
+
+        this._scheduleClearOpenSuppress();
 
         if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.syncClearControlVisibility) {
             ActionWarehouse.syncClearControlVisibility();
         }
 
         this.refreshStudyUnlocks();
+        this._syncLayerZoomOutGate();
+    },
+
+    _syncLayerZoomOutGate() {
+        if (typeof NavigationMap !== 'undefined') {
+            const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+            NavigationMap.syncActiveState(level);
+        }
+        if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.syncLauncherStudyGate) {
+            ActionWarehouse.syncLauncherStudyGate();
+        }
     },
 
     _removeRouteGroups(routes) {
@@ -1927,6 +2055,8 @@ const NoteCensor = {
 
     _linkCfg() {
         const cfg = this.cfg().wordLinks || {};
+        const blockNote = CONFIG.warehouse?.linkage?.blockNote || {};
+        const hairline = blockNote.width ?? (0.2 * (96 / 72));
         return {
             duration: cfg.duration ?? 1650,
             stagger: cfg.stagger ?? 175,
@@ -1935,11 +2065,167 @@ const NoteCensor = {
             revertDuration: cfg.revertDuration ?? 920,
             maxLinks: cfg.maxLinks ?? 48,
             opacityMin: cfg.opacityMin ?? 0,
-            opacityMax: cfg.opacityMax ?? 0.82,
-            strokeWidthStart: cfg.strokeWidthStart ?? 0.9,
-            strokeWidthEnd: cfg.strokeWidthEnd ?? 2.5,
-            curveBend: cfg.curveBend ?? 0.24
+            opacityMax: cfg.opacityMax ?? blockNote.opacity ?? 0.48,
+            strokeWidthStart: cfg.strokeWidthStart ?? hairline,
+            strokeWidthEnd: cfg.strokeWidthEnd ?? hairline,
+            curveBend: cfg.curveBend ?? 0.24,
+        soloProbeLength: cfg.soloProbeLength ?? 96,
+        soloProbeDuration: cfg.soloProbeDuration ?? 720,
+        soloProbeHoldMs: cfg.soloProbeHoldMs ?? 160,
+        soloProbeFadeMs: cfg.soloProbeFadeMs ?? 480,
+        soloLoopRise: cfg.soloLoopRise ?? 58,
+        soloProbeRevertDuration: cfg.soloProbeRevertDuration ?? 640
         };
+    },
+
+    _isSoloWordKey(key) {
+        if (!key) return false;
+        return this._wordsForKey(key).length <= 1;
+    },
+
+    _buildSoloLoopPath(sourceWord) {
+        const rect = sourceWord.getBoundingClientRect();
+        const card = sourceWord.closest('.micro-mock__card');
+        const isLtr = card?.getAttribute('dir') === 'ltr';
+        const cfg = this._linkCfg();
+        const loopRise = cfg.soloLoopRise ?? 58;
+        const spread = Math.max(rect.width * 0.55, (cfg.soloProbeLength ?? 96) * 0.45);
+        const baselineY = rect.top + rect.height * 0.76;
+        const startFrac = isLtr ? 0.94 : 0.06;
+        const endFrac = isLtr ? 0.06 : 0.94;
+        const start = { x: rect.left + rect.width * startFrac, y: baselineY };
+        const end = { x: rect.left + rect.width * endFrac, y: baselineY };
+        const apexX = (start.x + end.x) / 2 + (isLtr ? spread * 0.12 : -spread * 0.12);
+        const apexY = rect.top - loopRise;
+        const outSign = isLtr ? 1 : -1;
+        const cp1 = {
+            x: start.x + outSign * spread * 0.42,
+            y: start.y - loopRise * 0.52
+        };
+        const cp2 = {
+            x: end.x - outSign * spread * 0.42,
+            y: end.y - loopRise * 0.52
+        };
+        return `M ${start.x} ${start.y} C ${cp1.x} ${cp1.y} ${apexX} ${apexY} ${end.x} ${end.y}`;
+    },
+
+    _createSoloLoopRoute(sourceWord) {
+        if (!this.isActive() || !sourceWord?.isConnected) return null;
+
+        if (!this._linkSvg) this._ensureLinkOverlay();
+        const d = this._buildSoloLoopPath(sourceWord);
+        const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        group.setAttribute('class', 'note-censor-word-links__route note-censor-word-links__route--solo');
+
+        const trail = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        trail.setAttribute('class', 'note-censor-word-links__trail');
+        trail.setAttribute('d', d);
+        trail.setAttribute('fill', 'none');
+
+        group.appendChild(trail);
+        this._linkSvg.appendChild(group);
+        this._linkSvg.classList.add('is-active');
+        return { group, trail, sourceWord };
+    },
+
+    _clearSoloProbeTimer() {
+        if (this._soloProbeTimer) {
+            clearTimeout(this._soloProbeTimer);
+            this._soloProbeTimer = null;
+        }
+    },
+
+    _fadeOutRoute(route, token, onComplete) {
+        const trail = route?.trail;
+        const group = route?.group;
+        if (!trail?.isConnected) {
+            onComplete?.();
+            return;
+        }
+
+        const cfg = this._linkCfg();
+        const duration = cfg.soloProbeFadeMs ?? 480;
+        const startAt = performance.now();
+        const startOp = Number.parseFloat(trail.style.opacity);
+        const baseOp = Number.isFinite(startOp) ? startOp : cfg.opacityMax;
+
+        const tick = (now) => {
+            if (token !== this._linkAnimToken || !trail.isConnected) {
+                onComplete?.();
+                return;
+            }
+            const t = Math.min(1, (now - startAt) / duration);
+            trail.style.opacity = String(baseOp * (1 - t));
+            if (t >= 1) {
+                group?.remove?.();
+                onComplete?.();
+            } else {
+                requestAnimationFrame(tick);
+            }
+        };
+
+        requestAnimationFrame(tick);
+    },
+
+    _playSoloProbe(sourceWord, options = {}) {
+        const route = this._createSoloLoopRoute(sourceWord);
+        if (!route) return;
+
+        const cfg = this._linkCfg();
+        const token = ++this._linkAnimToken;
+        this._animateRoute(route.trail, 0, token, cfg.soloProbeDuration);
+
+        if (options.persist) {
+            this._initPersistState();
+            const key = this._wordKey(sourceWord);
+            route.key = key;
+            route.sourceWord = sourceWord;
+            route.isPersisted = true;
+            route.isSoloLoop = true;
+            this._persistedRoutes.push(route);
+            return;
+        }
+
+        this._clearSoloProbeTimer();
+        this._soloProbeTimer = setTimeout(() => {
+            this._soloProbeTimer = null;
+            if (token !== this._linkAnimToken || !route.trail.isConnected) return;
+            this._fadeOutRoute(route, token, () => this._syncLinkOverlayActive());
+        }, cfg.soloProbeDuration + cfg.soloProbeHoldMs);
+    },
+
+    _startSoloHoverProbe(sourceWord) {
+        const route = this._createSoloLoopRoute(sourceWord);
+        if (!route) return;
+
+        this._soloHoverRoutes = [route];
+        const cfg = this._linkCfg();
+        this._animateRoute(route.trail, 0, this._linkAnimToken, cfg.soloProbeDuration);
+    },
+
+    _releaseSoloHover(immediate = false) {
+        this._clearSoloProbeTimer();
+        const routes = this._soloHoverRoutes?.slice() || [];
+        this._soloHoverRoutes = [];
+        this._soloHoverWord = null;
+
+        if (!routes.length) return;
+
+        if (immediate) {
+            this._linkAnimToken += 1;
+            this._removeRouteGroups(routes);
+            this._syncLinkOverlayActive();
+            return;
+        }
+
+        const token = ++this._linkAnimToken;
+        let remaining = routes.length;
+        routes.forEach((route) => {
+            this._fadeOutRoute(route, token, () => {
+                remaining -= 1;
+                if (remaining <= 0) this._syncLinkOverlayActive();
+            });
+        });
     },
 
     _routeStaggerMs(count, spreadMs, cfg) {
@@ -1979,40 +2265,332 @@ const NoteCensor = {
         return typeof DepthController !== 'undefined' && DepthController.currentLevel === 3;
     },
 
+    _boundWordPointerDown: null,
+    _boundWordPointerUp: null,
+    _wordTapState: null,
+    _studyOpenTapState: null,
+    _studyNoteTapState: null,
+    _suppressOpenThisGesture: false,
+
+    shouldSuppressNoteOpen() {
+        return !!this._suppressOpenThisGesture;
+    },
+
+    _scheduleClearOpenSuppress() {
+        this._suppressOpenThisGesture = true;
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                this._suppressOpenThisGesture = false;
+            });
+        });
+    },
+
+    tryOpenStudyNoteAt(clientX, clientY) {
+        if (!this.isActive() || this.shouldSuppressNoteOpen()) return false;
+
+        const wrapper = this.hitStudyNoteAt(clientX, clientY);
+        if (!wrapper) return false;
+
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(clientX, clientY)) {
+            return false;
+        }
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(clientX, clientY)) {
+            return false;
+        }
+        if (typeof ArtifactInspector === 'undefined') return false;
+
+
+        if (ArtifactInspector.isActive) return true;
+        return this.openStudyNote(wrapper);
+    },
+
+    openStudyNote(wrapper) {
+        if (!wrapper || !this.isNoteStudyUnlocked(wrapper)) {
+            return false;
+        }
+        if (typeof ArtifactInspector === 'undefined') return false;
+        if (ArtifactInspector.isActive) return true;
+        ArtifactInspector.open(wrapper);
+        return true;
+    },
+
+    hitStudyNoteAt(clientX, clientY) {
+        if (!this.isActive()) return null;
+
+        if (typeof document.elementsFromPoint === 'function') {
+            const stack = document.elementsFromPoint(clientX, clientY);
+            for (const el of stack) {
+                const wrapper = el.closest?.('.note-wrapper');
+                if (wrapper?.closest?.('#app') && this.isNoteStudyUnlocked(wrapper)) {
+                    return wrapper;
+                }
+            }
+        }
+
+        const wrapper = typeof SpatialNavigation !== 'undefined'
+            ? SpatialNavigation.hitTestDepthNote(clientX, clientY)
+            : null;
+        return wrapper && this.isNoteStudyUnlocked(wrapper) ? wrapper : null;
+    },
+
+    isStudyTapTarget(clientX, clientY) {
+        if (!this.isActive()) return false;
+        if (this.hitWordAt(clientX, clientY)) return true;
+
+        if (typeof document.elementsFromPoint === 'function') {
+            const stack = document.elementsFromPoint(clientX, clientY);
+            for (const el of stack) {
+                const word = el.closest?.('.note-redact__word');
+                if (!word) continue;
+                const wrapper = word.closest?.('.note-wrapper');
+                if (wrapper && this._isCommitted(this._wordKey(word)) && this.isNoteStudyUnlocked(wrapper)) {
+                    return true;
+                }
+            }
+        }
+
+        return !!this.hitStudyNoteAt(clientX, clientY);
+    },
+
+    _onWordPointerDown(e) {
+        if (!this.isActive() || e.button !== 0) return;
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+            return;
+        }
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(e.clientX, e.clientY)) {
+            return;
+        }
+
+        const word = e.target.closest?.('.note-redact__word');
+        if (!word || !word.closest?.('#app')) {
+            const note = e.target.closest?.('.note-wrapper.is-study-unlocked .micro-mock__note');
+            if (note) {
+                const wrapper = note.closest('.note-wrapper');
+                if (wrapper) {
+                    this._studyNoteTapState = {
+                        wrapper,
+                        x: e.clientX,
+                        y: e.clientY,
+                        id: e.pointerId
+                    };
+                }
+            }
+            return;
+        }
+
+        const key = this._wordKey(word);
+        if (this._isCommitted(key)) {
+            const wrapper = word.closest('.note-wrapper');
+            if (this.isNoteStudyUnlocked(wrapper)) {
+                this._studyOpenTapState = { word, x: e.clientX, y: e.clientY, id: e.pointerId };
+            }
+            return;
+        }
+
+        this._wordTapState = { word, x: e.clientX, y: e.clientY, id: e.pointerId };
+    },
+
+    _onWordPointerUp(e) {
+        const noteTap = this._studyNoteTapState;
+        if (noteTap && e.pointerId === noteTap.id) {
+            this._studyNoteTapState = null;
+            const threshold = CONFIG.depth?.clickDragThreshold ?? 6;
+            const moved = Math.hypot(e.clientX - noteTap.x, e.clientY - noteTap.y);
+            if (moved <= threshold && noteTap.wrapper?.isConnected && !this.shouldSuppressNoteOpen()) {
+                e.preventDefault();
+                e.stopPropagation();
+                this.openStudyNote(noteTap.wrapper);
+            }
+            return;
+        }
+
+        const openTap = this._studyOpenTapState;
+        if (openTap && e.pointerId === openTap.id) {
+            this._studyOpenTapState = null;
+            const threshold = CONFIG.depth?.clickDragThreshold ?? 6;
+            const moved = Math.hypot(e.clientX - openTap.x, e.clientY - openTap.y);
+            if (moved <= threshold && openTap.word?.isConnected && !this.shouldSuppressNoteOpen()) {
+                const wrapper = openTap.word.closest('.note-wrapper');
+                if (this.isNoteStudyUnlocked(wrapper) && typeof ArtifactInspector !== 'undefined') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.openStudyNote(wrapper);
+                }
+            }
+            return;
+        }
+
+        const tap = this._wordTapState;
+        if (!tap || e.pointerId !== tap.id) return;
+        this._wordTapState = null;
+
+        const threshold = CONFIG.depth?.clickDragThreshold ?? 6;
+        const moved = Math.hypot(e.clientX - tap.x, e.clientY - tap.y);
+        if (moved > threshold) return;
+        if (!tap.word?.isConnected) return;
+        if (this._isCommitted(this._wordKey(tap.word))) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        this._commitWord(tap.word);
+    },
+
     init() {
         const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
         this.onLevelChange(level);
-        if (!this._boundRevealMove) {
-            this._boundRevealMove = (e) => this._updateWordReveal(e.clientX, e.clientY);
+        if (!this._boundRevealScroll) {
             this._boundRevealScroll = () => this._onRevealLayoutChange();
             this._boundRevealResize = () => this._onRevealLayoutChange();
-            window.addEventListener('mousemove', this._boundRevealMove, { passive: true });
             window.addEventListener('scroll', this._boundRevealScroll, { passive: true, capture: true });
             window.addEventListener('resize', this._boundRevealResize, { passive: true });
         }
+        if (!this._boundWordClick) {
+            this._boundWordClick = (e) => this._onWordClick(e);
+            document.addEventListener('click', this._boundWordClick, { capture: true });
+        }
+        if (!this._boundStudyCardClick) {
+            this._boundStudyCardClick = (e) => this._onStudyCardClick(e);
+            document.addEventListener('click', this._boundStudyCardClick, { capture: true });
+        }
+        if (!this._boundWordPointerDown) {
+            this._boundWordPointerDown = (e) => this._onWordPointerDown(e);
+            this._boundWordPointerUp = (e) => this._onWordPointerUp(e);
+            document.addEventListener('pointerdown', this._boundWordPointerDown, { capture: true });
+            document.addEventListener('pointerup', this._boundWordPointerUp, { capture: true });
+            document.addEventListener('pointercancel', this._boundWordPointerUp, { capture: true });
+        }
+    },
+
+    _onWordHoverOver(e) {
+        if (!this.isActive()) return;
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+            return;
+        }
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(e.clientX, e.clientY)) {
+            return;
+        }
+
+        const word = e.target.closest?.('.note-redact__word');
+        if (!word || !word.closest?.('#app')) return;
+
+        const key = this._wordKey(word);
+        if (this._isCommitted(key) || !this._isSoloWordKey(key)) return;
+        if (this._soloHoverWord === word) return;
+
+        this._releaseSoloHover(true);
+        this._soloHoverWord = word;
+        this._startSoloHoverProbe(word);
+    },
+
+    _onWordHoverOut(e) {
+        const word = e.target.closest?.('.note-redact__word');
+        const related = e.relatedTarget?.closest?.('.note-redact__word');
+        if (word && word === this._soloHoverWord && word !== related) {
+            this._releaseSoloHover(false);
+        }
+    },
+
+    _onWordClick(e) {
+        if (!this.isActive()) return;
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+            return;
+        }
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(e.clientX, e.clientY)) {
+            return;
+        }
+
+        const word = e.target.closest?.('.note-redact__word');
+        if (!word || !word.closest?.('#app')) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const key = this._wordKey(word);
+        if (this._isCommitted(key)) {
+            if (this.shouldSuppressNoteOpen()) return;
+            const wrapper = word.closest('.note-wrapper');
+            if (this.isNoteStudyUnlocked(wrapper) && typeof ArtifactInspector !== 'undefined') {
+                if (!ArtifactInspector.isActive) {
+                    this.openStudyNote(wrapper);
+                }
+            }
+            return;
+        }
+
+        this._commitWord(word);
+    },
+
+    _onStudyCardClick(e) {
+        if (!this.isActive() || e.button !== 0) return;
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+            return;
+        }
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(e.clientX, e.clientY)) {
+            return;
+        }
+
+        const wrapper = e.target.closest?.('.note-wrapper.is-study-unlocked');
+        if (!wrapper?.closest?.('#app')) {
+            const hit = this.hitStudyNoteAt(e.clientX, e.clientY);
+            if (!hit) return;
+            if (this.shouldSuppressNoteOpen()) return;
+            e.preventDefault();
+            e.stopPropagation();
+            this.openStudyNote(hit);
+            return;
+        }
+        if (e.target.closest('.note-redact__word')) return;
+        if (!e.target.closest?.('.micro-mock__note')) return;
+        if (this.shouldSuppressNoteOpen()) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+        this.openStudyNote(wrapper);
+    },
+
+    /** Full reset when leaving L2 — keep committed words; clear hover/routes only. */
+    resetForLayerLeave() {
+        this._clearTransientStudyState();
+        this._invalidateWordHitCache();
+    },
+
+    _clearTransientStudyState() {
+        this._initPersistState();
+        this._activeSourceWord = null;
+        this._activeKey = null;
+        this._cancelLinkAnimations();
+        this._activeRoutes = [];
+        this._retractingRoutes = [];
+        this._releaseSoloHover(true);
+        this._clearWordLinks();
     },
 
     onLevelChange(level) {
         document.body.classList.toggle('is-theme-censored', this.isThemeEnabled() && level === 3);
         if (!(this.isThemeEnabled() && level === 3)) {
-            this._releaseActiveHover(true);
-            this._invalidateWordHitCache();
+            this.resetForLayerLeave();
         } else {
             this._initPersistState();
-            this._committedKeys.forEach((key) => {
-                this._uncoverMatches(key);
-                this._wordsForKey(key).forEach((word) => word.classList.add('is-word-committed'));
-            });
-            this._refreshPersistedRoutes();
             this.refreshStudyUnlocks();
         }
         if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.syncWordPanelMode) {
             ActionWarehouse.syncWordPanelMode(level);
         }
-        if (this.isThemeEnabled() && level === 3 &&
-            typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
-            ArtifactInspector.close();
-        }
+        this._syncLayerZoomOutGate();
     },
 
     /** Topmost censored word under pointer — skips already-committed tokens. */
@@ -2032,6 +2610,39 @@ const NoteCensor = {
 
         if (!word || this._isCommitted(this._wordKey(word))) return null;
         return word;
+    },
+
+    blocksLayerZoomOut() {
+        return this.isActive() && !this.hasCommittedWord();
+    },
+
+    _hitWordByRect(clientX, clientY) {
+        const now = performance.now();
+        if (!this._wordHitCache || now - this._wordHitCacheAt > 400) {
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            this._wordHitCache = [];
+            document.querySelectorAll('.note-redact__word').forEach((word) => {
+                const r = word.getBoundingClientRect();
+                if (r.width <= 0 || r.height <= 0) return;
+                if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) return;
+                this._wordHitCache.push({ word, r });
+            });
+            this._wordHitCacheAt = now;
+        }
+
+        let best = null;
+        let bestArea = Infinity;
+        for (const { word, r } of this._wordHitCache) {
+            if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) continue;
+            if (this._isCommitted(this._wordKey(word))) continue;
+            const area = r.width * r.height;
+            if (area < bestArea) {
+                bestArea = area;
+                best = word;
+            }
+        }
+        return best;
     },
 
     _invalidateWordHitCache() {
@@ -2054,7 +2665,15 @@ const NoteCensor = {
     },
 
     _wordKey(wordEl) {
-        return String(wordEl?.textContent || '');
+        const raw = String(wordEl?.textContent || '');
+        if (typeof WordClusterCache !== 'undefined' && WordClusterCache.clusterKey) {
+            return WordClusterCache.clusterKey(raw);
+        }
+        if (typeof normalizeWordSurface === 'function') {
+            const normalized = normalizeWordSurface(raw);
+            return normalized ? ('exact:' + normalized) : '';
+        }
+        return raw;
     },
 
     _buildWordIndex() {
@@ -2130,7 +2749,6 @@ const NoteCensor = {
     },
 
     _clearAllHoverState() {
-        this._cancelDwell();
         this._initPersistState();
         this._committedKeys.forEach((key) => {
             this._wordsForKey(key).forEach((word) => {
@@ -2147,16 +2765,17 @@ const NoteCensor = {
         this._cancelLinkAnimations();
         this._activeRoutes = [];
         this._retractingRoutes = [];
+        this._releaseSoloHover(true);
         this._clearWordLinks();
         if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.syncClearControlVisibility) {
             ActionWarehouse.syncClearControlVisibility();
         }
         this.refreshStudyUnlocks();
+        this._syncLayerZoomOutGate();
     },
 
     _releaseActiveHover(immediate = false, onComplete) {
         if (!this._activeSourceWord && !this._activeRoutes.length && !this._retractingRoutes?.length) {
-            this._cancelDwell();
             onComplete?.();
             return;
         }
@@ -2165,7 +2784,6 @@ const NoteCensor = {
         const committed = this._isCommitted(key);
         this._activeSourceWord = null;
         this._activeKey = null;
-        this._cancelDwell();
 
         if (!committed) {
             this._coverMatches(key);
@@ -2189,51 +2807,6 @@ const NoteCensor = {
 
     _resetHoverState(immediate = false, onComplete) {
         this._releaseActiveHover(immediate, onComplete);
-    },
-
-    _activateHover(sourceWord) {
-        if (!sourceWord) return;
-
-        const key = this._wordKey(sourceWord);
-        if (this._isCommitted(key)) return;
-
-        this._activeSourceWord = sourceWord;
-        this._activeKey = key;
-        this._uncoverMatches(key);
-
-        this._cancelLinkAnimations();
-        this._clearActiveRouteGroups();
-
-        const matches = this._wordsForKey(key);
-        if (matches.length > 1) {
-            this._buildActiveRoutes(sourceWord, matches);
-        }
-
-        this._startDwell(sourceWord);
-    },
-
-    _switchActiveHover(sourceWord) {
-        if (!sourceWord) return;
-
-        const key = this._wordKey(sourceWord);
-        if (this._isCommitted(key)) {
-            this._releaseActiveHover(true);
-            return;
-        }
-
-        const oldKey = this._activeKey;
-        const sameKey = oldKey === key;
-
-        if (sameKey) {
-            this._activeSourceWord = sourceWord;
-            this._cancelDwell();
-            this._startDwell(sourceWord);
-            this._refreshActiveRoutes();
-            return;
-        }
-
-        this._releaseActiveHover(true);
-        this._activateHover(sourceWord);
     },
 
     _stopStretchAndRetract(routes, onComplete) {
@@ -2287,6 +2860,30 @@ const NoteCensor = {
 
         this._persistedRoutes = this._persistedRoutes.filter((route) => {
             if (route.key !== key) return true;
+
+            if (route.isSoloLoop) {
+                if (!sourceWord?.isConnected) {
+                    route.group?.remove?.();
+                    return false;
+                }
+                const snapFull = this._routeStretchProgress(route.trail) >= 0.995;
+                const d = this._buildSoloLoopPath(sourceWord);
+                const trail = route.trail;
+                const prevLen = trail.getTotalLength();
+                const prevOffset = Number.parseFloat(trail.style.strokeDashoffset);
+                trail.setAttribute('d', d);
+                if (snapFull) {
+                    this._finishRoute(trail, cfg);
+                } else if (prevLen > 0 && Number.isFinite(prevOffset)) {
+                    const progress = Math.max(0, Math.min(1, (prevLen - prevOffset) / prevLen));
+                    const nextLen = trail.getTotalLength();
+                    trail.style.strokeDasharray = `${nextLen}`;
+                    trail.style.strokeDashoffset = `${nextLen * (1 - progress)}`;
+                }
+                route.sourceWord = sourceWord;
+                return true;
+            }
+
             if (!route.targetWord?.isConnected) {
                 route.group?.remove?.();
                 return false;
@@ -2446,8 +3043,9 @@ const NoteCensor = {
         requestAnimationFrame(tick);
     },
 
-    _animateRoute(trail, delayMs, token) {
+    _animateRoute(trail, delayMs, token, durationMs) {
         const cfg = this._linkCfg();
+        const duration = durationMs ?? cfg.duration;
         const startAt = performance.now() + delayMs;
         const len = trail.getTotalLength();
 
@@ -2465,7 +3063,7 @@ const NoteCensor = {
             }
 
             const len = trail.getTotalLength();
-            const t = Math.min(1, (now - startAt) / cfg.duration);
+            const t = Math.min(1, (now - startAt) / duration);
             const flight = this._easeFlight(t);
             const strokeP = this._easeStroke(t);
             const traveled = len * flight;
@@ -2485,8 +3083,9 @@ const NoteCensor = {
         requestAnimationFrame(tick);
     },
 
-    _retractRoute(trail, delayMs, token, onComplete) {
+    _retractRoute(trail, delayMs, token, onComplete, durationMs) {
         const cfg = this._linkCfg();
+        const revertDuration = durationMs ?? cfg.revertDuration;
         const group = trail.parentNode;
         const startAt = performance.now() + delayMs;
         const len = trail.getTotalLength();
@@ -2525,7 +3124,7 @@ const NoteCensor = {
                 return;
             }
 
-            const t = Math.min(1, (now - startAt) / cfg.revertDuration);
+            const t = Math.min(1, (now - startAt) / revertDuration);
             const flight = this._easeFlight(t);
             const traveled = visible * (1 - flight);
 
@@ -2598,64 +3197,6 @@ const NoteCensor = {
         this._persistedRoutes = [];
     },
 
-    _hitWordByRect(clientX, clientY) {
-        const now = performance.now();
-        if (!this._wordHitCache || now - this._wordHitCacheAt > 400) {
-            const vw = window.innerWidth;
-            const vh = window.innerHeight;
-            this._wordHitCache = [];
-            document.querySelectorAll('.note-redact__word').forEach((word) => {
-                const r = word.getBoundingClientRect();
-                if (r.width <= 0 || r.height <= 0) return;
-                if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) return;
-                this._wordHitCache.push({ word, r });
-            });
-            this._wordHitCacheAt = now;
-        }
-
-        let best = null;
-        let bestArea = Infinity;
-        for (const { word, r } of this._wordHitCache) {
-            if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) continue;
-            if (this._isCommitted(this._wordKey(word))) continue;
-            const area = r.width * r.height;
-            if (area < bestArea) {
-                bestArea = area;
-                best = word;
-            }
-        }
-        return best;
-    },
-
-    _updateWordReveal(clientX, clientY) {
-        if (!this.isActive()) {
-            this._clearAllHoverState();
-            return;
-        }
-        if (this._revealRaf) return;
-        this._revealPending = { x: clientX, y: clientY };
-        this._revealRaf = requestAnimationFrame(() => {
-            this._revealRaf = null;
-            const pending = this._revealPending;
-            if (!pending) return;
-
-            const word = this.hitWordAt(pending.x, pending.y);
-
-            if (word === this._activeSourceWord) return;
-
-            if (this._activeSourceWord) {
-                if (word) {
-                    this._switchActiveHover(word);
-                } else {
-                    this._resetHoverState(false);
-                }
-                return;
-            }
-
-            if (word) this._activateHover(word);
-        });
-    },
-
     /** Censored theme — skip L1→L3 auto-open inspector; L3 study opens via allowsStudyNoteOpen. */
     blocksNoteFocus() {
         return this.isThemeEnabled();
@@ -2693,7 +3234,7 @@ const NoteCensor = {
         return ` style="--word-cover-color:${color}"`;
     },
 
-    /** Split visible text into hover-reveal word tokens (whitespace-separated). */
+    /** Split visible text into click-reveal word tokens (whitespace-separated). */
     tokenizeWords(text) {
         return String(text || '').split(/\s+/).filter(Boolean);
     },
@@ -2793,7 +3334,7 @@ const NoteCensor = {
     buildIdHTML(item) {
         const idText = String(item?.id || '').trim();
         if (!idText) return '';
-        return `<div class="note-idcode general-t">${this.escapeHTML(idText)}</div>`;
+        return `<div class="note-id-rail"><div class="note-idcode general-t">${this.escapeHTML(idText)}</div></div>`;
     },
 
     buildCardOnlyHTML(item, options = {}) {
@@ -2814,6 +3355,227 @@ const NoteCensor = {
             minWidth: 0.28,
             maxWidth: 0.72
         });
+    }
+};
+/* ==========================================================================
+   NOTE ID STICKY — focus inspector only; L2 grid IDs stay fixed on card
+   JS corridor clamp (top m / bottom m); release when card leaves scrollport.
+   ========================================================================== */
+const NoteIdSticky = {
+    _panel: null,
+    _onPanelScroll: null,
+    _onGlobalSync: null,
+    _minHeightProbe: null,
+    _inited: false,
+
+    init() {
+        if (this._inited) return;
+        this._inited = true;
+
+        this.clearGridStickyState();
+
+        this._onGlobalSync = () => this.syncAll();
+        window.addEventListener('scroll', this._onGlobalSync, { passive: true, capture: true });
+        window.addEventListener('resize', this._onGlobalSync, { passive: true });
+    },
+
+    isFocusCard(card) {
+        return !!card?.closest(
+            '.artifact-inspector-panel, .artifact-inspector-flyer, .artifact-inspector-card-measure-probe'
+        );
+    },
+
+    clearGridStickyState(root = document.getElementById('app')) {
+        if (!root) return;
+        root.querySelectorAll('.micro-mock__card.note-card').forEach((card) => {
+            card.classList.remove('is-note-id-sticky-enabled', 'is-note-id-viewport-track');
+            card.querySelector('.note-idcode')?.style.removeProperty('transform');
+        });
+    },
+
+    measureMinCardHeightPx() {
+        if (!this._minHeightProbe) {
+            this._minHeightProbe = document.createElement('div');
+            this._minHeightProbe.setAttribute('aria-hidden', 'true');
+            this._minHeightProbe.style.cssText = [
+                'position:fixed',
+                'visibility:hidden',
+                'pointer-events:none',
+                'top:0',
+                'left:0',
+                'height:var(--site-micro-note-min-height)'
+            ].join(';');
+            document.body.appendChild(this._minHeightProbe);
+        }
+        return this._minHeightProbe.getBoundingClientRect().height;
+    },
+
+    isStickyEligible(card) {
+        if (!card) return false;
+        const minH = this.measureMinCardHeightPx();
+        if (!Number.isFinite(minH) || minH <= 0) return false;
+        return card.offsetHeight > minH + 2;
+    },
+
+    findScroller(card) {
+        const panel = card?.closest('.artifact-inspector-panel');
+        if (panel) return panel;
+        return document.documentElement;
+    },
+
+    getScrollerRect(scroller) {
+        if (scroller === document.documentElement) {
+            return {
+                top: 0,
+                bottom: window.innerHeight,
+                left: 0,
+                right: window.innerWidth
+            };
+        }
+        return scroller.getBoundingClientRect();
+    },
+
+    measureNaturalTop(id) {
+        const prev = id.style.transform;
+        id.style.transform = 'none';
+        const top = id.getBoundingClientRect().top;
+        id.style.transform = prev;
+        return top;
+    },
+
+    getAncestorScaleY(el) {
+        let node = el?.parentElement;
+        while (node) {
+            const transform = getComputedStyle(node).transform;
+            if (transform && transform !== 'none') {
+                const matrix = new DOMMatrix(transform);
+                if (Math.abs(matrix.a - 1) > 0.001 || Math.abs(matrix.d - 1) > 0.001) {
+                    return matrix.a;
+                }
+            }
+            node = node.parentElement;
+        }
+        return 1;
+    },
+
+    refreshCard(card) {
+        if (!card?.classList.contains('note-card')) return;
+
+        if (!this.isFocusCard(card)) {
+            card.classList.remove('is-note-id-sticky-enabled', 'is-note-id-viewport-track');
+            card.querySelector('.note-idcode')?.style.removeProperty('transform');
+            return;
+        }
+
+        const enabled = this.isStickyEligible(card);
+        card.classList.toggle('is-note-id-sticky-enabled', enabled);
+        card.classList.remove('is-note-id-viewport-track');
+
+        const id = card.querySelector('.note-idcode');
+        if (!enabled && id) {
+            id.style.removeProperty('transform');
+        }
+    },
+
+    refreshAllCards(root = document) {
+        root.querySelectorAll('.micro-mock__card.note-card').forEach((card) => {
+            this.refreshCard(card);
+        });
+    },
+
+    bindFocusPanel(panel) {
+        this.unbindFocusPanel();
+        if (!panel) return;
+
+        this._panel = panel;
+        this._onPanelScroll = () => this.syncAll();
+        panel.addEventListener('scroll', this._onPanelScroll, { passive: true });
+        this.refreshAllCards(panel);
+        this.syncAll();
+    },
+
+    unbindFocusPanel() {
+        if (this._panel && this._onPanelScroll) {
+            this._panel.removeEventListener('scroll', this._onPanelScroll);
+        }
+        this._panel = null;
+        this._onPanelScroll = null;
+    },
+
+    resetFocusIds(root = document) {
+        root.querySelectorAll('.micro-mock__card .note-idcode').forEach((id) => {
+            id.style.removeProperty('transform');
+        });
+    },
+
+    syncAll() {
+        const focusRoots = [this._panel, document.querySelector('.artifact-inspector-flyer')].filter(Boolean);
+        focusRoots.forEach((root) => this.refreshAllCards(root));
+
+        document.querySelectorAll(
+            '.artifact-inspector-panel .micro-mock__card.is-note-id-sticky-enabled, ' +
+            '.artifact-inspector-flyer .micro-mock__card.is-note-id-sticky-enabled, ' +
+            '.artifact-inspector-card-measure-probe .micro-mock__card.is-note-id-sticky-enabled'
+        ).forEach((card) => {
+            this.syncStickyCard(card, this.findScroller(card));
+        });
+    },
+
+    syncFocusPanel() {
+        this.syncAll();
+    },
+
+    syncStickyCard(card, scroller) {
+        const id = card?.querySelector('.note-idcode');
+        const rail = card?.querySelector('.note-id-rail');
+        if (!id || !rail || !scroller) return;
+
+        if (!this.isFocusCard(card) || !card.classList.contains('is-note-id-sticky-enabled')) {
+            id.style.removeProperty('transform');
+            return;
+        }
+
+        const railStyle = getComputedStyle(rail);
+        const scale = this.getAncestorScaleY(card);
+        const padTop = (parseFloat(railStyle.paddingTop) || 0) * scale;
+        const padBottom = (parseFloat(railStyle.paddingBottom) || 0) * scale;
+
+        const naturalTop = this.measureNaturalTop(id);
+        const idRect = id.getBoundingClientRect();
+        const idHeight = idRect.height;
+        const railRect = rail.getBoundingClientRect();
+        const cardRect = card.getBoundingClientRect();
+
+        if (railRect.height <= 0 || idHeight <= 0) return;
+
+        const scrollerRect = this.getScrollerRect(scroller);
+        const corridorTop = railRect.top + padTop;
+        const corridorBottom = railRect.bottom - padBottom;
+        const maxY = corridorBottom - idHeight;
+
+        // Card lane not in scrollport — ID rides with note, no synthetic offset.
+        if (
+            corridorBottom < scrollerRect.top ||
+            corridorTop > scrollerRect.bottom ||
+            cardRect.right < scrollerRect.left ||
+            cardRect.left > scrollerRect.right
+        ) {
+            id.style.removeProperty('transform');
+            return;
+        }
+
+        const stickY = scrollerRect.top + padTop;
+        const lo = Math.min(stickY, maxY);
+        const hi = Math.max(stickY, maxY);
+        const targetY = Math.min(Math.max(naturalTop, lo), hi);
+
+        const delta = targetY - naturalTop;
+
+        if (Math.abs(delta) < 0.5) {
+            id.style.removeProperty('transform');
+        } else {
+            id.style.transform = `translateY(${delta / scale}px)`;
+        }
     }
 };
 /* ==========================================================================
@@ -5361,6 +6123,10 @@ const MesoMock = {
    03b. MICRO MOCK — תצוגת פתקים ב-L3 (V2, מחובר ל-AppState.items)
    ========================================================================== */
 const MicroMock = {
+    _prewarmScheduled: false,
+    _prewarmComplete: false,
+    _prewarmToken: 0,
+
     escapeHTML(text) {
         return String(text || '')
             .replace(/&/g, '&amp;')
@@ -5408,45 +6174,105 @@ const MicroMock = {
             `<span class="block-label">${this.escapeHTML(author)}</span></span>`;
     },
 
-    buildTypologyHTML(item) {
-        const typology = String(item?.typology || '').trim();
-        if (!typology) return '';
-        const pattern = typeof getTypologyPattern === 'function'
-            ? getTypologyPattern(typology)
-            : 'regular';
-        const inner = typeof buildTypologyBlockInnerHTML === 'function'
-            ? buildTypologyBlockInnerHTML(typology)
-            : `<span class="block-label">${this.escapeHTML(typology)}</span>`;
-        return `<span class="action-block action-block--typology action-block--attached micro-mock__typology-block general-t" data-typology="${this.escapeHTML(typology)}" data-typology-pattern="${pattern}">${inner}</span>`;
+    /** Sheet date codes like `0421` → `04 2021` (MM YYYY); empty / `0000` → לא ידוע. */
+    formatFocusDateWritten(raw) {
+        const s = String(raw || '').trim();
+        if (!s) return 'לא ידוע';
+
+        const compact = s.replace(/\s+/g, '');
+        if (/^0+$/.test(compact)) return 'לא ידוע';
+
+        const match = compact.match(/^(\d{2})(\d{2})$/);
+        if (match) {
+            const month = match[1];
+            const yearPart = match[2];
+            if (month === '00' && yearPart === '00') return 'לא ידוע';
+            const year = parseInt(yearPart, 10) >= 70 ? `19${yearPart}` : `20${yearPart}`;
+            return `${month} ${year}`;
+        }
+
+        return s;
+    },
+
+    buildFocusFooterHTML(item, options = {}) {
+        const readable = options.forceReadable || options.focusScale;
+        const useCensor = typeof NoteCensor !== 'undefined'
+            && NoteCensor.isActive()
+            && !readable;
+
+        const row = (label, valueHtml) =>
+            `<div class="note-card__focus-detail">` +
+            `<dt class="note-card__focus-label">${this.escapeHTML(label)}</dt>` +
+            `<dd class="note-card__focus-value">${valueHtml}</dd>` +
+            `</div>`;
+
+        if (useCensor) {
+            return `<footer class="note-card__focus-footer general-d" aria-label="פרטי פתק">` +
+                `<dl class="note-card__focus-details">` +
+                row('מחבר', NoteCensor.buildMetadataValueHTML('author', item)) +
+                row('תאריך', NoteCensor.buildMetadataValueHTML('date', item)) +
+                row('מבנה', NoteCensor.buildMetadataValueHTML('typology', item)) +
+                `</dl></footer>`;
+        }
+
+        const author = item.authorCode
+            ? String(item.authorCode).trim().toUpperCase()
+            : (item.authorFullName || '—');
+        const date = this.formatFocusDateWritten(item.dateWritten);
+        const typology = typeof getTypologyLabel === 'function'
+            ? (getTypologyLabel(item.typology) || item.typology || '—')
+            : (item.typology || '—');
+
+        return `<footer class="note-card__focus-footer general-d" aria-label="פרטי פתק">` +
+            `<dl class="note-card__focus-details">` +
+            row('מחבר', this.escapeHTML(author)) +
+            row('תאריך', this.escapeHTML(date)) +
+            row('מבנה', this.escapeHTML(typology)) +
+            `</dl></footer>`;
     },
 
     buildCardOnlyHTML(item, options = {}) {
+        const readable = options.forceReadable || options.focusScale;
         const useCensor = typeof NoteCensor !== 'undefined'
-            && NoteCensor.isActive()
-            && !options.forceReadable;
+            && NoteCensor.isThemeEnabled()
+            && !readable
+            && (NoteCensor.isActive() || options.prewarmCensored === true);
+        const focusClass = options.focusScale ? ' micro-mock__card--focus' : '';
+        const dir = item.textDirection === 'ltr' ? 'ltr' : 'rtl';
+        const focusMainOpen = options.focusScale ? '<div class="note-card__focus-main">' : '';
+        const focusMainClose = options.focusScale ? '</div>' : '';
+        const footerHtml = (useCensor && !options.focusScale)
+            ? ''
+            : this.buildFocusFooterHTML(item, options);
+
         if (useCensor) {
-            return NoteCensor.buildCardOnlyHTML(item, options);
+            return `<div class="micro-mock__card note-card${focusClass}" data-note-id="${this.escapeHTML(item.id)}" dir="${dir}">` +
+                NoteCensor.buildIdHTML(item) +
+                focusMainOpen +
+                NoteCensor.buildTitleHTML(item) +
+                NoteCensor.buildBodyHTML(item) +
+                focusMainClose +
+                footerHtml +
+                `</div>`;
         }
+
         const title = String(item.title || '').trim();
         const titleHTML = title
             ? `<h2 class="note-title note-h">${this.escapeHTML(title)}</h2>`
             : '';
-        const focusClass = options.focusScale ? ' micro-mock__card--focus' : '';
-        const dir = item.textDirection === 'ltr' ? 'ltr' : 'rtl';
         return `<div class="micro-mock__card note-card${focusClass}" data-note-id="${this.escapeHTML(item.id)}" dir="${dir}">` +
-            `<div class="note-idcode general-t">${this.escapeHTML(item.id)}</div>` +
+            `<div class="note-id-rail"><div class="note-idcode general-t">${this.escapeHTML(item.id)}</div></div>` +
+            focusMainOpen +
             titleHTML +
             `<div class="note-body note-t">${this.escapeHTML(item.body)}</div>` +
+            focusMainClose +
+            footerHtml +
             `</div>`;
     },
 
-    buildTagsRowHTML(item) {
-        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
-            return '';
-        }
+    buildTagsRowHTML(item, options = {}) {
         return `<div class="micro-mock__tags">` +
             `${this.buildTagsHTML(item.tags, { noteStyle: true })}` +
-            `${this.buildTypologyHTML(item)}` +
             `${this.buildAuthorHTML(item)}` +
             `</div>`;
     },
@@ -5457,7 +6283,7 @@ const MicroMock = {
         return `<div class="micro-mock__note">${card}${tags}</div>`;
     },
 
-    applyToWrapper(wrapper, item = null) {
+    applyToWrapper(wrapper, item = null, options = {}) {
         if (typeof DepthV2 !== 'undefined' && !DepthV2.isActive()) return false;
 
         const glyph = wrapper.querySelector('.depth-v2-glyph--micro');
@@ -5466,32 +6292,117 @@ const MicroMock = {
         const resolved = item || this.resolveItem(wrapper);
         if (!resolved) return false;
 
+        const force = options.force === true;
+        const noteId = String(resolved.id);
+        if (!force && wrapper.dataset.microMockNoteId === noteId && glyph.querySelector('.micro-mock__note')) {
+            return true;
+        }
+
         glyph.innerHTML = this.buildCardHTML(resolved);
         if (typeof TextDirection !== 'undefined') {
             TextDirection.applyToWrapper(wrapper, resolved.textDirection);
         }
         wrapper.style.removeProperty('--micro-mock-row-span');
-        wrapper.dataset.microMockNoteId = String(resolved.id);
-        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
-            NoteCensor.invalidateWordLayout();
-        }
+        wrapper.dataset.microMockNoteId = noteId;
         return true;
     },
 
-    applyAll() {
+    applyAll(options = {}) {
         if (typeof DepthV2 !== 'undefined' && !DepthV2.isActive()) return 0;
         if (typeof DepthController !== 'undefined' && DepthController.currentLevel !== 3) return 0;
 
+
         let applied = 0;
+        let rebuilt = 0;
         [...document.querySelectorAll('#app .note-wrapper:not(.is-layout-excluded)')].forEach(wrapper => {
             try {
-                if (this.applyToWrapper(wrapper)) applied++;
+                const hadCard = !!wrapper.querySelector('.micro-mock__note');
+                if (this.applyToWrapper(wrapper, null, options)) {
+                    applied++;
+                    if (!hadCard || options.force === true) rebuilt++;
+                }
             } catch (err) {
                 console.warn('MicroMock apply failed', wrapper.dataset.noteId, err);
             }
         });
+
+
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive() && rebuilt > 0) {
+            NoteCensor.invalidateWordLayout();
+        }
+
         return applied;
-    }
+    },
+
+    countPrewarmedWrappers() {
+        let count = 0;
+        document.querySelectorAll('#app .note-wrapper').forEach((wrapper) => {
+            if (wrapper.querySelector('.depth-v2-glyph--micro .micro-mock__note')) count++;
+        });
+        return count;
+    },
+
+    isPrewarmComplete() {
+        if (this._prewarmComplete) return true;
+        const total = typeof AppState !== 'undefined' ? AppState.items.length : 0;
+        if (!total) return false;
+        return this.countPrewarmedWrappers() >= total;
+    },
+
+    invalidatePrewarm() {
+        this._prewarmComplete = false;
+        this._prewarmScheduled = false;
+        this._prewarmToken++;
+    },
+
+    prewarmWrapper(wrapper, item) {
+        const glyph = wrapper?.querySelector('.depth-v2-glyph--micro');
+        if (!glyph || !item) return false;
+
+        const noteId = String(item.id);
+        if (wrapper.dataset.microMockNoteId === noteId && glyph.querySelector('.micro-mock__note')) {
+            wrapper.dataset.microMockPrewarmed = '1';
+            return true;
+        }
+
+        glyph.innerHTML = this.buildCardHTML(item, { prewarmCensored: true });
+        if (typeof TextDirection !== 'undefined') {
+            TextDirection.applyToWrapper(wrapper, item.textDirection);
+        }
+        wrapper.style.removeProperty('--micro-mock-row-span');
+        wrapper.dataset.microMockNoteId = noteId;
+        wrapper.dataset.microMockPrewarmed = '1';
+        return true;
+    },
+
+    prewarmAllSync() {
+        if (typeof NoteCensor === 'undefined' || !NoteCensor.isThemeEnabled()) return 0;
+        if (typeof AppState === 'undefined' || !AppState.items?.length) return 0;
+        if (this.isPrewarmComplete()) return this.countPrewarmedWrappers();
+
+
+        const wrappers = [...document.querySelectorAll('#app .note-wrapper')];
+        const itemsById = new Map(AppState.items.map((item) => [String(item.id), item]));
+        let applied = 0;
+
+        wrappers.forEach((wrapper) => {
+            const item = itemsById.get(wrapper.dataset.noteId);
+            if (item && this.prewarmWrapper(wrapper, item)) applied++;
+        });
+
+        this._prewarmComplete = true;
+        this._prewarmScheduled = false;
+
+
+        return applied;
+    },
+
+    schedulePrewarm() {
+        if (this.isPrewarmComplete()) return;
+        if (this._prewarmScheduled) return;
+        this._prewarmScheduled = true;
+        this.prewarmAllSync();
+    },
 };
 /* ==========================================================================
    03. RENDER ENGINE (DOM GENERATION)
@@ -5550,7 +6461,6 @@ const RenderEngine = {
         wrapper.dataset.noteId = item.id;
         if (noteIndex >= 0) wrapper.dataset.noteIndex = String(noteIndex);
         if (item.authorCode) wrapper.dataset.authorCode = item.authorCode;
-        if (item.typology) wrapper.dataset.typology = item.typology;
 
         const hoverDeg = this.getStableMicroHoverRotationDeg(item, noteIndex >= 0 ? noteIndex : 0);
         wrapper.style.setProperty('--note-micro-hover-rotation', `${hoverDeg}deg`);
@@ -5607,6 +6517,8 @@ const RenderEngine = {
 
         wrapper.addEventListener('click', (e) => {
             if (e.target.closest('.layer-dot')) return;
+            if (e.target.closest('.note-redact__word')) return;
+            if (typeof NoteCensor !== 'undefined' && NoteCensor.shouldSuppressNoteOpen?.()) return;
             if (typeof isPointOverSiteNavigationUI === 'function' &&
                 isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
                 return;
@@ -5625,6 +6537,13 @@ const RenderEngine = {
 
                 if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
                     DepthController.changeLevel(3);
+                    if (!(typeof NoteCensor !== 'undefined' && NoteCensor.blocksNoteFocus())) {
+                        requestAnimationFrame(() => {
+                            if (DepthController.currentLevel === 3) {
+                                ArtifactInspector.open(wrapper);
+                            }
+                        });
+                    }
                     return;
                 }
 
@@ -5632,10 +6551,6 @@ const RenderEngine = {
                     DepthTransitionOrchestrator.runNoteClick(noteIndex, wrapper);
                 }
                 return;
-            }
-
-            if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
-                if (!NoteCensor.isNoteStudyUnlocked(wrapper)) return;
             }
 
             if (ArtifactInspector.isActive) {
@@ -6267,8 +7182,8 @@ const CatalogLayoutEngine = {
    ========================================================================== */
 const CatalogState = {
     revision: 0,
-    activeCriteria: { tags: new Set(), authors: new Set(), typologies: new Set() },
-    filterCriteria: { tags: new Set(), authors: new Set(), typologies: new Set() },
+    activeCriteria: { tags: new Set(), authors: new Set() },
+    filterCriteria: { tags: new Set(), authors: new Set() },
     noteRoles: new Map(),
     blockAnchors: [],
     catalogLayout: null,
@@ -6303,10 +7218,8 @@ const CatalogState = {
             layoutMode: CONFIG.depth.layoutMode,
             activeTags: [...this.activeCriteria.tags],
             activeAuthors: [...this.activeCriteria.authors],
-            activeTypologies: [...this.activeCriteria.typologies],
             filterTags: [...this.filterCriteria.tags],
             filterAuthors: [...this.filterCriteria.authors],
-            filterTypologies: [...this.filterCriteria.typologies],
             blockCount: this.blockAnchors.length,
             noteCount: this.noteRoles.size,
             hasCatalogLayout: !!this.catalogLayout,
@@ -6318,12 +7231,24 @@ const CatalogState = {
         };
     },
 
+    /** Drop lens/filter snapshot so the next layer starts from default layout. */
+    resetForLayerSwitch() {
+        this.noteRoles = new Map();
+        this.blockAnchors = [];
+        this.visibleNoteIndices = [];
+        this.filteredNoteIndices = [];
+        this.hasFilterCriteria = false;
+        this.hasFocus = false;
+        this.macroRank = null;
+        this.activeCriteria = { tags: new Set(), authors: new Set() };
+        this.filterCriteria = { tags: new Set(), authors: new Set() };
+    },
+
     rebuildFromWarehouse() {
         if (typeof ActionWarehouse === 'undefined') return this;
 
         const activeTags = new Set();
         const activeAuthors = new Set();
-        const activeTypologies = new Set();
 
         ActionWarehouse.blocks.forEach(block => {
             if (block.state !== 'active') return;
@@ -6332,7 +7257,6 @@ const CatalogState = {
 
             if (block.type === 'tag' && block.tag) activeTags.add(block.tag);
             if (block.type === 'author' && block.author) activeAuthors.add(block.author);
-            if (block.type === 'typology' && block.typology) activeTypologies.add(block.typology);
         });
 
         ActionWarehouse.blocks.forEach(block => {
@@ -6341,29 +7265,27 @@ const CatalogState = {
             if (!ActionWarehouse.isBlockFocusEligible(block.nestedIn)) return;
             if (block.type === 'tag' && block.tag) activeTags.add(block.tag);
             if (block.type === 'author' && block.author) activeAuthors.add(block.author);
-            if (block.type === 'typology' && block.typology) activeTypologies.add(block.typology);
         });
 
-        const { tags: filterTags, authors: filterAuthors, typologies: filterTypologies } =
+        const { tags: filterTags, authors: filterAuthors } =
             ActionWarehouse.getFilterCriteria();
 
-        this.activeCriteria = { tags: activeTags, authors: activeAuthors, typologies: activeTypologies };
-        this.filterCriteria = { tags: filterTags, authors: filterAuthors, typologies: filterTypologies };
-        this.hasFilterCriteria = filterTags.size > 0 || filterAuthors.size > 0 || filterTypologies.size > 0;
-        this.hasFocus = activeTags.size > 0 || activeAuthors.size > 0 || activeTypologies.size > 0;
+        this.activeCriteria = { tags: activeTags, authors: activeAuthors };
+        this.filterCriteria = { tags: filterTags, authors: filterAuthors };
+        this.hasFilterCriteria = filterTags.size > 0 || filterAuthors.size > 0;
+        this.hasFocus = activeTags.size > 0 || activeAuthors.size > 0;
 
         this.filteredNoteIndices = [...ActionWarehouse.filteredNoteIndices];
         this.visibleNoteIndices = [];
 
         this.blockAnchors = ActionWarehouse.blocks
             .filter(b => ActionWarehouse.isWorkspaceOccupant(b))
-            .filter(b => b.type === 'tag' || b.type === 'author' || b.type === 'typology' || b.type === 'frame')
+            .filter(b => b.type === 'tag' || b.type === 'author' || b.type === 'frame')
             .map(b => ({
-                id: b.tag || b.author || b.typology || b.type,
+                id: b.tag || b.author || b.type,
                 type: b.type,
                 tag: b.tag || null,
                 author: b.author || null,
-                typology: b.typology || null,
                 pageX: b.bodyX,
                 pageY: b.bodyY
             }));
@@ -6379,14 +7301,11 @@ const CatalogState = {
             const authorCode = wrapper.dataset.authorCode || '';
             const { tags } = ActionWarehouse.getNoteFocusTagsAndAuthor(noteIndex, wrapper);
 
-            const noteTypology = ActionWarehouse.getNoteTypology(noteIndex, wrapper);
             const emphasized = ActionWarehouse.noteMatchesActiveFocus(
                 tags,
                 authorCode,
                 activeTags,
-                activeAuthors,
-                noteTypology,
-                activeTypologies
+                activeAuthors
             );
 
             let role = emphasized ? 'emphasized' : 'neutral';
@@ -6408,7 +7327,6 @@ const CatalogState = {
         this.workspaceLens = {
             activeTags: new Set(activeTags),
             activeAuthors: new Set(activeAuthors),
-            activeTypologies: new Set(activeTypologies),
             blockAnchors: this.blockAnchors.slice(),
             emphasizedNotes: [...this.noteRoles.entries()]
                 .filter(([, role]) => role === 'emphasized' || role === 'captured' || role === 'stretched')
@@ -7169,10 +8087,10 @@ const MesoSpatialLayout = {
 
     hasActiveLens() {
         if (typeof ActionWarehouse === 'undefined') return false;
-        const { tags, authors, typologies } = ActionWarehouse.getActiveFocusCriteria();
+        const { tags, authors } = ActionWarehouse.getActiveFocusCriteria();
         const filter = ActionWarehouse.getFilterCriteria();
-        return tags.size > 0 || authors.size > 0 || typologies.size > 0 ||
-            filter.tags.size > 0 || filter.authors.size > 0 || filter.typologies.size > 0;
+        return tags.size > 0 || authors.size > 0 ||
+            filter.tags.size > 0 || filter.authors.size > 0;
     },
 
     getLayoutRanks() {
@@ -7474,10 +8392,9 @@ const DepthV2 = {
             const titleLines = Math.max(0, Math.ceil(titleChars / 24));
             const bodyLines = Math.max(1, Math.ceil(bodyChars / 38));
             const tagBonus = (item.tags?.length || 0) * 90;
-            const typologyBonus = item.typology ? 60 : 0;
             const lineWeight = titleLines * 150 + bodyLines * 95;
             const minBlock = level === 3 ? 720 : 480;
-            return Math.max(minBlock, lineWeight + tagBonus + typologyBonus);
+            return Math.max(minBlock, lineWeight + tagBonus);
         }
 
         return level === 3 ? 720 : 480;
@@ -7892,6 +8809,7 @@ const DepthV2 = {
     layoutMicroGrid(options = {}) {
         if (DepthController.currentLevel !== 3) return;
 
+
         const app = document.getElementById('app');
         const grid = this.getGrid(3);
         if (!app || !grid) return;
@@ -7962,6 +8880,7 @@ const DepthV2 = {
         if (typeof updateSiteGridCrosses === 'function') {
             updateSiteGridCrosses({ force: true });
         }
+
     },
 
     relayoutForFilterChange(options = {}) {
@@ -7969,7 +8888,7 @@ const DepthV2 = {
         const level = DepthController.currentLevel;
         if (level === 3) {
             this.layoutMicroGrid(options);
-            if (typeof MicroMock !== 'undefined') MicroMock.applyAll();
+            if (typeof MicroMock !== 'undefined') MicroMock.applyAll({ force: options.force === true });
             if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
                 AppState.centerMicroFocusCluster({ smooth: options.smooth !== false });
             }
@@ -8252,32 +9171,46 @@ const DepthV2 = {
         return this._mesoLayoutReadyPromise;
     },
 
-    prepareMicroGrid() {
+    prepareMicroGrid(options = {}) {
         if (DepthController.currentLevel !== 3) return;
+
+        const force = options.force === true;
+        const app = document.getElementById('app');
+        const hasLayout = app?.classList.contains('is-micro-grid-layout');
+        const hasCards = !!app?.querySelector('.micro-mock__note');
+        if (!force && hasLayout && hasCards) {
+            return;
+        }
+
 
         this.layoutMicroGrid({ force: true });
 
-        if (typeof AppState !== 'undefined') {
-            AppState.syncNoteDomFromItems();
+        const cardsReady = typeof MicroMock !== 'undefined' && MicroMock.isPrewarmComplete();
+        const applyForce = force || !cardsReady;
+
+        if (typeof MicroMock !== 'undefined') {
+            MicroMock.applyAll({ force: applyForce });
         }
 
-        const applyMocks = () => {
-            if (typeof MicroMock !== 'undefined') {
-                MicroMock.applyAll();
-            }
-            void document.getElementById('app')?.offsetHeight;
-            if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
-                AppState.centerMicroFocusCluster({ smooth: true });
-            } else if (typeof AppState !== 'undefined') {
-                AppState.scheduleViewportCenter({ passes: 4 });
-            }
-        };
+
+        void app?.offsetHeight;
+        if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
+            AppState.centerMicroFocusCluster({ smooth: true });
+        } else if (typeof AppState !== 'undefined') {
+            AppState.scheduleViewportCenter({ passes: 4 });
+        }
 
         const fontReady = document.fonts?.ready;
         if (fontReady?.then) {
-            fontReady.then(() => requestAnimationFrame(applyMocks)).catch(() => applyMocks());
-        } else {
-            requestAnimationFrame(applyMocks);
+            fontReady.then(() => {
+                if (DepthController.currentLevel !== 3) return;
+                requestAnimationFrame(() => {
+                    void document.getElementById('app')?.offsetHeight;
+                    if (typeof AppState !== 'undefined') {
+                        AppState.scheduleViewportCenter({ passes: 2 });
+                    }
+                });
+            }).catch(() => {});
         }
     },
 
@@ -8313,7 +9246,8 @@ const DepthV2 = {
         if (level === 3) {
             this._lastMesoPreparedLevel = 3;
             if (typeof MesoMock !== 'undefined') MesoMock.unbindShaderLiveHover();
-            this.prepareMicroGrid();
+            const cardsReady = typeof MicroMock !== 'undefined' && MicroMock.isPrewarmComplete();
+            this.prepareMicroGrid({ force: !cardsReady });
             return;
         }
 
@@ -8328,7 +9262,9 @@ const DepthV2 = {
         if (level !== 3) return;
         this.ensureShell();
         this.applyGridTokens(3);
-        this.prepareMicroGrid();
+        if (!document.getElementById('app')?.querySelector('.micro-mock__note')) {
+            this.prepareMicroGrid({ force: true });
+        }
     }
 };
 /* ==========================================================================
@@ -8459,7 +9395,7 @@ const DepthFocusLinks = {
 
         return ActionWarehouse.blocks.filter(block => {
             if (block.state !== 'active') return false;
-            if (block.type !== 'tag' && block.type !== 'author' && block.type !== 'typology') return false;
+            if (block.type !== 'tag' && block.type !== 'author') return false;
             if (block.nestedIn?.frameKind === 'filter') return false;
             if (!ActionWarehouse.isBlockFocusEligible(block)) return false;
 
@@ -8498,12 +9434,6 @@ const DepthFocusLinks = {
         const authorCode = wrapper.dataset.authorCode || '';
         if (block.type === 'author') {
             return !!block.author && authorCode === block.author;
-        }
-
-        if (block.type === 'typology' && block.typology) {
-            const noteTypology = wrapper.dataset.typology ||
-                ActionWarehouse.getNoteTypology(noteIndex, wrapper);
-            return noteTypology === block.typology;
         }
 
         if (block.type === 'tag' && block.tag) {
@@ -8706,6 +9636,7 @@ const DepthController = {
     },
 
     zoomOut() {
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.blocksLayerZoomOut?.()) return false;
         const next = getDepthAdjacentLevel(this.currentLevel, -1);
         if (next === this.currentLevel || this.isWheelLocked()) return false;
         if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
@@ -8723,6 +9654,9 @@ const DepthController = {
         if (!isDepthLevelActive(newLevel)) return false;
 
         const prevLevel = this.currentLevel;
+        if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.clearStudyStateForLayerLeave) {
+            ActionWarehouse.clearStudyStateForLayerLeave(prevLevel);
+        }
         const isMacroMesoTransition =
             (prevLevel === 1 && newLevel === 2) || (prevLevel === 2 && newLevel === 1);
 
@@ -9054,6 +9988,7 @@ const SpatialNavigation = {
         startY: 0,
         didMove: false
     },
+    _studyTap: null,
 
     init() {
         this.navSurface = document.getElementById('nav-surface');
@@ -9100,8 +10035,32 @@ const SpatialNavigation = {
                 return;
             }
             if (!e.target?.closest?.('#app')) return;
-            if (e.target === this.navSurface) return;
-            if (!this.canStartPan(e)) return;
+            if (e.target === this.navSurface) {
+                if (e.button === 0 && !this.isPaused && this.isDepthCanvasLevel() &&
+                    typeof NoteCensor !== 'undefined' && NoteCensor.isActive() &&
+                    NoteCensor.isStudyTapTarget?.(e.clientX, e.clientY) &&
+                    !this.isPanBlockedTarget(e.target)) {
+                    this._studyTap = {
+                        pointerId: e.pointerId,
+                        startX: e.clientX,
+                        startY: e.clientY
+                    };
+                }
+                return;
+            }
+            if (!this.canStartPan(e)) {
+                if (e.button === 0 && !this.isPaused && this.isDepthCanvasLevel() &&
+                    typeof NoteCensor !== 'undefined' && NoteCensor.isActive() &&
+                    NoteCensor.isStudyTapTarget?.(e.clientX, e.clientY) &&
+                    !this.isPanBlockedTarget(e.target)) {
+                    this._studyTap = {
+                        pointerId: e.pointerId,
+                        startX: e.clientX,
+                        startY: e.clientY
+                    };
+                }
+                return;
+            }
             this.handlePanDown(e);
         }, { capture: true });
         document.addEventListener('pointermove', this.onPanMove);
@@ -9114,6 +10073,40 @@ const SpatialNavigation = {
     },
 
     handleWheel(e) {
+        const wheelCfg = CONFIG.navigation.wheel || {};
+        const pinchZoom = !!(e.ctrlKey && wheelCfg.depthZoom !== false);
+
+        if (pinchZoom && typeof DepthController !== 'undefined') {
+            if (this.isPaused || DepthController.isWheelLocked()) {
+                e.preventDefault();
+                return;
+            }
+            if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
+                e.preventDefault();
+                return;
+            }
+            if (this.isPanBlockedTarget(e.target)) return;
+            if (typeof isPointOverSiteNavigationUI === 'function' &&
+                isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+                return;
+            }
+
+            const threshold = wheelCfg.zoomThreshold ?? 12;
+            if (Math.abs(e.deltaY) < threshold) {
+                e.preventDefault();
+                return;
+            }
+
+            e.preventDefault();
+            if (e.deltaY > 0) {
+                if (typeof NoteCensor !== 'undefined' && NoteCensor.blocksLayerZoomOut?.()) return;
+                DepthController.zoomOut();
+            } else {
+                DepthController.zoomIn();
+            }
+            return;
+        }
+
         if (e.ctrlKey) return;
 
         if (this.isPaused ||
@@ -9282,12 +10275,17 @@ const SpatialNavigation = {
     },
 
     dispatchDepthNoteTap(clientX, clientY) {
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            if (NoteCensor.commitWordAt(clientX, clientY)) {
+                return true;
+            }
+            if (NoteCensor.tryOpenStudyNoteAt?.(clientX, clientY)) {
+                return true;
+            }
+        }
+
         const wrapper = this.hitTestDepthNote(clientX, clientY);
         if (!wrapper) return false;
-
-        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
-            if (!NoteCensor.isNoteStudyUnlocked(wrapper)) return false;
-        }
 
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(clientX, clientY)) {
@@ -9321,7 +10319,7 @@ const SpatialNavigation = {
         if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
             const overWord = NoteCensor.hitWordAt(clientX, clientY);
             if (overWord) {
-                this.navSurface.style.cursor = 'default';
+                this.navSurface.style.cursor = 'pointer';
                 return;
             }
             const wrapper = this.hitTestDepthNote(clientX, clientY);
@@ -9348,6 +10346,11 @@ const SpatialNavigation = {
         if (this.isPaused || e.button !== 0) return false;
         if (this.isPanBlockedTarget(e.target)) return false;
 
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            if (NoteCensor.isStudyTapTarget?.(e.clientX, e.clientY)) return false;
+            if (NoteCensor.hitWordAt(e.clientX, e.clientY)) return false;
+        }
+
         if (this.spaceHeld) return true;
 
         const target = e.target;
@@ -9363,6 +10366,20 @@ const SpatialNavigation = {
 
     handlePanDown(e) {
         if (this.pan.active) return;
+
+        if (e.button === 0 && !this.isPaused && this.isDepthCanvasLevel() &&
+            typeof NoteCensor !== 'undefined' && NoteCensor.isActive() &&
+            NoteCensor.isStudyTapTarget?.(e.clientX, e.clientY) &&
+            !this.isPanBlockedTarget(e.target)) {
+            this._studyTap = {
+                pointerId: e.pointerId,
+                startX: e.clientX,
+                startY: e.clientY
+            };
+            e.preventDefault();
+            return;
+        }
+
         if (!this.canStartPan(e)) return;
 
         e.preventDefault();
@@ -9418,6 +10435,16 @@ const SpatialNavigation = {
     },
 
     handlePanEnd(e) {
+        const studyTap = this._studyTap;
+        if (studyTap && e.pointerId === studyTap.pointerId) {
+            this._studyTap = null;
+            const threshold = CONFIG.depth?.clickDragThreshold ?? 6;
+            const moved = Math.hypot(e.clientX - studyTap.startX, e.clientY - studyTap.startY);
+            if (moved < threshold) {
+                this.dispatchDepthNoteTap(studyTap.startX, studyTap.startY);
+            }
+        }
+
         if (!this.pan.active || e.pointerId !== this.pan.pointerId) return;
 
         const wasTap = !this.pan.didMove;
@@ -9956,6 +10983,11 @@ const LAYER_NAV_SYMBOL_INLINE = {
 };
 
 const LAYER_NAV_SYMBOL_FETCH_CACHE = new Map();
+
+function isLayerZoomOutBlocked(level = getSiteGridLevel()) {
+    if (level !== 3) return false;
+    return typeof NoteCensor !== 'undefined' && NoteCensor.blocksLayerZoomOut?.();
+}
 
 function getLayerNavToggleTarget(currentLevel) {
     const levels = getDepthActiveLevels();
@@ -11374,6 +12406,7 @@ const NavigationMap = {
 
     syncActiveState(level) {
         const transitionActive = this.isTransitionActive();
+        const layerToggleBlocked = this.isLayerToggleBlocked();
         const inspectorActive = level === 1 &&
             typeof ArtifactInspector !== 'undefined' &&
             ArtifactInspector.isActive;
@@ -11397,9 +12430,11 @@ const NavigationMap = {
 
             this.applyLayerSlot(this.toggleButton, 0);
             this.toggleButton.classList.add('is-active');
-            this.toggleButton.classList.remove('is-inactive');
+            this.toggleButton.classList.remove('is-inactive', 'is-zoom-out-blocked');
             this.toggleButton.removeAttribute('aria-current');
-            this.toggleButton.disabled = transitionActive;
+            this.toggleButton.disabled = layerToggleBlocked;
+            this.toggleButton.setAttribute('aria-disabled', layerToggleBlocked ? 'true' : 'false');
+            document.body.classList.remove('is-layer-zoom-out-blocked');
         } else {
             this.titles.forEach((title, rowLevel) => {
                 const isActive = rowLevel === level;
@@ -11430,6 +12465,16 @@ const NavigationMap = {
             DepthController.isAnyTransitionActive();
     },
 
+    /** Layer toggle stays available on L2 (code level 3) even while focus inspector is open. */
+    isLayerToggleBlocked() {
+        if (DepthController.isAnyTransitionActive?.()) return true;
+        if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive &&
+            DepthController.currentLevel === 3) {
+            return false;
+        }
+        return !!SpatialNavigation.isPaused;
+    },
+
     isTransitionBlocked() {
         return this.isTransitionActive();
     },
@@ -11446,8 +12491,12 @@ const NavigationMap = {
     navigateToLayer(level) {
         const target = Number(level);
         if (!Number.isFinite(target) || !isDepthLevelActive(target)) return;
-        if (this.isTransitionActive()) return;
-        if (target === this._activeLevel) return;
+        if (this.isLayerToggleBlocked()) return;
+
+        const currentLevel = typeof DepthController !== 'undefined'
+            ? DepthController.currentLevel
+            : this._activeLevel;
+        if (target === currentLevel) return;
 
         if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
             ArtifactInspector.close();
@@ -13031,7 +14080,6 @@ const ArtifactInspector = {
         const studyOpen = typeof NoteCensor !== 'undefined'
             && NoteCensor.isActive()
             && NoteCensor.isNoteStudyUnlocked(noteWrapperNode);
-        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive() && !studyOpen) return;
 
         this._forceReadableOpen = studyOpen;
         this.openPopup(noteWrapperNode);
@@ -13077,10 +14125,14 @@ const ArtifactInspector = {
         const item = typeof MicroMock !== 'undefined'
             ? MicroMock.resolveItem(noteWrapperNode)
             : null;
-        if (!item) return;
+        if (!item) {
+            return;
+        }
 
         const source = this._resolveOpenSource(noteWrapperNode, item);
-        if (!source) return;
+        if (!source) {
+            return;
+        }
 
         const { card: sourceCard, firstRect: firstCard, synthetic } = source;
 
@@ -13097,6 +14149,9 @@ const ArtifactInspector = {
         }
 
         this.panel.innerHTML = this.buildFocusHTML(item);
+        if (typeof NoteIdSticky !== 'undefined') {
+            NoteIdSticky.refreshAllCards(this.panel);
+        }
         this.panel.setAttribute('aria-hidden', 'false');
         this.panel.dataset.noteId = String(item.id);
         this.panel.scrollTop = 0;
@@ -13154,15 +14209,15 @@ const ArtifactInspector = {
     _resolveOpenSource(wrapper, item) {
         const { card } = this._getSourceFocusElements(wrapper);
         const firstRect = card?.getBoundingClientRect();
-
-        if (this._forceReadableOpen && card && firstRect && firstRect.width > 0) {
-            const readableCard = this._buildSyntheticFocusCard(item, { forceReadable: true });
-            if (readableCard) {
-                return { card: readableCard, firstRect, synthetic: true };
-            }
-        }
+        const censoredMicro = typeof NoteCensor !== 'undefined' && NoteCensor.isActive();
 
         if (card && firstRect && firstRect.width > 0) {
+            if (censoredMicro) {
+                const readableCard = this._buildSyntheticFocusCard(item, { forceReadable: true });
+                if (readableCard) {
+                    return { card: readableCard, firstRect, synthetic: true };
+                }
+            }
             return { card, firstRect, synthetic: false };
         }
 
@@ -13172,14 +14227,18 @@ const ArtifactInspector = {
         const sourceRect = this._resolveMacroSourceRect(wrapper, cardSize);
         if (!sourceRect) return null;
 
-        const syntheticCard = this._buildSyntheticFocusCard(item);
+        const syntheticCard = this._buildSyntheticFocusCard(item, { forceReadable: true });
         if (!syntheticCard) return null;
 
         return { card: syntheticCard, firstRect: sourceRect, synthetic: true };
     },
 
     _buildSyntheticFocusCard(item, options = {}) {
-        const html = MicroMock.buildCardOnlyHTML(item, { focusScale: true, ...options });
+        const html = MicroMock.buildCardOnlyHTML(item, {
+            focusScale: true,
+            forceReadable: true,
+            ...options
+        });
         const mount = document.createElement('div');
         mount.innerHTML = html;
         return mount.firstElementChild;
@@ -13193,7 +14252,10 @@ const ArtifactInspector = {
             document.body.appendChild(this._cardMeasureProbe);
         }
 
-        this._cardMeasureProbe.innerHTML = MicroMock.buildCardOnlyHTML(item, { focusScale: true });
+        this._cardMeasureProbe.innerHTML = MicroMock.buildCardOnlyHTML(item, {
+            focusScale: true,
+            forceReadable: true
+        });
         const card = this._cardMeasureProbe.querySelector('.micro-mock__card.note-card');
         const rect = card?.getBoundingClientRect();
         const rootStyle = getComputedStyle(document.documentElement);
@@ -13317,42 +14379,6 @@ const ArtifactInspector = {
         };
     },
 
-    _getSiteGridRowStridePx() {
-        const rootStyle = getComputedStyle(document.documentElement);
-        const cellH = parseFloat(rootStyle.getPropertyValue('--site-grid-cell-h')) || 0;
-        const gap = parseFloat(rootStyle.getPropertyValue('--site-grid-gap')) || 0;
-        return cellH + gap;
-    },
-
-    _getInspectorMetadataShellRowBottomOffsetPx() {
-        const cardAnchorRow = CONFIG.inspector?.cardAnchorRow ?? 2;
-        const alignRow = CONFIG.inspector?.metadataAlignRow
-            ?? CONFIG.siteGrid?.rows
-            ?? 12;
-        const rowsBelowCard = Math.max(0, alignRow - cardAnchorRow);
-        const rootStyle = getComputedStyle(document.documentElement);
-        const cellH = parseFloat(rootStyle.getPropertyValue('--site-grid-cell-h')) || 0;
-        return rowsBelowCard * this._getSiteGridRowStridePx() + cellH;
-    },
-
-    _measureFocusBlockEndPx() {
-        const panel = this.panel;
-        const focus = panel?.querySelector('.artifact-inspector-focus');
-        if (!panel || !focus) return 0;
-
-        const panelStyle = getComputedStyle(panel);
-        const contentTop = panel.getBoundingClientRect().top
-            + (parseFloat(panelStyle.paddingTop) || 0);
-
-        let end = focus.getBoundingClientRect().bottom - contentTop;
-
-        focus.querySelectorAll('.micro-mock__card.note-card, .micro-mock__tags').forEach((el) => {
-            end = Math.max(end, el.getBoundingClientRect().bottom - contentTop);
-        });
-
-        return end;
-    },
-
     _syncFocusCardSlotHeight() {
         const panelSlot = this.panel?.querySelector(
             '.artifact-inspector-focus__card-slot'
@@ -13366,30 +14392,6 @@ const ArtifactInspector = {
         if (cardHeight > 0) {
             panelSlot.style.height = `${Math.ceil(cardHeight)}px`;
         }
-    },
-
-    _syncMetadataPanelGap() {
-        const metadata = this.panel?.querySelector('.artifact-inspector-metadata');
-        const details = metadata?.querySelector('.artifact-inspector-metadata__details');
-        if (!metadata || !details || !this.panel) return;
-
-        this._syncFocusCardSlotHeight();
-
-        const minGap = CONFIG.inspector?.metadataMinGap ?? 60;
-        const rowBottomOffset = this._getInspectorMetadataShellRowBottomOffsetPx();
-        const focusEnd = this._measureFocusBlockEndPx();
-
-        const metadataRect = metadata.getBoundingClientRect();
-        const detailsRect = details.getBoundingClientRect();
-        const detailsOffsetInMetadata = detailsRect.bottom - metadataRect.top;
-
-        const metadataTopForShortAlign = rowBottomOffset - detailsOffsetInMetadata;
-        const longNote = focusEnd + minGap > metadataTopForShortAlign;
-        const gap = longNote
-            ? minGap
-            : Math.max(minGap, metadataTopForShortAlign - focusEnd);
-
-        this.panel.style.setProperty('--inspector-metadata-gap', `${Math.round(gap)}px`);
     },
 
     _applyFocusLandingLayout() {
@@ -13414,10 +14416,8 @@ const ArtifactInspector = {
 
     _handoffFocusToPanel() {
         const flyerScaler = this.flyer?.querySelector('.artifact-inspector-focus__card-scaler');
-        const flyerTags = this.flyer?.querySelector('.micro-mock__tags');
         const flyingCard = flyerScaler?.querySelector('.micro-mock__card.note-card');
         const panelFocus = this.panel?.querySelector('.artifact-inspector-focus');
-        const panelNote = panelFocus?.querySelector('.artifact-inspector-focus__note');
         const panelScaler = panelFocus?.querySelector('.artifact-inspector-focus__card-scaler');
 
         if (!flyingCard || !panelScaler || !panelFocus || !this._openFirstCard) {
@@ -13447,7 +14447,6 @@ const ArtifactInspector = {
         }
 
         panelScaler.appendChild(flyingCard);
-        if (flyerTags && panelNote) panelNote.appendChild(flyerTags);
 
         if (this.flyer) {
             this.flyer.innerHTML = '';
@@ -13493,6 +14492,10 @@ const ArtifactInspector = {
         flyerScaler.offsetHeight;
         this.flyer?.classList.remove('is-preparing');
 
+        if (typeof NoteIdSticky !== 'undefined') {
+            NoteIdSticky.syncFocusPanel();
+        }
+
         const duration = `${CONFIG.inspector?.openDuration ?? 0.48}s`;
         const easing = 'cubic-bezier(0.25, 1, 0.5, 1)';
         const onTransitionEnd = (event) => {
@@ -13537,10 +14540,16 @@ const ArtifactInspector = {
 
         this._handoffFocusToPanel();
 
+        if (typeof NoteIdSticky !== 'undefined') {
+            NoteIdSticky.bindFocusPanel(this.panel);
+        }
+
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 this._syncFocusCardSlotHeight();
-                this._syncMetadataPanelGap();
+                if (typeof NoteIdSticky !== 'undefined') {
+                    NoteIdSticky.syncFocusPanel();
+                }
             });
         });
 
@@ -13549,8 +14558,9 @@ const ArtifactInspector = {
     },
 
     buildFlyerShellHTML(item) {
+        const tagOptions = { forceReadable: true, focusScale: true };
         const tagsHtml = typeof MicroMock !== 'undefined'
-            ? MicroMock.buildTagsRowHTML(item)
+            ? MicroMock.buildTagsRowHTML(item, tagOptions)
             : '';
         return `
             <div class="artifact-inspector-flyer__note micro-mock__note artifact-inspector-focus__note">
@@ -13563,7 +14573,10 @@ const ArtifactInspector = {
     },
 
     buildFocusHTML(item) {
-        const metaHtml = this.buildMetadataHTML(item);
+        const tagOptions = { forceReadable: true, focusScale: true };
+        const tagsHtml = typeof MicroMock !== 'undefined'
+            ? MicroMock.buildTagsRowHTML(item, tagOptions)
+            : '';
         const relatedHtml = this.buildRelatedNotesHTML(item);
         return `
             <div class="artifact-inspector-focus">
@@ -13571,72 +14584,10 @@ const ArtifactInspector = {
                     <div class="artifact-inspector-focus__card-slot">
                         <div class="artifact-inspector-focus__card-scaler"></div>
                     </div>
+                    ${tagsHtml}
                 </div>
             </div>
-            ${metaHtml}
             ${relatedHtml}
-        `;
-    },
-
-    buildMetadataHTML(item) {
-        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
-            const idRedact = NoteCensor.buildRedactBlock(String(item.id || ''), `${item.id}:meta-id`, 'note-redact--meta-title', {
-                maxLines: 1,
-                minWidth: 0.2,
-                maxWidth: 0.45
-            });
-            return `
-            <section class="artifact-inspector-metadata">
-                <div class="artifact-inspector-metadata__scroll-glyphs" aria-hidden="true">
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                </div>
-                <h2 class="artifact-inspector-metadata__id general-h">${idRedact}</h2>
-                <div class="artifact-inspector-metadata__grid">
-                    <dl class="artifact-inspector-metadata__details general-t">
-                        <div><dt>מחבר</dt><dd>${NoteCensor.buildMetadataValueHTML('author', item)}</dd></div>
-                        <div><dt>תאריך כתיבה</dt><dd>${NoteCensor.buildMetadataValueHTML('date', item)}</dd></div>
-                        <div><dt>מספר סידורי</dt><dd>${NoteCensor.buildMetadataValueHTML('serial', item)}</dd></div>
-                        <div><dt>מבנה טיפולוגי</dt><dd>${NoteCensor.buildMetadataValueHTML('typology', item)}</dd></div>
-                    </dl>
-                </div>
-            </section>
-        `;
-        }
-
-        const author = item.authorCode
-            ? String(item.authorCode).trim().toUpperCase()
-            : (item.authorFullName || '—');
-        const date = item.dateWritten || '—';
-        const serial = item.id || '—';
-        const typology = typeof getTypologyLabel === 'function'
-            ? (getTypologyLabel(item.typology) || item.typology || '—')
-            : (item.typology || '—');
-        const blocksHtml = typeof MicroMock !== 'undefined'
-            ? MicroMock.buildTagsRowHTML(item)
-            : '';
-        return `
-            <section class="artifact-inspector-metadata">
-                <div class="artifact-inspector-metadata__scroll-glyphs" aria-hidden="true">
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                </div>
-                <h2 class="artifact-inspector-metadata__id general-h">${this.escapeHtml(item.id || '')}</h2>
-                <div class="artifact-inspector-metadata__grid">
-                    <div class="artifact-inspector-metadata__tags">
-                        <h3 class="general-t">תגיות</h3>
-                        <div class="artifact-inspector-metadata__tag-list">${blocksHtml}</div>
-                    </div>
-                    <dl class="artifact-inspector-metadata__details general-t">
-                        <div><dt>מחבר</dt><dd>${this.escapeHtml(author)}</dd></div>
-                        <div><dt>תאריך כתיבה</dt><dd>${this.escapeHtml(date)}</dd></div>
-                        <div><dt>מספר סידורי</dt><dd>${this.escapeHtml(serial)}</dd></div>
-                        <div><dt>מבנה טיפולוגי</dt><dd>${this.escapeHtml(typology)}</dd></div>
-                    </dl>
-                </div>
-            </section>
         `;
     },
 
@@ -13766,10 +14717,13 @@ const ArtifactInspector = {
         this.panel.setAttribute('aria-hidden', 'true');
         const noteId = this.panel?.dataset?.noteId;
         this._restoreSourceCard(noteId);
+        if (typeof NoteIdSticky !== 'undefined') {
+            NoteIdSticky.unbindFocusPanel();
+            NoteIdSticky.resetFocusIds();
+        }
         this.panel.innerHTML = '';
         this.panel.style.removeProperty('width');
         this.panel.style.removeProperty('left');
-        this.panel.style.removeProperty('--inspector-metadata-gap');
         delete this.panel.dataset.noteId;
 
         if (this.flyer) {
@@ -13796,7 +14750,7 @@ const ArtifactInspector = {
     }
 };
 /* ==========================================================================
-   Site About — bottom-center pull-up sheet (opening + Experience 1)
+   Site About — tab at col 1; tab + panel slide up from below to mid-screen
    ========================================================================== */
 const SiteAbout = {
     root: null,
@@ -13807,6 +14761,7 @@ const SiteAbout = {
     isOpen: false,
     _progress: 0,
     _openHeight: 0,
+    _openLift: 0,
     _tabHeight: 40,
     _dragging: false,
     _pointerActive: false,
@@ -13820,12 +14775,37 @@ const SiteAbout = {
         return CONFIG.about || {};
     },
 
+    _renderDetailsHtml() {
+        const intro = this.cfg().intro || '';
+        const credits = Array.isArray(this.cfg().credits) ? this.cfg().credits : [];
+        const rows = credits.map(({ category, output }) => {
+            const outHtml = Array.isArray(output)
+                ? output.map((line) => `<span class="site-about__credit-output-line">${line}</span>`).join('')
+                : output;
+            return `<div class="site-about__credit-detail">
+                <dt class="site-about__credit-cat general-t">${category}</dt>
+                <dd class="site-about__credit-out general-t">${outHtml}</dd>
+            </div>`;
+        }).join('');
+
+        return `
+            ${intro ? `<p class="site-about__intro general-t">${intro}</p>` : ''}
+            ${rows ? `<dl class="site-about__credits general-t">${rows}</dl>` : ''}
+        `;
+    },
+
     init() {
         if (this.root) return;
 
         const label = this.cfg().label || 'על הפרויקט';
+        const mainTitle = this.cfg().mainTitle || 'הדברים';
         const bodyHtml = this.cfg().bodyHtml || '';
+        const detailsHtml = this._renderDetailsHtml();
         const logoSrc = this.cfg().logoSrc || '';
+        const arrowGlyph = `
+            <svg class="site-about__scroll-glyph" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 17.71 11.65" aria-hidden="true" focusable="false">
+                <path fill="currentColor" d="M3.47,11.38c-.4.4-.92.33-1.32-.07l-1.85-1.85c-.4-.4-.4-.92,0-1.32L8.22.3c.4-.4.92-.4,1.32,0l7.85,7.85c.4.4.46.92,0,1.32l-1.65,1.85c-.46.4-.92.46-1.39.07l-5.48-4.82-5.41,4.82Z"/>
+            </svg>`;
         const logoHtml = logoSrc
             ? `<div class="site-about__brand"><img class="site-about__logo" src="${logoSrc}" alt="בצלאל אקדמיה לאמנות ועיצוב"></div>`
             : '';
@@ -13856,14 +14836,18 @@ const SiteAbout = {
         this.panel.setAttribute('aria-labelledby', 'site-about-trigger');
         this.panel.setAttribute('aria-hidden', 'true');
         this.panel.innerHTML = `
-            <section class="artifact-inspector-metadata site-about__metadata">
-                <div class="artifact-inspector-metadata__scroll-glyphs" aria-hidden="true">
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
+            <section class="site-about__metadata">
+                <div class="site-about__scroll-glyphs" aria-hidden="true">
+                    ${arrowGlyph}
+                    ${arrowGlyph}
+                    ${arrowGlyph}
                 </div>
-                <div class="site-about__body general-t" dir="rtl">${bodyHtml}</div>
-                ${logoHtml}
+                <div class="site-about__content">
+                    <h2 class="site-about__headline main-t" dir="rtl">${mainTitle}</h2>
+                    ${logoHtml}
+                    <div class="site-about__text general-t" dir="rtl">${bodyHtml}</div>
+                    <div class="site-about__details" dir="rtl">${detailsHtml}</div>
+                </div>
             </section>
         `;
 
@@ -13891,25 +14875,115 @@ const SiteAbout = {
 
         this._onResize = () => {
             const wasOpen = this.isOpen;
-            this._measureOpenHeight();
-            this._measureTabHeight();
+            this._measureDimensions();
+            this._fitMainTitle();
             this._progress = wasOpen ? 1 : 0;
             this._applyProgress(false);
         };
         window.addEventListener('resize', this._onResize);
 
         requestAnimationFrame(() => {
-            this._measureOpenHeight();
-            this._measureTabHeight();
+            this._measureDimensions();
+            this._fitMainTitle();
             this._applyProgress(false);
         });
     },
 
-    _measureOpenHeight() {
-        const vh = this.cfg().openHeightVh ?? 65;
-        const maxPx = this.cfg().openMaxPx ?? 640;
-        this._openHeight = Math.round(Math.min(window.innerHeight * (vh / 100), maxPx));
-        this.root?.style.setProperty('--site-about-open-height', `${this._openHeight}px`);
+    _fitMainTitle() {
+        const headline = this.panel?.querySelector('.site-about__headline');
+        if (!headline) return;
+
+        headline.style.fontSize = '';
+        headline.style.letterSpacing = '0px';
+
+        const minPx = this.cfg().titleMinPx ?? 24;
+        const maxPx = this.cfg().titleMaxPx ?? 400;
+        const reducePt = this.cfg().titleReducePt ?? 12;
+        const reducePx = reducePt * (96 / 72);
+        const spacingBoost = this.cfg().titleLetterSpacingBoost ?? 1.55;
+        const maxWidth = headline.clientWidth;
+        if (maxWidth <= 0) return;
+
+        let lo = minPx;
+        let hi = maxPx;
+        let best = minPx;
+
+        while (lo <= hi) {
+            const mid = Math.floor((lo + hi) / 2);
+            headline.style.fontSize = `${mid}px`;
+            headline.style.letterSpacing = '0px';
+            if (headline.scrollWidth <= maxWidth) {
+                best = mid;
+                lo = mid + 1;
+            } else {
+                hi = mid - 1;
+            }
+        }
+
+        const targetPx = Math.max(minPx, best - reducePx);
+        headline.style.fontSize = `${targetPx}px`;
+        headline.style.letterSpacing = '0px';
+
+        const text = (headline.textContent || '').trim();
+        const units = [...text].length;
+        if (units <= 1) return;
+
+        const naturalWidth = headline.scrollWidth;
+        if (naturalWidth >= maxWidth) return;
+
+        headline.style.letterSpacing = `${((maxWidth - naturalWidth) / (units - 1)) * spacingBoost}px`;
+    },
+
+    _measureDimensions() {
+        this._measureTabHeight();
+        this._fitMainTitle();
+        this._measurePanelHeight();
+        this._measureOpenLift();
+    },
+
+    _shellPaddingPx() {
+        const raw = getComputedStyle(document.documentElement).getPropertyValue('--site-grid-padding').trim();
+        const n = parseFloat(raw);
+        if (!Number.isFinite(n)) return 20;
+        return raw.endsWith('rem') ? n * (parseFloat(getComputedStyle(document.documentElement).fontSize) || 16) : n;
+    },
+
+    _measurePanelHeight() {
+        const panelVh = this.cfg().panelHeightVh ?? 38;
+        const configMax = this.cfg().openMaxPx ?? 960;
+        const vhFallback = Math.round(window.innerHeight * (panelVh / 100));
+        const pad = this._shellPaddingPx();
+        const viewportCap = Math.max(vhFallback, Math.round(window.innerHeight - this._tabHeight - pad * 2));
+
+        let contentHeight = 0;
+        const metadata = this.panel?.querySelector('.site-about__metadata');
+        if (metadata && this.panel) {
+            const panel = this.panel;
+            const prev = {
+                height: panel.style.height,
+                overflow: panel.style.overflow,
+                visibility: panel.style.visibility,
+                position: panel.style.position
+            };
+            panel.style.height = 'auto';
+            panel.style.overflow = 'visible';
+            panel.style.visibility = 'hidden';
+            panel.style.position = 'absolute';
+            panel.style.left = '0';
+            panel.style.width = '100%';
+            this._fitMainTitle();
+            contentHeight = Math.ceil(metadata.getBoundingClientRect().height);
+            panel.style.height = prev.height;
+            panel.style.overflow = prev.overflow;
+            panel.style.visibility = prev.visibility;
+            panel.style.position = prev.position;
+            panel.style.left = '';
+            panel.style.width = '';
+        }
+
+        const target = contentHeight > 0 ? contentHeight : vhFallback;
+        this._openHeight = Math.round(Math.min(Math.max(target, vhFallback), configMax, viewportCap));
+        this.root?.style.setProperty('--site-about-panel-height', `${this._openHeight}px`);
     },
 
     _measureTabHeight() {
@@ -13919,10 +14993,68 @@ const SiteAbout = {
         this.root?.style.setProperty('--site-about-tab-h', `${this._tabHeight}px`);
 
         const cols = this.cfg().panelCols ?? 12;
-        this.root?.style.setProperty(
-            '--site-about-panel-width',
-            `calc(${cols} * var(--site-grid-cell-w) + ${Math.max(0, cols - 1)} * var(--site-grid-gap))`
-        );
+        const panelCol = this.cfg().panelColStart ?? 1;
+        const tabCol = this.cfg().tabColStart ?? 2;
+        const region = {
+            colStart: panelCol,
+            colEnd: panelCol + cols,
+            rowStart: 1,
+            rowEnd: 2
+        };
+
+        if (typeof siteGridRegionRect === 'function') {
+            const rect = siteGridRegionRect(region);
+            this.root?.style.setProperty('--site-about-panel-width', rect.width);
+            this.root?.style.setProperty('--site-about-panel-left', rect.left);
+        } else {
+            const colOffset = Math.max(0, panelCol - 1);
+            const cellStep = '(var(--site-grid-cell-w) + var(--site-grid-gap))';
+            this.root?.style.setProperty(
+                '--site-about-panel-width',
+                `calc(${cols} * var(--site-grid-cell-w) + ${Math.max(0, cols - 1)} * var(--site-grid-gap))`
+            );
+            this.root?.style.setProperty(
+                '--site-about-panel-left',
+                `calc(var(--site-grid-padding) + ${colOffset} * ${cellStep})`
+            );
+        }
+
+        const tabColOffset = Math.max(0, tabCol - panelCol);
+        const cellStep = '(var(--site-grid-cell-w) + var(--site-grid-gap))';
+        if (tabColOffset > 0) {
+            this.root?.style.setProperty(
+                '--site-about-tab-inset-left',
+                `calc(${tabColOffset} * ${cellStep})`
+            );
+        } else {
+            this.root?.style.setProperty('--site-about-tab-inset-left', '0px');
+        }
+
+        this.root?.style.setProperty('--site-about-panel-cols', String(cols));
+
+        const logoCols = this.cfg().logoCols ?? 1;
+        const textCols = this.cfg().textCols ?? 6;
+        const detailsCols = this.cfg().detailsCols ?? 5;
+        const logoStart = 1;
+        const detailsStart = logoCols + 1;
+        const textStart = detailsStart + detailsCols;
+
+        this.root?.style.setProperty('--site-about-logo-cols', String(logoCols));
+        this.root?.style.setProperty('--site-about-logo-col-start', String(logoStart));
+        this.root?.style.setProperty('--site-about-text-cols', String(textCols));
+        this.root?.style.setProperty('--site-about-text-col-start', String(textStart));
+        this.root?.style.setProperty('--site-about-details-cols', String(detailsCols));
+        this.root?.style.setProperty('--site-about-details-col-start', String(detailsStart));
+    },
+
+    _measureOpenLift() {
+        this._openLift = Math.max(0, Math.round(
+            (window.innerHeight + this._openHeight - this._tabHeight) / 2
+        ));
+    },
+
+    _dragTravel() {
+        return this._openLift || 1;
     },
 
     _onPointerDown(e) {
@@ -13949,8 +15081,7 @@ const SiteAbout = {
             this.root.classList.add('is-dragging');
         }
 
-        const travel = this._openHeight || 1;
-        this._progress = Math.min(1, Math.max(0, this._dragStartProgress + dy / travel));
+        this._progress = Math.min(1, Math.max(0, this._dragStartProgress + dy / this._dragTravel()));
         this._applyProgress(false);
     },
 
@@ -14008,7 +15139,7 @@ const SiteAbout = {
     _applyProgress(animate) {
         if (!this.root) return;
 
-        const lift = this._progress * this._openHeight;
+        const lift = this._progress * this._openLift;
         this.root.style.setProperty('--site-about-lift', `${lift}px`);
         this.root.style.setProperty('--site-about-progress', String(this._progress));
         this.isOpen = this._progress >= 1;
@@ -14021,6 +15152,10 @@ const SiteAbout = {
         this.trigger?.setAttribute('aria-expanded', this.isOpen ? 'true' : 'false');
         this.panel?.setAttribute('aria-hidden', this._progress <= 0 ? 'true' : 'false');
         document.body.classList.toggle('is-site-about-open', this._progress > 0);
+
+        if (this._progress > 0) {
+            requestAnimationFrame(() => this._fitMainTitle());
+        }
     }
 };
 /* ==========================================================================
@@ -15857,7 +16992,7 @@ const PhysicsEngine = {
     getMoleculeHoverFont() {
         const root = getComputedStyle(document.documentElement);
         const weight = root.getPropertyValue('--type-display-weight').trim() || '400';
-        const size = root.getPropertyValue('--type-display-size').trim() || '2rem';
+        const size = root.getPropertyValue('--type-display-size').trim() || '1.6667rem';
         const family = root.getPropertyValue('--type-family-note-h').trim() || 'TheBasics-Dots, sans-serif';
         return `normal ${weight} ${size} ${family}`;
     },
@@ -15891,7 +17026,6 @@ const PhysicsEngine = {
         if (!item) return false;
         if (Array.isArray(item.tags) && item.tags.length > 0) return true;
         if (String(item.authorCode || item.authorFullName || '').trim()) return true;
-        if (String(item.typology || '').trim()) return true;
         return false;
     },
 
@@ -15901,7 +17035,6 @@ const PhysicsEngine = {
         if (Array.isArray(item.tags) && item.tags.length > 0) {
             count += item.tags.length;
         }
-        if (String(item.typology || '').trim()) count += 1;
         if (String(item.authorCode || item.authorFullName || '').trim()) count += 1;
         return count;
     },
@@ -15931,12 +17064,74 @@ const PhysicsEngine = {
         if (!label) return;
         label.textContent = '';
         label.replaceChildren();
-        label.classList.remove('is-title-chip', 'is-blocks-row', 'note-title', 'note-body');
+        label.classList.remove('is-title-chip', 'is-blocks-row', 'note-title', 'note-body', 'is-row-gap-y');
     },
 
-    positionMoleculeHoverLabel(label, bounds, isLtr) {
+    _macroRowStridePx: 0,
+
+    getMacroRowStridePx() {
+        if (this._macroRowStridePx > 0) return this._macroRowStridePx;
+        const app = document.getElementById('app');
+        if (!app) return 0;
+        const probe = document.createElement('div');
+        probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;height:var(--site-macro-row-stride);';
+        app.appendChild(probe);
+        const h = probe.getBoundingClientRect().height;
+        probe.remove();
+        if (h > 0) this._macroRowStridePx = h;
+        return h;
+    },
+
+    parseMacroGridRowStart(wrapper) {
+        const raw = wrapper?.style?.gridRow;
+        if (!raw) return -1;
+        const match = String(raw).match(/^(\d+)/);
+        return match ? parseInt(match[1], 10) : -1;
+    },
+
+    resolveMacroRowGapCenterY(noteIndex) {
+        const wrappers = [...document.querySelectorAll('#app .note-wrapper')];
+        const wrapper = wrappers[noteIndex];
+        if (!wrapper) return null;
+
+        const rect = wrapper.getBoundingClientRect();
+        if (rect.height < 1) return null;
+
+        const rowStep = CONFIG.siteGrid?.macroGridRowStep ?? CONFIG.siteGrid?.macroGridStep ?? 2;
+        const startRow = this.parseMacroGridRowStart(wrapper);
+
+        if (startRow > 1) {
+            const prevWrapper = wrappers.find((w) => this.parseMacroGridRowStart(w) === startRow - rowStep);
+            if (prevWrapper) {
+                const prevRect = prevWrapper.getBoundingClientRect();
+                if (prevRect.height > 0) {
+                    return (prevRect.bottom + rect.top) * 0.5;
+                }
+            }
+        }
+
+        const stride = this.getMacroRowStridePx();
+        if (stride <= 0) return null;
+        const slotHeight = rowStep * stride;
+        const margin = (slotHeight - rect.height) * 0.5;
+        if (margin <= 0) return null;
+        return rect.top - margin * 0.5;
+    },
+
+    shouldAlignHoverToMacroRowGap() {
+        if (DepthController.currentLevel !== 1) return false;
+        if (!document.body.classList.contains('site-grid')) return false;
+        const warehouse = typeof ActionWarehouse !== 'undefined' ? ActionWarehouse : null;
+        if (!warehouse || typeof warehouse.getCrowdedBlockCount !== 'function') return true;
+        return warehouse.getCrowdedBlockCount() === 0;
+    },
+
+    positionMoleculeHoverLabel(label, bounds, isLtr, noteIndex = -1) {
         if (!label || !bounds) return;
-        label.style.top = `${bounds.minY}px`;
+        const useRowGapY = noteIndex >= 0 && this.shouldAlignHoverToMacroRowGap();
+        const gapCenterY = useRowGapY ? this.resolveMacroRowGapCenterY(noteIndex) : null;
+        label.classList.toggle('is-row-gap-y', useRowGapY && gapCenterY != null);
+        label.style.top = `${gapCenterY ?? bounds.minY}px`;
         label.style.left = `${isLtr ? bounds.minX : bounds.maxX}px`;
     },
 
@@ -16059,7 +17254,7 @@ const PhysicsEngine = {
 
         label.classList.toggle('is-note-ltr', isLtr);
         label.classList.toggle('is-note-rtl', !isLtr);
-        this.positionMoleculeHoverLabel(label, bounds, isLtr);
+        this.positionMoleculeHoverLabel(label, bounds, isLtr, noteIndex);
         label.classList.add('is-visible');
         this.moleculeHoverPinnedIndex = noteIndex;
     }
@@ -16195,12 +17390,145 @@ const ActionWarehouse = {
 
     syncClearControlVisibility() {
         document.body.classList.toggle('is-clear-visible', this.hasClearableSelection());
+        this.syncLauncherStudyGate();
+    },
+
+    isWordStudyLauncherGated() {
+        if (!this.isWordPanelLevelActive()) return false;
+        return typeof NoteCensor === 'undefined' || !NoteCensor.hasCommittedWord();
+    },
+
+    syncLauncherStudyGate() {
+        const gated = this.isWordStudyLauncherGated();
+        document.body.classList.toggle('is-warehouse-launcher-gated', gated);
+
+        if (this.launcherElement) {
+            this.launcherElement.disabled = gated;
+            this.launcherElement.setAttribute('aria-disabled', gated ? 'true' : 'false');
+        }
+
+
+        if (!gated) return;
+
+        if (this.isLauncherStripMode?.()) {
+            if (this.launcherStripPinned || (this.launcherExpandProgress ?? 0) > 0) {
+                this.unpinLauncherStrip(true);
+            }
+        } else if (this.popupOpen) {
+            this.closePopup();
+        }
     },
 
     clearWordPanel() {
         if (!this.trayBlocksElement) return;
         this.trayBlocksElement.querySelectorAll('.word-panel__chip').forEach((el) => el.remove());
         if (this._wordPanelWords) this._wordPanelWords.clear();
+    },
+
+    /** Abort an in-flight block drag so layer navigation can reset state. */
+    cancelActiveDrag() {
+        if (!this.dragState) return;
+
+        const drag = this.dragState;
+        cancelAnimationFrame(drag.rafId);
+        document.removeEventListener('pointermove', this.boundMove);
+        document.removeEventListener('pointerup', this.boundUp);
+
+        const block = drag.block;
+        block?.element?.classList.remove('is-dragging');
+        this.dragState = null;
+    },
+
+    _clearAllNoteInteractionVisuals(bodiesData) {
+        this.restoreAllFilterVisuals(bodiesData);
+        document.querySelectorAll('.note-wrapper').forEach(wrapper => {
+            wrapper.classList.remove(
+                'is-molecule-focused',
+                'is-molecule-muted',
+                'is-layout-excluded',
+                'is-study-unlocked'
+            );
+            wrapper.querySelectorAll('.layer-dot').forEach(dot => {
+                dot.classList.remove('is-dot-focused', 'is-dot-muted');
+            });
+        });
+    },
+
+    _returnAllActiveBlocksToDock() {
+        this.clearMacroIndicationGhost();
+        this.ensurePhysicsMaps();
+        this.stretchBindingByNote.clear();
+        this.stretchGroupCounts.clear();
+        this.orbitAngleByNote.clear();
+        this.orbitRingCountByBlock.clear();
+        this.filteredNoteIndices.clear();
+        this.filterExitByNote.clear();
+        this.workspaceSlotLayout = null;
+        if (typeof PhysicsEngine !== 'undefined') {
+            this._clearAllNoteInteractionVisuals(PhysicsEngine.bodiesData);
+            PhysicsEngine.bodiesData?.forEach(item => {
+                item.overrideTarget = null;
+                item.smoothTarget = null;
+            });
+        }
+
+        if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
+            DepthV2.clearFringeZone();
+            const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+            if (level >= 2) {
+                DepthV2.relayoutForFilterChange({ force: true });
+            }
+        }
+
+        this.unmountDeployedBlocksFromDepthBar();
+
+        this.blocks.forEach(block => {
+            if (block.state !== 'active' || block.nestedIn) return;
+            this.returnToDock(block);
+        });
+
+        this.workspaceCenters = null;
+        this.workspaceGridRush = null;
+        this.workspaceGridRushUntil = 0;
+        this.shellElement?.classList.remove('is-workspace-active');
+        this.depthBlockBarElement?.classList.remove('has-blocks');
+        this.clearDepthDropIndicator?.();
+
+        document.body.classList.remove(
+            'is-block-focus',
+            'is-block-filter',
+            'is-catalog-lens',
+            'is-depth-workspace-active',
+            'is-depth-filter-layout'
+        );
+
+        this.updateWorkspaceState();
+        this.updateDotFocusFilter();
+        if (typeof CatalogState !== 'undefined') {
+            CatalogState.resetForLayerSwitch?.();
+            CatalogState.rebuildFromWarehouse();
+        }
+    },
+
+    /** Clear blocks / word study from the layer being left before depth navigation. */
+    clearStudyStateForLayerLeave(prevLevel) {
+        this.cancelActiveDrag();
+
+        if (prevLevel === 3) {
+            if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
+                ArtifactInspector.close();
+            }
+            this.clearWordPanel();
+            if (typeof NoteCensor !== 'undefined' && NoteCensor.resetForLayerLeave) {
+                NoteCensor.resetForLayerLeave();
+            }
+        }
+
+        if (prevLevel === 1 || prevLevel === 3) {
+            this._returnAllActiveBlocksToDock();
+        }
+
+        this.syncClearControlVisibility();
     },
 
     init() {
@@ -16362,6 +17690,7 @@ const ActionWarehouse = {
         const cfg = this.getLauncherExpandTeaserCfg();
         if (cfg.enabled === false) return false;
         if (!this.isLauncherExpandDragMode()) return false;
+        if (this.isWordStudyLauncherGated()) return false;
         if (this.hasSeenLauncherExpandTeaser()) return false;
         if (this.launcherExpandTeaserActive) return false;
         if (this.launcherStripPinned) return false;
@@ -16489,25 +17818,7 @@ const ActionWarehouse = {
             const u = Math.max(0, Math.min(1, (now - startTime) / durationMs));
             const progress = this.sampleLauncherExpandTeaserProgress(u, segments);
             this.applyLauncherExpandSize(progress, true);
-
-            const rail = this.getLauncherExpandRail(bounds);
-            const pt = this._launcherPointerXY || {
-                x: window.innerWidth * 0.5,
-                y: window.innerHeight * 0.5
-            };
-            if (progress > 0.02) {
-                const wrapRect = wrap?.getBoundingClientRect();
-                if (wrapRect) {
-                    const cx = wrapRect.right - bounds.collapsedW / 2;
-                    const cy = wrapRect.bottom - bounds.collapsedH / 2;
-                    this.updateLauncherGlyphRotation(
-                        cx - rail.ux * progress * rail.length,
-                        cy - rail.uy * progress * rail.length
-                    );
-                }
-            } else {
-                this.updateLauncherGlyphRotation(pt.x, pt.y);
-            }
+            this.updateLauncherGlyphRotation(0, 0);
 
             if (u < 1) {
                 this._launcherExpandTeaserRaf = requestAnimationFrame(step);
@@ -16516,6 +17827,10 @@ const ActionWarehouse = {
 
             this.applyLauncherExpandSize(0, false);
             this.cancelLauncherExpandTeaser();
+            const pt = this._launcherPointerXY || {
+                x: window.innerWidth * 0.5,
+                y: window.innerHeight * 0.5
+            };
             this.updateLauncherGlyphRotation(pt.x, pt.y);
         };
 
@@ -16540,41 +17855,27 @@ const ActionWarehouse = {
         };
     },
 
-    /** Diagonal rail — tilt matches expand panel growth (width vs height delta). */
+    /** Vertical rail — drag upward; width grows symmetrically via progress. */
     getLauncherExpandRail(bounds = null) {
         const b = bounds || this.getLauncherExpandBounds();
         const deltaW = Math.max(0, b.expandedW - b.collapsedW);
         const deltaH = Math.max(0, b.expandedH - b.collapsedH);
-        const length = Math.hypot(deltaW, deltaH) || 1;
+        const length = deltaH || 1;
         return {
             deltaW,
             deltaH,
             length,
-            ux: deltaW / length,
-            uy: deltaH / length
+            ux: 0,
+            uy: 1
         };
     },
 
     getLauncherExpandRailArrowDeg() {
-        const popupCfg = CONFIG.warehouse?.popup;
-        const baseDeg = popupCfg?.launcherArrowBaseDeg ?? -90;
-        const rail = this.getLauncherExpandRail();
-        const aimDeg = Math.atan2(-rail.deltaH, -rail.deltaW) * (180 / Math.PI);
-        return aimDeg - baseDeg;
+        return 0;
     },
 
-    getLauncherExpandRetractArrowDeg() {
-        const popupCfg = CONFIG.warehouse?.popup;
-        const baseDeg = popupCfg?.launcherArrowBaseDeg ?? -90;
-        const wrap = this.launcherWrapElement;
-        const launcher = this.launcherElement;
-        if (!wrap || !launcher) return 0;
-        const wrapRect = wrap.getBoundingClientRect();
-        const launcherRect = launcher.getBoundingClientRect();
-        const cx = launcherRect.left + launcherRect.width / 2;
-        const cy = launcherRect.top + launcherRect.height / 2;
-        const aimDeg = Math.atan2(wrapRect.bottom - cy, wrapRect.right - cx) * (180 / Math.PI);
-        return aimDeg - baseDeg;
+    getLauncherExpandOpenArrowDeg() {
+        return 180;
     },
 
     applyLauncherExpandHandlePosition(clamped, isDragging) {
@@ -16582,33 +17883,22 @@ const ActionWarehouse = {
         if (!launcher || !this.isLauncherExpandDragMode()) return;
 
         const bounds = this.getLauncherExpandBounds();
-        const lw = bounds.collapsedW;
         const lh = bounds.collapsedH;
         const pinned = this.launcherStripPinned && clamped >= 1 && !isDragging;
+        const progress = pinned ? 1 : clamped;
 
-        launcher.style.left = '';
-        launcher.style.top = '';
-        launcher.style.right = '';
-        launcher.style.bottom = '';
-        launcher.style.transform = '';
-
-        if (pinned) {
-            launcher.style.left = '0';
-            launcher.style.top = '0';
-            return;
-        }
-
-        if (clamped <= 0 && !isDragging) {
-            launcher.style.right = '0';
-            launcher.style.bottom = '0';
-            return;
-        }
-
-        const tx = -clamped * (bounds.expandedW - lw);
-        const ty = -clamped * (bounds.expandedH - lh);
-        launcher.style.right = '0';
+        launcher.style.left = '50%';
+        launcher.style.right = 'auto';
+        launcher.style.top = 'auto';
         launcher.style.bottom = '0';
-        launcher.style.transform = `translate(${tx}px, ${ty}px)`;
+
+        if (progress <= 0 && !isDragging) {
+            launcher.style.transform = 'translateX(-50%)';
+            return;
+        }
+
+        const ty = -progress * (bounds.expandedH - lh);
+        launcher.style.transform = `translate(-50%, ${ty}px)`;
     },
 
     applyLauncherExpandSize(progress, isDragging) {
@@ -16629,7 +17919,7 @@ const ActionWarehouse = {
 
         const launcher = this.launcherElement;
         if (launcher && this.isLauncherExpandDragMode()) {
-            launcher.style.transition = isDragging ? 'none' : `transform ${ease}, left ${ease}, top ${ease}, right ${ease}, bottom ${ease}`;
+            launcher.style.transition = isDragging ? 'none' : `transform ${ease}`;
             this.applyLauncherExpandHandlePosition(clamped, isDragging);
         }
 
@@ -16645,6 +17935,9 @@ const ActionWarehouse = {
                 NavigationMap.resizeCanvas?.();
                 if (NavigationMap.isMapReady?.()) NavigationMap.scheduleRender?.();
             });
+        }
+        if (showContent) {
+            requestAnimationFrame(() => this.syncLauncherStripTrayPinnedLayout());
         }
         this.updateScrollReserve();
     },
@@ -16757,6 +18050,7 @@ const ActionWarehouse = {
 
         this.launcherElement.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (this.isWordStudyLauncherGated()) return;
             if (expandDrag) {
                 if (this.isLauncherExpandDismissBlocked()) return;
                 if (this.launcherExpandDragState) return;
@@ -16829,6 +18123,8 @@ const ActionWarehouse = {
         } else {
             this.syncPopupState(popupCfg.defaultOpen === true);
         }
+
+        this.syncLauncherStudyGate();
     },
 
     initLauncherGlyphTracking() {
@@ -16882,6 +18178,21 @@ const ActionWarehouse = {
                     }
                 });
                 this._launcherStripPeekObserver.observe(this.launcherWrapElement);
+            } else {
+                this._launcherStripRow2ResizeBound = () => {
+                    if (this.launcherStripPinned) this.syncLauncherStripTrayPinnedLayout();
+                };
+                window.addEventListener('resize', this._launcherStripRow2ResizeBound, { passive: true });
+                this._launcherStripRow2Observer = new ResizeObserver(() => {
+                    if (this.launcherStripPinned) this.syncLauncherStripTrayPinnedLayout();
+                });
+                if (this.launcherStripTrayElement) {
+                    this._launcherStripRow2Observer.observe(this.launcherStripTrayElement);
+                }
+                this._launcherStripRow2WrapObserver = new ResizeObserver(() => {
+                    if (this.launcherStripPinned) this.syncLauncherStripTrayPinnedLayout();
+                });
+                this._launcherStripRow2WrapObserver.observe(this.launcherWrapElement);
             }
         }
 
@@ -16897,23 +18208,16 @@ const ActionWarehouse = {
         const baseDeg = popupCfg?.launcherArrowBaseDeg ?? -90;
 
         if (this.isLauncherStripMode() && this.launcherWrapElement) {
-            const hovered = this.launcherWrapElement.matches(':hover');
-            const open = this.launcherStripPinned ||
-                this.launcherExpandDragState ||
-                (this.launcherExpandProgress ?? 0) > 0;
             if (this.isLauncherExpandDragMode()) {
-                const retracting = this.launcherStripPinned ||
-                    (this.launcherExpandDragState?.startProgress ?? 0) >= 1 ||
-                    (this.launcherExpandProgress ?? 0) >= 0.92;
-                if (retracting && (hovered || open)) {
-                    glyph.style.transform = `rotate(${this.getLauncherExpandRetractArrowDeg()}deg)`;
-                    return;
-                }
-                if (hovered || open) {
-                    glyph.style.transform = `rotate(${this.getLauncherExpandRailArrowDeg()}deg)`;
-                    return;
-                }
-            } else if (this.launcherStripPinned || hovered) {
+                const deg = this.launcherStripPinned
+                    ? this.getLauncherExpandOpenArrowDeg()
+                    : this.getLauncherExpandRailArrowDeg();
+                glyph.style.transform = `rotate(${deg}deg)`;
+                return;
+            }
+            const hovered = this.launcherWrapElement.matches(':hover');
+            const open = this.launcherStripPinned;
+            if (open || hovered) {
                 glyph.style.transform = `rotate(${popupCfg?.launcherArrowHoverDeg ?? -90}deg)`;
                 return;
             }
@@ -16962,6 +18266,17 @@ const ActionWarehouse = {
             this.syncLauncherStripPeek();
         } else {
             this.applyLauncherExpandSize(pinned ? 1 : 0, false);
+            if (pinned) {
+                if (this.launcherStripTrayElement) {
+                    this.launcherStripTrayElement.scrollTop = 0;
+                }
+                requestAnimationFrame(() => {
+                    this.syncLauncherStripTrayPinnedLayout();
+                    requestAnimationFrame(() => this.syncLauncherStripTrayPinnedLayout());
+                });
+            } else {
+                this.syncLauncherStripTrayPinnedLayout();
+            }
         }
     },
 
@@ -17028,6 +18343,7 @@ const ActionWarehouse = {
 
         const onPointerDown = (e) => {
             if (e.button !== 0) return;
+            if (this.isWordStudyLauncherGated()) return;
             if (this.launcherExpandTeaserActive) return;
             e.stopPropagation();
             if (this.dragState) return;
@@ -17096,6 +18412,38 @@ const ActionWarehouse = {
 
         this.applyLauncherExpandSize(progress, true);
         this.updateLauncherGlyphRotation(clientX, clientY);
+    },
+
+    syncLauncherStripTrayPinnedLayout() {
+        const tray = this.launcherStripTrayElement;
+        if (!tray || !this.isLauncherExpandDragMode()) return;
+
+        tray.querySelectorAll('.warehouse-launcher-strip__row-break').forEach((el) => el.remove());
+        tray.querySelectorAll('.block-slot--row-lead').forEach((el) => el.remove());
+
+        const progress = this.launcherExpandProgress ?? 0;
+        if (!this.launcherStripPinned && progress < 0.99) return;
+
+        const slots = [...tray.querySelectorAll('.block-slot:not(.is-empty)')];
+        if (slots.length < 2) return;
+
+        const firstTop = slots[0].getBoundingClientRect().top;
+        let lastRow1Index = 0;
+        for (let i = 1; i < slots.length; i++) {
+            const slotTop = slots[i].getBoundingClientRect().top;
+            if (slotTop <= firstTop + 1) {
+                lastRow1Index = i;
+            } else {
+                break;
+            }
+        }
+
+        if (lastRow1Index >= slots.length - 1) return;
+
+        const rowBreak = document.createElement('div');
+        rowBreak.className = 'warehouse-launcher-strip__row-break';
+        rowBreak.setAttribute('aria-hidden', 'true');
+        slots[lastRow1Index].after(rowBreak);
     },
 
     syncLauncherStripPeek() {
@@ -17463,20 +18811,17 @@ const ActionWarehouse = {
 
     buildSlotGhostInnerHTML(block) {
         const label = this.getBlockGhostLabel(block);
-        const safeLabel = typeof escapeTypologyHtml === 'function'
-            ? escapeTypologyHtml(label)
-            : String(label || '').replace(/</g, '&lt;');
+        const safeLabel = String(label || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
         return `<span class="block-slot__glyph-ring" aria-hidden="true"></span>` +
             `<span class="block-slot__ghost-label">${safeLabel}</span>`;
     },
 
     getBlockGhostLabel(block) {
         if (block.type === 'author') return block.author || '';
-        if (block.type === 'typology') {
-            return typeof getTypologyLabel === 'function'
-                ? getTypologyLabel(block.typology)
-                : (block.typology || '');
-        }
         return block.tag || '';
     },
 
@@ -17531,30 +18876,7 @@ const ActionWarehouse = {
             return;
         }
 
-        this.clearMacroIndicationGhost();
-        this.ensurePhysicsMaps();
-        this.stretchBindingByNote.clear();
-        this.stretchGroupCounts.clear();
-        this.orbitAngleByNote.clear();
-        this.orbitRingCountByBlock.clear();
-        this.filteredNoteIndices.clear();
-        this.filterExitByNote.clear();
-        this.workspaceSlotLayout = null;
-        this.restoreAllFilterVisuals(PhysicsEngine.bodiesData);
-
-        if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
-            DepthV2.clearFringeZone();
-            if (DepthController.currentLevel >= 2) {
-                DepthV2.relayoutForFilterChange({ force: true });
-            }
-        }
-
-        this.unmountDeployedBlocksFromDepthBar();
-
-        this.blocks.forEach(block => {
-            if (block.state !== 'active' || block.nestedIn) return;
-            this.returnToDock(block);
-        });
+        this._returnAllActiveBlocksToDock();
         this.syncClearControlVisibility();
     },
 
@@ -17576,17 +18898,6 @@ const ActionWarehouse = {
             this.createBlock({ type: 'tag', tag: tagName, color: color });
         });
 
-        const retired = new Set(CONFIG.data.retiredTypologies || []);
-        const typologies = new Set();
-        AppState.items.forEach(item => {
-            if (item.typology && !retired.has(item.typology)) typologies.add(item.typology);
-        });
-        [...typologies]
-            .sort((a, b) => getTypologySortIndex(a) - getTypologySortIndex(b) || a.localeCompare(b))
-            .forEach(name => {
-            this.createBlock({ type: 'typology', typology: name });
-        });
-
         const authorCodes = new Set();
         AppState.items.forEach(item => {
             if (item.authorCode) authorCodes.add(item.authorCode);
@@ -17601,11 +18912,12 @@ const ActionWarehouse = {
         this.captureDockTrayBaseOrder();
         this.updateWarehouseCapacityUI();
         this.syncLauncherStripPeek();
+        this.syncLauncherStripTrayPinnedLayout();
     },
 
     captureDockTrayBaseOrder() {
         this._dockTrayBaseOrder = this.blocks.filter(
-            b => (b.type === 'tag' || b.type === 'author' || b.type === 'typology') && b.slotElement
+            b => (b.type === 'tag' || b.type === 'author') && b.slotElement
         );
     },
 
@@ -17625,7 +18937,7 @@ const ActionWarehouse = {
         });
     },
 
-    reorderDockTrayByRelevance(coTags, coAuthors, coTypologies = new Set()) {
+    reorderDockTrayByRelevance(coTags, coAuthors) {
         if (!this.trayBlocksElement) return;
         this.ensureDockTrayBaseOrder();
 
@@ -17653,7 +18965,7 @@ const ActionWarehouse = {
                 return;
             }
 
-            if (this.isDockBlockCoRelevant(block, coTags, coAuthors, coTypologies)) {
+            if (this.isDockBlockCoRelevant(block, coTags, coAuthors)) {
                 relevant.push(block);
             } else {
                 irrelevant.push(block);
@@ -17680,36 +18992,25 @@ const ActionWarehouse = {
 
         const el = document.createElement('div');
         const isAuthor = def.type === 'author';
-        const isTypology = def.type === 'typology';
         el.classList.add('action-block', 'general-t');
         if (isAuthor) el.classList.add('action-block--author');
-        if (isTypology) {
-            el.classList.add('action-block--typology');
-            el.dataset.typology = def.typology;
-            el.dataset.typologyPattern = typeof getTypologyPattern === 'function'
-                ? getTypologyPattern(def.typology)
-                : 'regular';
-        }
         el.dataset.type = def.type || 'tag';
         if (def.color) el.style.setProperty('--block-tag-color', def.color);
 
-        const label = isAuthor ? def.author : (isTypology ? null : def.tag);
-        const glyphHTML = (isAuthor || isTypology)
+        const label = isAuthor ? def.author : def.tag;
+        const glyphHTML = isAuthor
             ? ''
             : `<span class="block-glyph" style="background-color: ${def.color}"></span>`;
-        const typologyHTML = isTypology && typeof buildTypologyBlockInnerHTML === 'function'
-            ? buildTypologyBlockInnerHTML(def.typology)
-            : `<span class="block-label">${label}</span>`;
-        el.innerHTML = isTypology ? typologyHTML : `${glyphHTML}${typologyHTML}`;
+        const labelHTML = `<span class="block-label">${label}</span>`;
+        el.innerHTML = `${glyphHTML}${labelHTML}`;
         slot.appendChild(el);
         const trayParent = this.getBlockTrayParent(def);
         if (trayParent) trayParent.appendChild(slot);
 
         const block = {
             type: def.type || 'tag',
-            tag: (isAuthor || isTypology) ? null : def.tag,
+            tag: isAuthor ? null : def.tag,
             author: isAuthor ? def.author : null,
-            typology: isTypology ? def.typology : null,
             color: def.color || null,
             frameKind: null,
             element: el,
@@ -17864,8 +19165,7 @@ const ActionWarehouse = {
         return (frame.nestedBlocks || []).some(n =>
             n.type === block.type &&
             ((block.type === 'tag' && n.tag === block.tag) ||
-             (block.type === 'author' && n.author === block.author) ||
-             (block.type === 'typology' && n.typology === block.typology))
+             (block.type === 'author' && n.author === block.author))
         );
     },
 
@@ -19103,9 +20403,7 @@ const ActionWarehouse = {
                     const matchesTag = block.type === 'tag' && block.tag && noteTags.has(block.tag);
                     const matchesAuthor = block.type === 'author' && block.author &&
                         (item.authorCode === block.author || item.authorFullName === block.author);
-                    const matchesTypology = block.type === 'typology' && block.typology &&
-                        item.typology === block.typology;
-                    if (!matchesTag && !matchesAuthor && !matchesTypology) return;
+                    if (!matchesTag && !matchesAuthor) return;
 
                     blockNoteConnections++;
                     connectedNotes.add(noteIndex);
@@ -19264,14 +20562,13 @@ const ActionWarehouse = {
             !CatalogLayoutEngine.isLegacyMode() &&
             !isV2Depth;
 
-        const { tags: activeTags, authors: activeAuthors, typologies: activeTypologies } =
+        const { tags: activeTags, authors: activeAuthors } =
             this.getActiveFocusCriteria();
 
-        const { tags: filterTags, authors: filterAuthors, typologies: filterTypologies } =
+        const { tags: filterTags, authors: filterAuthors } =
             this.getFilterCriteria();
-        const focus = activeTags.size > 0 || activeAuthors.size > 0 || activeTypologies.size > 0;
-        const hasFilterCriteria = filterTags.size > 0 || filterAuthors.size > 0 ||
-            filterTypologies.size > 0;
+        const focus = activeTags.size > 0 || activeAuthors.size > 0;
+        const hasFilterCriteria = filterTags.size > 0 || filterAuthors.size > 0;
         const shouldPeel = hasFilterCriteria && isMacro;
 
         document.body.classList.toggle(
@@ -19294,7 +20591,7 @@ const ActionWarehouse = {
 
         wrappers.forEach((wrapper, noteIndex) => {
             if (hasFilterCriteria &&
-                this.moleculeMatchesFilter(noteIndex, filterTags, filterAuthors, filterTypologies)) {
+                this.moleculeMatchesFilter(noteIndex, filterTags, filterAuthors)) {
                 shouldFilter.add(noteIndex);
             }
         });
@@ -19351,14 +20648,11 @@ const ActionWarehouse = {
             const moleculeTags = [...dots]
                 .map(dot => dot.dataset.tag)
                 .filter(Boolean);
-            const noteTypology = this.getNoteTypology(noteIndex, wrapper);
             const isRelevant = this.noteMatchesActiveFocus(
                 moleculeTags,
                 authorCode,
                 activeTags,
-                activeAuthors,
-                noteTypology,
-                activeTypologies
+                activeAuthors
             );
 
             wrapper.classList.toggle('is-molecule-focused', isRelevant);
@@ -19370,8 +20664,7 @@ const ActionWarehouse = {
                 const tag = dot.dataset.tag || '';
                 const dotMatchesTag = tag && activeTags.has(tag);
                 const dotMatchesAuthor = authorCode && activeAuthors.has(authorCode);
-                const dotMatchesTypology = noteTypology && activeTypologies.has(noteTypology);
-                const dotMatches = dotMatchesTag || dotMatchesAuthor || dotMatchesTypology;
+                const dotMatches = dotMatchesTag || dotMatchesAuthor;
                 dot.classList.toggle('is-dot-focused', dotMatches);
                 dot.classList.toggle('is-dot-muted', !dotMatches);
             });
@@ -19389,9 +20682,11 @@ const ActionWarehouse = {
 
         if (isV2Depth && level === 3 && typeof DepthV2 !== 'undefined') {
             ActionWarehouse.syncDeployedBlocksForDepth?.();
-            DepthV2.relayoutForFilterChange({ force: true });
-            if (typeof MicroMock !== 'undefined') {
-                MicroMock.applyAll?.();
+            const app = document.getElementById('app');
+            const needsRelayout = app?.classList.contains('has-filter-fringe') ||
+                (typeof CatalogState !== 'undefined' && CatalogState.hasFocus);
+            if (needsRelayout) {
+                DepthV2.relayoutForFilterChange({ force: false });
             }
         }
 
@@ -19754,7 +21049,6 @@ Object.assign(ActionWarehouse, {
     isActiveCaptureBlock(block) {
         if (block.nestedIn) return false;
         if (block.type === 'author') return !!block.author;
-        if (block.type === 'typology') return !!block.typology;
         return !!block.tag;
     },
 
@@ -19790,7 +21084,7 @@ Object.assign(ActionWarehouse, {
             if (!this.isWorkspaceOccupant(b)) return false;
             if (b.nestedIn?.frameKind === 'filter') return false;
             if (!Number.isFinite(b.bodyX) || !Number.isFinite(b.bodyY)) return false;
-            return b.type === 'frame' || b.type === 'tag' || b.type === 'author' || b.type === 'typology';
+            return b.type === 'frame' || b.type === 'tag' || b.type === 'author';
         });
     },
 
@@ -19805,7 +21099,6 @@ Object.assign(ActionWarehouse, {
             if (b.nestedIn?.frameKind === 'filter') return false;
             if (b.type === 'author') return !!b.author;
             if (b.type === 'tag') return !!b.tag;
-            if (b.type === 'typology') return !!b.typology;
             return false;
         });
     },
@@ -19833,17 +21126,6 @@ Object.assign(ActionWarehouse, {
                 )
                 .map(b => b.author)
         );
-        const activeTypologies = new Set(
-            this.blocks
-                .filter(b =>
-                    b.state === 'active' &&
-                    b.type === 'typology' &&
-                    b.typology &&
-                    !b.nestedIn &&
-                    this.isBlockFocusEligible(b)
-                )
-                .map(b => b.typology)
-        );
         this.blocks
             .filter(b =>
                 b.state === 'active' &&
@@ -19854,20 +21136,8 @@ Object.assign(ActionWarehouse, {
             .forEach(b => {
                 if (b.type === 'tag' && b.tag) activeTags.add(b.tag);
                 if (b.type === 'author' && b.author) activeAuthors.add(b.author);
-                if (b.type === 'typology' && b.typology) activeTypologies.add(b.typology);
             });
-        return { tags: activeTags, authors: activeAuthors, typologies: activeTypologies };
-    },
-
-    getNoteTypology(noteIndex, wrapper = null) {
-        if (typeof AppState !== 'undefined' && AppState.items?.[noteIndex]) {
-            return AppState.items[noteIndex].typology || '';
-        }
-
-        const w = wrapper ||
-            (typeof this.getNoteWrapper === 'function' ? this.getNoteWrapper(noteIndex) : null) ||
-            document.querySelector(`.note-wrapper[data-note-index="${noteIndex}"]`);
-        return w?.dataset.typology || '';
+        return { tags: activeTags, authors: activeAuthors };
     },
 
     getNoteFocusTagsAndAuthor(noteIndex, wrapper = null) {
@@ -19890,11 +21160,10 @@ Object.assign(ActionWarehouse, {
         };
     },
 
-    /* All active focus tags/authors/typologies must match the same note (AND, not OR). */
-    noteMatchesActiveFocus(noteTags, authorCode, activeTags, activeAuthors, noteTypology = '', activeTypologies = null) {
+    /* All active focus tags/authors must match the same note (AND, not OR). */
+    noteMatchesActiveFocus(noteTags, authorCode, activeTags, activeAuthors) {
         const tagList = Array.isArray(noteTags) ? noteTags : [...noteTags];
-        const typologies = activeTypologies || new Set();
-        if (!activeTags.size && !activeAuthors.size && !typologies.size) return false;
+        if (!activeTags.size && !activeAuthors.size) return false;
 
         for (const tag of activeTags) {
             if (!tagList.includes(tag)) return false;
@@ -19902,52 +21171,41 @@ Object.assign(ActionWarehouse, {
         for (const author of activeAuthors) {
             if (authorCode !== author) return false;
         }
-        for (const typology of typologies) {
-            if (noteTypology !== typology) return false;
-        }
         return true;
     },
 
-    noteMatchesActiveFocusForIndex(noteIndex, activeTags, activeAuthors, wrapper = null, activeTypologies = null) {
+    noteMatchesActiveFocusForIndex(noteIndex, activeTags, activeAuthors, wrapper = null) {
         const { tags, authorCode } = this.getNoteFocusTagsAndAuthor(noteIndex, wrapper);
-        const noteTypology = this.getNoteTypology(noteIndex, wrapper);
         return this.noteMatchesActiveFocus(
             tags,
             authorCode,
             activeTags,
-            activeAuthors,
-            noteTypology,
-            activeTypologies
+            activeAuthors
         );
     },
 
     getFilterCriteria() {
         const tags = new Set();
         const authors = new Set();
-        const typologies = new Set();
         this.blocks.forEach(b => {
             if (b.state !== 'active' || !b.nestedIn || b.nestedIn.frameKind !== 'filter') return;
             if (b.type === 'tag' && b.tag) tags.add(b.tag);
             if (b.type === 'author' && b.author) authors.add(b.author);
-            if (b.type === 'typology' && b.typology) typologies.add(b.typology);
         });
-        return { tags, authors, typologies };
+        return { tags, authors };
     },
 
     isNoteFiltered(noteIndex) {
         return this.filteredNoteIndices.has(noteIndex);
     },
 
-    moleculeMatchesFilter(noteIndex, filterTags, filterAuthors, filterTypologies = new Set()) {
+    moleculeMatchesFilter(noteIndex, filterTags, filterAuthors) {
         const wrappers = document.querySelectorAll('.note-wrapper');
         const wrapper = wrappers[noteIndex];
         if (!wrapper) return false;
 
         const authorCode = wrapper.dataset.authorCode || '';
         if (authorCode && filterAuthors.has(authorCode)) return true;
-
-        const noteTypology = this.getNoteTypology(noteIndex, wrapper);
-        if (noteTypology && filterTypologies.has(noteTypology)) return true;
 
         const dots = wrapper.querySelectorAll('.layer-dot');
         return [...dots].some(dot => {
@@ -19958,18 +21216,12 @@ Object.assign(ActionWarehouse, {
 
     getBlockRingKey(block) {
         if (block.type === 'author') return `@${block.author}`;
-        if (block.type === 'typology') return `~${block.typology}`;
         return block.tag;
     },
 
     dotMatchesBlock(block, dot) {
         if (block.type === 'author') {
             return !!dot.authorCode && dot.authorCode === block.author;
-        }
-        if (block.type === 'typology') {
-            if (!block.typology) return false;
-            const item = typeof AppState !== 'undefined' ? AppState.items?.[dot.noteIndex] : null;
-            return item?.typology === block.typology;
         }
         return dot.tag === block.tag;
     },
@@ -20132,21 +21384,6 @@ Object.assign(ActionWarehouse, {
         const ringDots = [];
         bodiesData.forEach(d => {
             if (d.authorCode !== block.author) return;
-            if (this.isNotePhysicsSuspended(d.noteIndex)) return;
-            if (this.stretchedNotes.has(d.noteIndex)) return;
-            if (seen.has(d.noteIndex)) return;
-            seen.add(d.noteIndex);
-            ringDots.push(d);
-        });
-        return ringDots;
-    },
-
-    getTypologyRingDots(block, bodiesData) {
-        const seen = new Set();
-        const ringDots = [];
-        bodiesData.forEach(d => {
-            const item = typeof AppState !== 'undefined' ? AppState.items?.[d.noteIndex] : null;
-            if (!item || item.typology !== block.typology) return;
             if (this.isNotePhysicsSuspended(d.noteIndex)) return;
             if (this.stretchedNotes.has(d.noteIndex)) return;
             if (seen.has(d.noteIndex)) return;
@@ -20592,27 +21829,24 @@ Object.assign(ActionWarehouse, {
         }
     },
 
-    buildCooccurrenceSets(activeTags, activeAuthors, activeTypologies = new Set()) {
+    buildCooccurrenceSets(activeTags, activeAuthors) {
         const coTags = new Set();
         const coAuthors = new Set();
-        const coTypologies = new Set();
         const items = typeof AppState !== 'undefined' ? AppState.items : [];
 
         items.forEach(item => {
             const noteTags = (item.tags || []).map(t => t.name).filter(Boolean);
             const author = item.authorCode || '';
-            const typology = item.typology || '';
 
             if (!this.noteMatchesActiveFocus(
-                noteTags, author, activeTags, activeAuthors, typology, activeTypologies
+                noteTags, author, activeTags, activeAuthors
             )) return;
 
             noteTags.forEach(tag => coTags.add(tag));
             if (author) coAuthors.add(author);
-            if (typology) coTypologies.add(typology);
         });
 
-        return { coTags, coAuthors, coTypologies };
+        return { coTags, coAuthors };
     },
 
     isBlockDockedInTray(block) {
@@ -20621,13 +21855,12 @@ Object.assign(ActionWarehouse, {
         if (block.element.classList.contains('is-deployed')) return false;
         if (block.element.classList.contains('is-depth-ui-mounted')) return false;
         if (block.element.classList.contains('is-dragging')) return false;
-        return block.type === 'tag' || block.type === 'author' || block.type === 'typology';
+        return block.type === 'tag' || block.type === 'author';
     },
 
-    isDockBlockCoRelevant(block, coTags, coAuthors, coTypologies = new Set()) {
+    isDockBlockCoRelevant(block, coTags, coAuthors) {
         if (block.type === 'tag' && block.tag) return coTags.has(block.tag);
         if (block.type === 'author' && block.author) return coAuthors.has(block.author);
-        if (block.type === 'typology' && block.typology) return coTypologies.has(block.typology);
         return true;
     },
 
@@ -20635,8 +21868,8 @@ Object.assign(ActionWarehouse, {
         const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
         const isV2Depth = typeof DepthV2 !== 'undefined' && DepthV2.isActive();
         if (!isV2Depth || level < 2 || level > 3) return false;
-        const { tags, authors, typologies } = this.getActiveFocusCriteria();
-        return tags.size > 0 || authors.size > 0 || typologies.size > 0;
+        const { tags, authors } = this.getActiveFocusCriteria();
+        return tags.size > 0 || authors.size > 0;
     },
 
     updateWarehouseBlockRelevance() {
@@ -20658,10 +21891,10 @@ Object.assign(ActionWarehouse, {
             return;
         }
 
-        const { tags: activeTags, authors: activeAuthors, typologies: activeTypologies } =
+        const { tags: activeTags, authors: activeAuthors } =
             this.getActiveFocusCriteria();
-        const { coTags, coAuthors, coTypologies } =
-            this.buildCooccurrenceSets(activeTags, activeAuthors, activeTypologies);
+        const { coTags, coAuthors } =
+            this.buildCooccurrenceSets(activeTags, activeAuthors);
 
         this.blocks.forEach(block => {
             if (!this.isBlockDockedInTray(block)) {
@@ -20670,13 +21903,13 @@ Object.assign(ActionWarehouse, {
                 return;
             }
 
-            const irrelevant = !this.isDockBlockCoRelevant(block, coTags, coAuthors, coTypologies);
+            const irrelevant = !this.isDockBlockCoRelevant(block, coTags, coAuthors);
             block.element.classList.toggle('is-dock-irrelevant', irrelevant);
             block.slotElement?.classList.toggle('is-dock-irrelevant', irrelevant);
         });
 
-        this.reorderDockTrayByRelevance(coTags, coAuthors, coTypologies);
-        this.reorderDepthBlockBar(coTags, coAuthors, coTypologies);
+        this.reorderDockTrayByRelevance(coTags, coAuthors);
+        this.reorderDepthBlockBar(coTags, coAuthors);
     },
 
     getDepthBarDeployedBlocks() {
@@ -20698,23 +21931,22 @@ Object.assign(ActionWarehouse, {
         return blocksIdx >= 0 ? blocksIdx : 9999;
     },
 
-    reorderDepthBlockBar(coTags, coAuthors, coTypologies = new Set()) {
+    reorderDepthBlockBar(coTags, coAuthors) {
         if (!this.depthBlockBarElement) return;
 
         const deployed = this.getDepthBarDeployedBlocks();
         if (!deployed.length) return;
 
-        const { tags: activeTags, authors: activeAuthors, typologies: activeTypologies } =
+        const { tags: activeTags, authors: activeAuthors } =
             this.getActiveFocusCriteria();
 
         const rank = (block) => {
             const isPrimaryFocus =
                 (block.type === 'tag' && activeTags.has(block.tag)) ||
-                (block.type === 'author' && activeAuthors.has(block.author)) ||
-                (block.type === 'typology' && activeTypologies.has(block.typology));
+                (block.type === 'author' && activeAuthors.has(block.author));
             if (isPrimaryFocus) return 0;
             if (block.type === 'frame') return 1;
-            if (this.isDockBlockCoRelevant(block, coTags, coAuthors, coTypologies)) return 2;
+            if (this.isDockBlockCoRelevant(block, coTags, coAuthors)) return 2;
             return 3;
         };
 
@@ -21621,7 +22853,7 @@ Object.assign(ActionWarehouse, {
 
     // First dot in bodiesData order matching the block tag — never body.position
     pickStableAnchorDot(block, bodiesData, noteIndex) {
-        if (block.type === 'author' || block.type === 'typology') {
+        if (block.type === 'author') {
             return bodiesData.find(d => d.noteIndex === noteIndex) || null;
         }
         return bodiesData.find(d => d.noteIndex === noteIndex && d.tag === block.tag) || null;
@@ -22216,7 +23448,7 @@ Object.assign(ActionWarehouse, {
             bodiesData.forEach(d => {
                 if (this.isNotePhysicsSuspended(d.noteIndex)) return;
                 if (!this.dotMatchesBlock(block, d)) return;
-                if (block.type === 'author' || block.type === 'typology') {
+                if (block.type === 'author') {
                     const firstOfNote = bodiesData.find(bd => bd.noteIndex === d.noteIndex);
                     if (d !== firstOfNote) return;
                 }
@@ -22264,13 +23496,11 @@ Object.assign(ActionWarehouse, {
 
             const ringDots = block.type === 'author'
                 ? this.getAuthorRingDots(block, bodiesData)
-                : block.type === 'typology'
-                    ? this.getTypologyRingDots(block, bodiesData)
-                    : bodiesData.filter(d =>
-                        d.tag === block.tag &&
-                        !this.stretchedNotes.has(d.noteIndex) &&
-                        !this.isNotePhysicsSuspended(d.noteIndex)
-                    );
+                : bodiesData.filter(d =>
+                    d.tag === block.tag &&
+                    !this.stretchedNotes.has(d.noteIndex) &&
+                    !this.isNotePhysicsSuspended(d.noteIndex)
+                );
             const ringCount = ringDots.length;
             if (ringCount === 0) return;
 
@@ -24762,6 +25992,12 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     try {
+        if (typeof WordClusterCache !== 'undefined') WordClusterCache.init();
+    } catch (err) {
+        console.error('WordClusterCache.init failed:', err);
+    }
+
+    try {
         if (typeof NoteCensor !== 'undefined') NoteCensor.init();
     } catch (err) {
         console.error('NoteCensor.init failed:', err);
@@ -24782,6 +26018,7 @@ document.addEventListener('DOMContentLoaded', () => {
     SilhouetteEngine.init();
     SpatialNavigation.init();
     ArtifactInspector.init();
+    if (typeof NoteIdSticky !== 'undefined') NoteIdSticky.init();
     ActionWarehouse.init();
 
     try {
@@ -24839,5 +26076,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 console.warn('NavigationMap.onBootComplete failed:', mapErr);
             }
         })
-        .finally(() => clearTimeout(safetyTimer));
+        .finally(() => {
+            clearTimeout(safetyTimer);
+        });
 });

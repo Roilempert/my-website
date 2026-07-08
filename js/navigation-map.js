@@ -8,6 +8,11 @@ const LAYER_NAV_SYMBOL_INLINE = {
 
 const LAYER_NAV_SYMBOL_FETCH_CACHE = new Map();
 
+function isLayerZoomOutBlocked(level = getSiteGridLevel()) {
+    if (level !== 3) return false;
+    return typeof NoteCensor !== 'undefined' && NoteCensor.blocksLayerZoomOut?.();
+}
+
 function getLayerNavToggleTarget(currentLevel) {
     const levels = getDepthActiveLevels();
     const other = levels.find((level) => level !== currentLevel);
@@ -1425,6 +1430,7 @@ const NavigationMap = {
 
     syncActiveState(level) {
         const transitionActive = this.isTransitionActive();
+        const layerToggleBlocked = this.isLayerToggleBlocked();
         const inspectorActive = level === 1 &&
             typeof ArtifactInspector !== 'undefined' &&
             ArtifactInspector.isActive;
@@ -1448,9 +1454,11 @@ const NavigationMap = {
 
             this.applyLayerSlot(this.toggleButton, 0);
             this.toggleButton.classList.add('is-active');
-            this.toggleButton.classList.remove('is-inactive');
+            this.toggleButton.classList.remove('is-inactive', 'is-zoom-out-blocked');
             this.toggleButton.removeAttribute('aria-current');
-            this.toggleButton.disabled = transitionActive;
+            this.toggleButton.disabled = layerToggleBlocked;
+            this.toggleButton.setAttribute('aria-disabled', layerToggleBlocked ? 'true' : 'false');
+            document.body.classList.remove('is-layer-zoom-out-blocked');
         } else {
             this.titles.forEach((title, rowLevel) => {
                 const isActive = rowLevel === level;
@@ -1481,6 +1489,16 @@ const NavigationMap = {
             DepthController.isAnyTransitionActive();
     },
 
+    /** Layer toggle stays available on L2 (code level 3) even while focus inspector is open. */
+    isLayerToggleBlocked() {
+        if (DepthController.isAnyTransitionActive?.()) return true;
+        if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive &&
+            DepthController.currentLevel === 3) {
+            return false;
+        }
+        return !!SpatialNavigation.isPaused;
+    },
+
     isTransitionBlocked() {
         return this.isTransitionActive();
     },
@@ -1497,8 +1515,12 @@ const NavigationMap = {
     navigateToLayer(level) {
         const target = Number(level);
         if (!Number.isFinite(target) || !isDepthLevelActive(target)) return;
-        if (this.isTransitionActive()) return;
-        if (target === this._activeLevel) return;
+        if (this.isLayerToggleBlocked()) return;
+
+        const currentLevel = typeof DepthController !== 'undefined'
+            ? DepthController.currentLevel
+            : this._activeLevel;
+        if (target === currentLevel) return;
 
         if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
             ArtifactInspector.close();

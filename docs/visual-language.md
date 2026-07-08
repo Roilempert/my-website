@@ -63,9 +63,11 @@ Four classes replace legacy `--type-*` / ratzif22 / NarkissTam body.
 
 | Class | Font file | Size | Line | Other | Use |
 |-------|-----------|------|------|-------|-----|
+| `.main-t` | `NarkissYair-Bold-TRIAL.woff2` | fluid (about panel fits width) | `0.88` | no synthesis | About panel display title (`הדברים`); side padding `--space-40` |
 | `.general-h` | `NarkissYair-Bold-TRIAL.woff2` | `calc(3.625rem + 10pt)` | `calc(3.5rem + 10pt)` | — | Layer labels; inspector ID title; related-notes section title |
-| `.general-t` | `NarkissYair-BoldMono-TRIAL.woff2` | `1rem` | `1` | letter-spacing 5%, no synthesis | Warehouse, blocks, **active** layer label, metadata labels/details, note ID |
-| `.note-h` | `TheBasics-Dots.woff2` | `24pt` (`2rem` / 32px) | `0.9` | — | Note titles |
+| `.general-t` | `NarkissYair-BoldMono-TRIAL.woff2` | `1rem` | `1` | letter-spacing 5%, no synthesis | Warehouse, blocks, **active** layer label, note ID |
+| `.general-d` | `NarkissYair-BoldMono-TRIAL.woff2` | `10pt` | `1` | letter-spacing 5%, no synthesis | Focus card footer metadata (author, date, typology) |
+| `.note-h` | `TheBasics-Dots.woff2` | `20pt` (`1.6667rem` / 26.67px) | `0.9` | — | Note titles |
 | `.note-t` | `FrankRuhl_Universal-Mono.woff2` | `1.125rem` | `1.2` | — | Note body |
 
 **Retired for exhibition UI:** `ratzif22`, NarkissTam on note body, NarkissYair Regular for chrome.
@@ -105,8 +107,9 @@ Ceremonial onboarding threshold before Experience 1. Single **כניסה** conti
 | Load sequence | Blank bg → slow cursor blink → title types → molecules fade in (text above art, beige canvas) |
 | Text layer | Above molecules (`z-index: 3`); canvas uses `--color-5` fill |
 | Silhouette art | L1-style molecules + pills (`OpeningBackground`), not meso grid |
-| Title | `.general-h`, `--color-4`, RTL — `titleCursorWaitMs` then slow typewriter |
-| Subtitle | `.general-t`, ceremonial invitation copy |
+| Title | `.main-t` width-fit (`הדברים`), `--color-3`, RTL — `titleCursorWaitMs` then slow typewriter; shares `CONFIG.about` title fit limits |
+| Subtitle | `.general-t`, `--color-3` — `רשימת קניות, הודעת פרידה, מתכון לספינג׳. המילים שנכתבות בטלפון.` |
+| Content layout | Full shell width (`calc(100% - 2 * --site-grid-padding)`); no content panel/padding box |
 | Continue | `.general-t` pill — fill `--color-3`, text `--color-1`, radius `--space-5`, pad `--space-10` / `--space-30` |
 | Corners | `decoration-corner-tr.svg` × 4 (warehouse pattern) |
 | Dev bypass | `?skipOpening=1` persists skip in `localStorage`; `?opening=1` resets. **Do not use skip on exhibition iMac.** |
@@ -129,18 +132,35 @@ Screensaver-style **scripted demo** when the exhibition iMac is idle (~90s). An 
 
 Config: `CONFIG.showReel` in `js/config.js`. Modules: `js/show-reel.js`, `js/show-reel-script.js`.
 
+### About panel (bottom pull-up)
+
+Tab at physical col 2; panel **12 shell cols** wide (cols 1–12). Pull-up sheet vertically centers on open.
+
+| Region | Cols (physical) | Type | Content |
+|--------|-----------------|------|---------|
+| Logo | **1** (left, col 1) | Bezalel SVG, **−90°** | `assets/ui/Bezalel_academy_of_arts_and_design_new_logo.svg` |
+| Details | **5** (cols 2–6) | `.general-t` (`1rem`) | Intro + credit rows |
+| Body | **5.5** (right, cols 7–12 zone) | `.general-t` (`1rem`) | Project description — width 5.5 cols, end-aligned; details + logo unchanged |
+
+**Details credit rows:** each row is a 5-subcol grid (RTL) — category **right 2 cols**, output **left 3 cols** (both **color 3**); category and output stay on one row.
+
+**Title:** `.main-t` — width-fit minus `titleReducePt`, centered, letter-spacing boosted (`titleLetterSpacingBoost`) to span panel width.
+
 ### Warehouse (rows 11–12)
 
 **Popup mode (default):** The full dock is **hidden during roaming**. A bottom-right square launcher (`.warehouse-launcher`, color **6**, **5px** radius, **2×** scale) opens the warehouse as a slide-up panel — **40px** from right/bottom; **`arrow.svg`** glyph (color **3**, tracks pointer) centered inside. Active/open: square fill **3**, arrow **1**. Accessible label **כלים** via `aria-label`. Minimap lives inside the popup only — full canvas height when closed. **No screen dimming** when open — transparent backdrop for click-outside dismiss only. **נקה לוח** and L2 deployed block pills stay visible above the launcher when active. Popup stays open while dragging blocks. Close: launcher toggle, Escape, or click outside the panel. Config: `CONFIG.warehouse.popup`.
 
-**Expand-drag launcher (active):** `CONFIG.warehouse.popup.launcherStrip.expandDrag: true` — window-style resize from the bottom-right corner:
-- **Default:** same **80×40** outer shell (color **6**); inner pill (`.warehouse-launcher__pill`, color **3**) with arrow glyph (color **6**); arrow tracks pointer
-- **Hover:** arrow points along the expand **rail** (tilt derived from 9×3 growth ratio)
-- **Open:** drag the color-3 pill along the expand rail until **9 cols × 3 rows**, then snap; handle rests **top-left**; blocks fill to the right edge; arrow points **bottom-right** (retract)
-- **Open:** drag the pill along the diagonal rail past the snap threshold, or **click** the arrow button while collapsed
+**Expand-drag launcher (active):** `CONFIG.warehouse.popup.launcherStrip.expandDrag: true` — window-style resize from **bottom-center** of the warehouse row:
+- **Default:** **86×46** outer shell (**color 6**), **5px** inset; inner pill (**color 6**); arrow (**color 3**)
+- **Hover / grab / pressed:** outer (**color 6**); inner pill (**color 3**); arrow (**color 6**)
+- **Hover:** arrow points **up** (collapsed / expanding)
+- **Open (pinned):** arrow points **down**, **color 3** (including hover while open)
+- **Open layout:** **12 cols × 4 rows** — row **1** handle band; rows **2–4** split **3 cols × 2 rows map** (left) + **9 cols blocks** (right, extra row under arrow); blocks **20px** inset end + **10px** shift left; scroll flush to content top
+- **Open:** drag straight **upward** on the vertical center axis until **12 cols × 4 rows**; handle + arrow travel **vertical only** (bottom-anchored `translateY`, no top/bottom anchor swap); handle rests **top-center** when pinned
+- **Open:** drag the pill upward past the snap threshold, or **click** the arrow button while collapsed
 - **While dragging:** map + blocks clip-reveal inside the growing panel; blocks muted until fully snapped
 - **Close:** drag the pill back along the rail, **click** the arrow button, click outside, or Escape
-- Full panel: minimap (left, below handle) + tag blocks (scroll, full width right) + launcher handle (top-left when open)
+- Full panel: minimap (**3 cols × 2 rows**, left) + tag blocks (**9 cols**, rows 2–4) + launcher handle (**top-center** when open)
 
 **Legacy launcher strip** (`expandDrag: false`): hover peek + click pin — see changelog.
 
@@ -174,7 +194,7 @@ All block/tag pills share dimensions site-wide; chrome varies by **context/state
 |---------|---------|------|------|--------|------------------|
 | **Default** | Dock, deployed, depth bar | color 3 | color 1 | none | sheet tag color (tags only) |
 | **Default hover** | Dock tag pills | color 3 | color 1 | **2px** sheet tag color | sheet tag color |
-| **Remove hover** | Selected/deployed removable blocks | color 3 | color 1 | none | **×** — tag color (tags) or color 1 (author/typology); click returns to dock |
+| **Remove hover** | Selected/deployed removable blocks | color 3 | color 1 | none | **×** — tag color (tags) or color 1 (author); click returns to dock |
 | **Attached to note** | L2 / inspector pills below cards | color 1 | color 4 | none | sheet tag color — not clickable |
 | **Irrelevant / muted** | Capture-full + co-occurrence dock mute | color 2 | color 5 | none | color 5 filled circle (tags only) |
 | **Empty slot** | Reserved dock ghost after deploy | color 6 | color 2 | **2px** color 2 | hollow ring color 2 |
@@ -187,17 +207,6 @@ All block/tag pills share dimensions site-wide; chrome varies by **context/state
 | Hover border width | `calc(var(--outline-weight) + 1pt)` → `var(--block-hover-border-width)`; empty slot stays `var(--outline-weight)` |
 | Tag dot | 10px, color from sheet; CSS var `--block-tag-color` on tag blocks |
 | Dot/text gap | 10px → `var(--space-10)` |
-
-**Typology block** — same pill dimensions as tag/author; no tag dot. Visible label: Hebrew from `CONFIG.data.typologyLabels` (בלוק, רשימה, מקטע, מחרוזת). Dock order: Block → List → Fragment → Stanza (`typologyOrder`). Pattern underline on `.block-typology-mark` (`data-typology-pattern`), text color, 1px thick (wavy 3px box), 1px below label:
-
-| Typology | Pattern | Hebrew label |
-|----------|---------|--------------|
-| Block | regular (solid) | בלוק |
-| List | dashed | רשימה |
-| Fragment | dotted | מקטע |
-| Stanza | wavy | מחרוזת |
-
-Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive). Retired typology values (e.g. `Quote`) are listed in `CONFIG.data.retiredTypologies` and never become dock blocks.
 
 ### Deployed block
 
@@ -214,7 +223,7 @@ Pattern is resolved at render time via `getTypologyPattern()` (case-insensitive)
 
 - Hull outline **0.4pt** (`CONFIG.outlines.width`); on hover the hull **fills with color 6** (`--color-6`, `hoverFillMode: 'token'`; canvas layer behind DOM dots; `body.is-molecule-hover`)
 - **Idle breathing:** whole-molecule visual drift (`CONFIG.physics.breathing`) — sine offset on draw positions only; physics bodies unchanged; quieter when captured or on bank grid
-- **Title mode** (`moleculeHoverMode: 'title'` — current default): floating `.molecule-hover-title` pinned on hover start at fixed viewport coords; **10px** (`var(--space-10)`) above/outside the hull top corner (RTL `maxX` / LTR `minX`); does not track molecule motion after pin; **truncation rule** (no ellipsis): first title line only (body fallback) → phrase clip within **8 words** (prefer sentence `.!?…`, else clause `,;:—`) → pixel-fit to `.note-h` at `min(28rem, 42vw)` whole words only; `.note-h` scale, transparent background
+- **Title mode** (`moleculeHoverMode: 'title'` — current default): floating `.molecule-hover-title` pinned on hover start at fixed viewport coords; **10px** (`var(--space-10)`) outside the hull top corner (RTL `maxX` / LTR `minX`); when **no blocks** are on the surface, vertically centered in the macro **inter-row corridor** between molecule rows (`.is-row-gap-y`, `translateY(-50%)`); with blocks deployed, stays above the hull corner; does not track molecule motion after pin; **truncation rule** (no ellipsis): first title line only (body fallback) → phrase clip within **8 words** (prefer sentence `.!?…`, else clause `,;:—`) → pixel-fit to `.note-h` at `min(28rem, 42vw)` whole words only; `.note-h` scale, transparent background
 - **Blocks / mixed modes** (optional): same floating label with attached-block pill row via `MicroMock.buildTagsRowHTML`; config: `moleculeHoverMode`, `moleculeHoverBlocksPercent`, `moleculeHoverBlocksPerRow`, `moleculeHoverBlocksSingleRowMax`
 - Warehouse hover port (`.warehouse-hover-port`) remains in the message band but is unused for L1 hover
 - Code path: `PhysicsEngine.updateMoleculeHoverState()`
@@ -251,7 +260,7 @@ SVG assets: `layer-nav-molecule-2.svg`, `layer-nav-blocks.svg`, `layer-nav-molec
 | Left padding | **100px** → `6.25rem` (protects vertical note ID lane) |
 | Top padding | `0.75 × site-grid-gap + var(--space-5)` |
 | Title / body gap | 10px → `var(--space-10)` |
-| Note ID | 10px from left edge → `var(--space-10)`; vertically centered on card |
+| Note ID | **Color 5**; sticky only when card height **> min**; at min height: **centered**, fixed; taller: scrolls **with** card until ID top reaches **m**, then pins until **m** from bottom |
 | Title / body | `.note-h` / `.note-t` |
 
 **Text direction:** Default RTL (Hebrew). English-only notes auto-detect to LTR from title+body (Latin letters, no Hebrew/Arabic script). Optional sheet column `direction` (`ltr` / `rtl` / `en` / `he`) overrides auto-detect. LTR cards mirror the ID lane to the right (`6.25rem` right padding, ID at `var(--space-10)` from right). Tag/author pills stay RTL Hebrew.
@@ -264,19 +273,20 @@ SVG assets: `layer-nav-molecule-2.svg`, `layer-nav-blocks.svg`, `layer-nav-molec
 | Line rects | anchored right | anchored left |
 | SVG clip rects | `x = viewW − width` | `x = 0` |
 
-**Tags / typology / authors (below card):** attached variant — fill color 1, text color 4, no border, not clickable. Same sizing as dock blocks. Typology underline follows text color.
+**Tags / authors (below card):** attached variant — fill color 1, text color 4, no border, not clickable. Same sizing as dock blocks.
 
 ### Focus popup (inspector, all levels)
 
 - Backdrop: color 3 @ 20% opacity
-- Note scales **6 cols → 8 cols** proportionally via `--focus-card-scale` (`8/6`); inspector width is measured from the clicked card (`sourceWidth × 8/6`), not the site token alone; card interior keeps L2 proportions; tag/author/typology blocks stay grid pill size
-- **Panel scaler:** `transform: scale(var(--focus-card-scale))` with measured `margin-bottom` lift — same scale path as the flyer; reserves height for tags/metadata
+- Note scales **6 cols → 8 cols** proportionally via `--focus-card-scale` (`8/6`); inspector width is measured from the clicked card (`sourceWidth × 8/6`), not the site token alone; card interior keeps L2 proportions; tag/author blocks stay grid pill size below the card
+- **Panel scaler:** `transform: scale(var(--focus-card-scale))` with measured `margin-bottom` lift — same scale path as the flyer
 - **Open motion:** the clicked L2 card DOM moves into a fixed `.artifact-inspector-flyer` shell (no HTML rebuild); top-left FLIP on the scaler from source rect → shell row 2; one element, one proportional scale path; shadow only after landing; source `.note-wrapper` hidden (`visibility: hidden` on wrapper + descendants). **L1 macro:** molecule click builds a synthetic L2 card (no visible grid card at macro); FLIP starts from molecule hull center at L2 width; tap on hull or dot via `openMacroNoteAt` (physics hit test + nav-surface tap)
 - Popup scrollport spans the full viewport height; focused/related content can scroll to the top and bottom viewport edges
 - Focused note starts at the beginning of shell row 2 when the popup opens
-- Metadata panel below focus card: bg color 6, text color 3, radius 5px; **details block** (`.artifact-inspector-metadata__details`) bottom aligns to **shell row 10** (last content row above warehouse) on short notes; long notes keep `metadataMinGap` (60px) below the focus card
-- **Metadata fields:** author shows **Author Code** in uppercase (e.g. `MFR`); typology shows Hebrew label from `CONFIG.data.typologyLabels` (e.g. `רשימה` for `List`)
+- **No separate metadata panel** — author, date (MM YYYY, `0000`/empty → `לא ידוע`), and typology (`מבנה`, Hebrew via `typologyLabels`) in a **single RTL row** at the bottom of the focus card (`.note-card__focus-footer.general-d`, **10pt**, no background band); category labels (`.note-card__focus-label`) **color 2**, values **color 3**
+- **Focus note ID:** vertical lane text **color 2** (not background); sticky like L2 — JS sync inside scaled focus card (`NoteIdSticky`), CSS sticky elsewhere in inspector
 - **Related notes:** one section per tag subset of focus note that **exists on at least one other note**; omit unused combinations; 2 notes per row, 40px gap
+- **Censored theme:** grid cards stay redacted; **focus inspector is never censored** — full title, body, footer, and tag pills when opened (study-unlock gate still applies to open from grid)
 
 ---
 
@@ -305,9 +315,68 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-08 | Expand-drag panel **12×4** — **3×2 map** + **9 col** blocks (row 2 under arrow); blocks **20px** end inset, **10px** left shift, scroll flush top |
+| 2026-07-08 | L3 note card: bottom pad **20px**; title↔body and body↔details gaps **30px** (`--space-30`) |
+| 2026-07-08 | Expand-drag panel **10×3** grid — **2 col** compact map (1 row) + **8 col** blocks from row 2; one handle row reserved at top |
+| 2026-07-08 | L2 censored: bottom launcher disabled until word commit — outer **3pt** outline `--color-6` only (no fill), inner pill transparent, arrow `--color-6` |
+| 2026-07-08 | L2 censored grid: metadata footer hidden on cards (focus inspector only); tag row **10px** gap from card |
+| 2026-07-08 | L2 censored word cover: **scaleY** shrink from bottom (sink behind ledge); restore = reverse grow |
+| 2026-07-08 | L2 solo words (no matches): probe line stretches out on hover/click and retracts — same hairline style as match links |
+| 2026-07-08 | About body width **5.5 cols** (end-aligned); logo enlarged; title letter-spacing **+2%** (`titleLetterSpacingBoost` 1.581) |
+| 2026-07-08 | About layout RTL: **text right** (cols 7–12), **details center** (2–6), **logo left** (1); categories **color 3**; intro line break after חזותית; body sentences merged (no gap) |
+| 2026-07-08 | About layout: logo **physical left** (col 1); text cols 2–7; details cols 8–12; credit rows **5-subcol grid** (category right 2, output left 3, no wrap); credits **`.general-t`** (1rem) not `.general-d` |
+| 2026-07-08 | About title: **20px** gap below scroll arrows; centered; **−20pt** from fit size + letter-spacing to span panel; logo scaled to 1-col; credits use focus footer classes (`.general-d`, `.note-card__focus-label` / `value`) |
+| 2026-07-08 | About panel body: **1 col logo** (rotated −90°) + **6 col** `.general-t` body + **5 col** credits (intro + category/output rows); `CONFIG.about.intro` / `credits` |
+| 2026-07-08 | L2 censored word hover: cover lifts like theatre curtain (`scaleY`, bottom origin); underline stretches inline-start→end on reveal |
+| 2026-07-08 | L2 censored study: **click** word to commit (no hover dwell); layer-nav zoom-out + pinch zoom blocked until first word selected; word-match lines hairline like L1 block↔note links; tag/author pill row restored under grid cards |
+| 2026-07-08 | L2 note ID → **color 5** (focus note ID stays color 2) |
+| 2026-07-08 | L2 note ID + footer category labels → **color 2** (grid, inspector, censored grid) |
+| 2026-07-08 | Focus note ID + footer category labels → **color 2** (was color 5) |
+| 2026-07-08 | Focus footer category labels (`.note-card__focus-label`) → **color 5**; values stay color 3 |
+| 2026-07-08 | Focus footer: restored `מבנה` typology metadata row (Hebrew label via `typologyLabels`); typology blocks remain removed |
+| 2026-07-08 | **Removed typology blocks** — dock pills, L2 attached pills, pattern underline CSS, and all capture/filter/orbit logic for typology block type |
+| 2026-07-08 | Focus footer: `.general-d` 10pt, no background; date empty/`0000` → `לא ידוע` |
+| 2026-07-08 | Focus inspector: tag pills + footer metadata locked to single row (`flex-wrap: nowrap`) |
+| 2026-07-08 | Focus inspector: removed metadata panel; author/date in color-5 card footer; focus ID lane color-5 fill |
+| 2026-07-08 | Expand-drag launcher arrow points **down** when menu open (pinned); **up** when collapsed |
+| 2026-07-08 | Expand-drag launcher colors locked — default outer **6** / pill **6** / arrow **3**; hover+grab outer **6** / pill **3** / arrow **6** |
+| 2026-07-08 | Expand-drag launcher default/hover colors **flipped** — default outer **6** / inner **3** / arrow **6**; hover+grab outer **3** / inner **6** / arrow **3** |
+| 2026-07-08 | Expand-drag launcher shell **86×46** with **5px** pad (`--space-5`); handle motion **vertical-only** via bottom anchor + `translateY` (no diagonal snap to `top: 0`) |
+| 2026-07-08 | Expand-drag open: handle **top-center**; blocks tray below handle row; **row 2** reserves empty launcher-width slot at row start; default launcher colors outer **3** / inner **6** / arrow **3**, reversed on hover+grab |
+| 2026-07-08 | Opening screen: title **הדברים** `.main-t` width-fit (matches about panel); subtitle updated; no content panel box — full-bleed type on canvas |
+| 2026-07-08 | Warehouse expand-drag: handle travels **vertical center axis only** (no horizontal drift); arrow fixed **up** in expand-drag mode |
+| 2026-07-08 | Note ID sticky: rides with card until natural top crosses **m**, then pins; bottom clamp at **m** |
+| 2026-07-08 | Note ID sticky bottom clamp: JS corridor (`rail` padding top/bottom **m**), scale-aware for focus transform |
+| 2026-07-08 | Note ID sticky gated to tall cards only (`is-note-id-sticky-enabled`); min-height cards centered, no scroll follow |
+| 2026-07-08 | Note ID lane: `white-space: nowrap` — single vertical column (no hyphen wrap into multiple columns) |
+| 2026-07-08 | Note ID horizontal inset **10px → 20px** (`--note-id-inset` / `var(--space-20)`); RTL from left, LTR from right |
+| 2026-07-08 | Note ID horizontal lane restored: card padding `--note-id-lane` + absolute rail at inset (sticky vertical unchanged) |
+| 2026-07-08 | Note ID sticky lane (L2 + focus): `--note-id-sticky-inset`; `.note-id-rail`; CSS sticky on grid scroll; focus card JS sync (`NoteIdSticky`) inside scaled transform |
+| 2026-07-08 | Warehouse expand-drag launcher: **bottom-center** on warehouse row; opens **symmetrically** (width from center, height upward); drag rail vertical; final panel still **9 cols × 3 rows** |
 | 2026-07-07 | `site-icon.svg`: icon scaled to **0.9** within viewBox for favicon margin |
 | 2026-07-07 | Site favicon: dedicated `site-icon.svg` (2-dot molecule, hull R +5 vs `layer-nav-l1.svg`) |
 | 2026-07-07 | **Show reel** — exhibition attract mode: `#show-reel-cursor`, `body.is-show-reel`, optional `.show-reel-hint`; `CONFIG.showReel` |
+| 2026-07-08 | About `.main-t` title: **grow-to-fill** panel width (RTL, right-aligned); bleeds full panel; max **400px** |
+| 2026-07-08 | About `.main-t` title max size **136px → 180px** (`CONFIG.about.titleMaxPx`; still width-fit) |
+| 2026-07-08 | About panel height: **content-measured** (headline + body + logo); capped by viewport when vertically centered; `openMaxPx` **960** |
+| 2026-07-08 | About tab: **physical col 2 left** (`direction: ltr` sheet + 1-col inset); **upward elongation** via `--site-about-tab-extend` (+20px bottom padding); max-content width |
+| 2026-07-08 | About open state: tab + panel **vertically centered** on pull-up (lift = half viewport minus half sheet height); horizontal position stays **col 1 left** |
+| 2026-07-08 | About pull-up restored: tab **thin** (`--space-10` only); tab + panel **one sheet** — panel full height off-screen, whole sheet lifts via `--site-about-lift` (no separate height fade) |
+| 2026-07-08 | About: tab **full panel width** (12 cols); tab + panel **flex-attached** on one sheet; scroll ^ row at **panel top** |
+| 2026-07-08 | About panel: **12 cols** wide, **5px** radius; `.main-t` headline; `.site-about__text` **6 cols** physical left; scroll ^ row bottom inset `--space-40` |
+| 2026-07-08 | About tab: **+20px** bottom extend (`--site-about-tab-extend`); top text inset unchanged (`--space-10`) |
+| 2026-07-08 | About tab: bottom flush to viewport edge (`--site-about-tab-lift: 0`) |
+| 2026-07-08 | About tab lift **20px** (`--site-about-tab-lift: var(--space-20)`) |
+| 2026-07-08 | About tab lift reset to **0** (moved down 40px from prior offset) |
+| 2026-07-08 | About tab: lifted **40px** (`--site-about-tab-lift`); bottom padding extended **40px** to meet panel |
+| 2026-07-08 | About tab: **col 2 left** (panel stays col 1); tab keeps **5px top radius** in all states |
+| 2026-07-08 | About: bottom pull-up — tab at **col 1 left**; tab + panel slide up from below viewport to **50vh** top |
+| 2026-07-08 | About: tab only at **col 8 left**; tab + panel slide down together from above viewport to **50vh** bottom |
+| 2026-07-07 | Warehouse launcher open state: arrow stays visible (**pill 6**, **arrow 3**); legacy strip `is-active` glyph rule scoped off expand-drag |
+| 2026-07-07 | Warehouse launcher drag grab keeps hover color swap (**pill 6**, **arrow 3**) |
+| 2026-07-07 | Warehouse launcher hover: inner pill + arrow swap colors (**3↔6**) |
+| 2026-07-07 | Warehouse launcher outer/inner gap **10px → 7px** (inner pill enlarged within 90×50 shell) |
+| 2026-07-07 | Warehouse launcher outer shell **80×40 → 90×50**; outer/inner gap **5px → 10px** (`--warehouse-launcher-pad`) |
 | 2026-07-07 | Warehouse launcher: collapsed click now fully opens the strip (same as drag snap); first-press teaser no longer blocks open |
 | 2026-07-07 | Layer nav toggle icon scale: L1 molecule **1**; L2 blocks **0.9** (−10% vs molecule) |
 | 2026-07-07 | L1 layer nav icon (`layer-nav-l1.svg`) hull stroke **3.5 → 2.8** (`vector-effect: non-scaling-stroke`) |
@@ -339,6 +408,8 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 | 2026-07-07 | Warehouse launcher: pill width ×3; `arrow.svg` tracks pointer (rotate toward mouse) |
 | 2026-07-07 | Warehouse launcher shell: hugs pill with 5px padding (no forced square) |
 | 2026-07-07 | Warehouse launcher glyph: `assets/ui/arrow.svg` replaces ^ character (color-1 mask on block pill) |
+| 2026-07-07 | L1 hover (no blocks): title vertically centered in macro inter-row corridor (`.is-row-gap-y`); hull-corner offset when blocks deployed |
+| 2026-07-07 | Reduced `.note-h` note title size from **24pt** (`2rem` / 32px) to **20pt** (`1.6667rem` / 26.67px) |
 | 2026-07-07 | L1 hover truncation: phrase-boundary clip (8-word window) + `.note-h` pixel-fit; no char cap, no ellipsis |
 | 2026-07-07 | L1 hover label length rule: first line, max **5 words** + **42 chars**, append **…**; CSS cap `min(28rem, 42vw)` |
 | 2026-07-07 | Physics dot collider radius **12px → 8px** (`CONFIG.physics.body.radius`) |

@@ -62,7 +62,6 @@ const ArtifactInspector = {
         const studyOpen = typeof NoteCensor !== 'undefined'
             && NoteCensor.isActive()
             && NoteCensor.isNoteStudyUnlocked(noteWrapperNode);
-        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive() && !studyOpen) return;
 
         this._forceReadableOpen = studyOpen;
         this.openPopup(noteWrapperNode);
@@ -108,10 +107,14 @@ const ArtifactInspector = {
         const item = typeof MicroMock !== 'undefined'
             ? MicroMock.resolveItem(noteWrapperNode)
             : null;
-        if (!item) return;
+        if (!item) {
+            return;
+        }
 
         const source = this._resolveOpenSource(noteWrapperNode, item);
-        if (!source) return;
+        if (!source) {
+            return;
+        }
 
         const { card: sourceCard, firstRect: firstCard, synthetic } = source;
 
@@ -128,6 +131,9 @@ const ArtifactInspector = {
         }
 
         this.panel.innerHTML = this.buildFocusHTML(item);
+        if (typeof NoteIdSticky !== 'undefined') {
+            NoteIdSticky.refreshAllCards(this.panel);
+        }
         this.panel.setAttribute('aria-hidden', 'false');
         this.panel.dataset.noteId = String(item.id);
         this.panel.scrollTop = 0;
@@ -185,15 +191,15 @@ const ArtifactInspector = {
     _resolveOpenSource(wrapper, item) {
         const { card } = this._getSourceFocusElements(wrapper);
         const firstRect = card?.getBoundingClientRect();
-
-        if (this._forceReadableOpen && card && firstRect && firstRect.width > 0) {
-            const readableCard = this._buildSyntheticFocusCard(item, { forceReadable: true });
-            if (readableCard) {
-                return { card: readableCard, firstRect, synthetic: true };
-            }
-        }
+        const censoredMicro = typeof NoteCensor !== 'undefined' && NoteCensor.isActive();
 
         if (card && firstRect && firstRect.width > 0) {
+            if (censoredMicro) {
+                const readableCard = this._buildSyntheticFocusCard(item, { forceReadable: true });
+                if (readableCard) {
+                    return { card: readableCard, firstRect, synthetic: true };
+                }
+            }
             return { card, firstRect, synthetic: false };
         }
 
@@ -203,14 +209,18 @@ const ArtifactInspector = {
         const sourceRect = this._resolveMacroSourceRect(wrapper, cardSize);
         if (!sourceRect) return null;
 
-        const syntheticCard = this._buildSyntheticFocusCard(item);
+        const syntheticCard = this._buildSyntheticFocusCard(item, { forceReadable: true });
         if (!syntheticCard) return null;
 
         return { card: syntheticCard, firstRect: sourceRect, synthetic: true };
     },
 
     _buildSyntheticFocusCard(item, options = {}) {
-        const html = MicroMock.buildCardOnlyHTML(item, { focusScale: true, ...options });
+        const html = MicroMock.buildCardOnlyHTML(item, {
+            focusScale: true,
+            forceReadable: true,
+            ...options
+        });
         const mount = document.createElement('div');
         mount.innerHTML = html;
         return mount.firstElementChild;
@@ -224,7 +234,10 @@ const ArtifactInspector = {
             document.body.appendChild(this._cardMeasureProbe);
         }
 
-        this._cardMeasureProbe.innerHTML = MicroMock.buildCardOnlyHTML(item, { focusScale: true });
+        this._cardMeasureProbe.innerHTML = MicroMock.buildCardOnlyHTML(item, {
+            focusScale: true,
+            forceReadable: true
+        });
         const card = this._cardMeasureProbe.querySelector('.micro-mock__card.note-card');
         const rect = card?.getBoundingClientRect();
         const rootStyle = getComputedStyle(document.documentElement);
@@ -348,42 +361,6 @@ const ArtifactInspector = {
         };
     },
 
-    _getSiteGridRowStridePx() {
-        const rootStyle = getComputedStyle(document.documentElement);
-        const cellH = parseFloat(rootStyle.getPropertyValue('--site-grid-cell-h')) || 0;
-        const gap = parseFloat(rootStyle.getPropertyValue('--site-grid-gap')) || 0;
-        return cellH + gap;
-    },
-
-    _getInspectorMetadataShellRowBottomOffsetPx() {
-        const cardAnchorRow = CONFIG.inspector?.cardAnchorRow ?? 2;
-        const alignRow = CONFIG.inspector?.metadataAlignRow
-            ?? CONFIG.siteGrid?.rows
-            ?? 12;
-        const rowsBelowCard = Math.max(0, alignRow - cardAnchorRow);
-        const rootStyle = getComputedStyle(document.documentElement);
-        const cellH = parseFloat(rootStyle.getPropertyValue('--site-grid-cell-h')) || 0;
-        return rowsBelowCard * this._getSiteGridRowStridePx() + cellH;
-    },
-
-    _measureFocusBlockEndPx() {
-        const panel = this.panel;
-        const focus = panel?.querySelector('.artifact-inspector-focus');
-        if (!panel || !focus) return 0;
-
-        const panelStyle = getComputedStyle(panel);
-        const contentTop = panel.getBoundingClientRect().top
-            + (parseFloat(panelStyle.paddingTop) || 0);
-
-        let end = focus.getBoundingClientRect().bottom - contentTop;
-
-        focus.querySelectorAll('.micro-mock__card.note-card, .micro-mock__tags').forEach((el) => {
-            end = Math.max(end, el.getBoundingClientRect().bottom - contentTop);
-        });
-
-        return end;
-    },
-
     _syncFocusCardSlotHeight() {
         const panelSlot = this.panel?.querySelector(
             '.artifact-inspector-focus__card-slot'
@@ -397,30 +374,6 @@ const ArtifactInspector = {
         if (cardHeight > 0) {
             panelSlot.style.height = `${Math.ceil(cardHeight)}px`;
         }
-    },
-
-    _syncMetadataPanelGap() {
-        const metadata = this.panel?.querySelector('.artifact-inspector-metadata');
-        const details = metadata?.querySelector('.artifact-inspector-metadata__details');
-        if (!metadata || !details || !this.panel) return;
-
-        this._syncFocusCardSlotHeight();
-
-        const minGap = CONFIG.inspector?.metadataMinGap ?? 60;
-        const rowBottomOffset = this._getInspectorMetadataShellRowBottomOffsetPx();
-        const focusEnd = this._measureFocusBlockEndPx();
-
-        const metadataRect = metadata.getBoundingClientRect();
-        const detailsRect = details.getBoundingClientRect();
-        const detailsOffsetInMetadata = detailsRect.bottom - metadataRect.top;
-
-        const metadataTopForShortAlign = rowBottomOffset - detailsOffsetInMetadata;
-        const longNote = focusEnd + minGap > metadataTopForShortAlign;
-        const gap = longNote
-            ? minGap
-            : Math.max(minGap, metadataTopForShortAlign - focusEnd);
-
-        this.panel.style.setProperty('--inspector-metadata-gap', `${Math.round(gap)}px`);
     },
 
     _applyFocusLandingLayout() {
@@ -445,10 +398,8 @@ const ArtifactInspector = {
 
     _handoffFocusToPanel() {
         const flyerScaler = this.flyer?.querySelector('.artifact-inspector-focus__card-scaler');
-        const flyerTags = this.flyer?.querySelector('.micro-mock__tags');
         const flyingCard = flyerScaler?.querySelector('.micro-mock__card.note-card');
         const panelFocus = this.panel?.querySelector('.artifact-inspector-focus');
-        const panelNote = panelFocus?.querySelector('.artifact-inspector-focus__note');
         const panelScaler = panelFocus?.querySelector('.artifact-inspector-focus__card-scaler');
 
         if (!flyingCard || !panelScaler || !panelFocus || !this._openFirstCard) {
@@ -478,7 +429,6 @@ const ArtifactInspector = {
         }
 
         panelScaler.appendChild(flyingCard);
-        if (flyerTags && panelNote) panelNote.appendChild(flyerTags);
 
         if (this.flyer) {
             this.flyer.innerHTML = '';
@@ -524,6 +474,10 @@ const ArtifactInspector = {
         flyerScaler.offsetHeight;
         this.flyer?.classList.remove('is-preparing');
 
+        if (typeof NoteIdSticky !== 'undefined') {
+            NoteIdSticky.syncFocusPanel();
+        }
+
         const duration = `${CONFIG.inspector?.openDuration ?? 0.48}s`;
         const easing = 'cubic-bezier(0.25, 1, 0.5, 1)';
         const onTransitionEnd = (event) => {
@@ -568,10 +522,16 @@ const ArtifactInspector = {
 
         this._handoffFocusToPanel();
 
+        if (typeof NoteIdSticky !== 'undefined') {
+            NoteIdSticky.bindFocusPanel(this.panel);
+        }
+
         requestAnimationFrame(() => {
             requestAnimationFrame(() => {
                 this._syncFocusCardSlotHeight();
-                this._syncMetadataPanelGap();
+                if (typeof NoteIdSticky !== 'undefined') {
+                    NoteIdSticky.syncFocusPanel();
+                }
             });
         });
 
@@ -580,8 +540,9 @@ const ArtifactInspector = {
     },
 
     buildFlyerShellHTML(item) {
+        const tagOptions = { forceReadable: true, focusScale: true };
         const tagsHtml = typeof MicroMock !== 'undefined'
-            ? MicroMock.buildTagsRowHTML(item)
+            ? MicroMock.buildTagsRowHTML(item, tagOptions)
             : '';
         return `
             <div class="artifact-inspector-flyer__note micro-mock__note artifact-inspector-focus__note">
@@ -594,7 +555,10 @@ const ArtifactInspector = {
     },
 
     buildFocusHTML(item) {
-        const metaHtml = this.buildMetadataHTML(item);
+        const tagOptions = { forceReadable: true, focusScale: true };
+        const tagsHtml = typeof MicroMock !== 'undefined'
+            ? MicroMock.buildTagsRowHTML(item, tagOptions)
+            : '';
         const relatedHtml = this.buildRelatedNotesHTML(item);
         return `
             <div class="artifact-inspector-focus">
@@ -602,72 +566,10 @@ const ArtifactInspector = {
                     <div class="artifact-inspector-focus__card-slot">
                         <div class="artifact-inspector-focus__card-scaler"></div>
                     </div>
+                    ${tagsHtml}
                 </div>
             </div>
-            ${metaHtml}
             ${relatedHtml}
-        `;
-    },
-
-    buildMetadataHTML(item) {
-        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
-            const idRedact = NoteCensor.buildRedactBlock(String(item.id || ''), `${item.id}:meta-id`, 'note-redact--meta-title', {
-                maxLines: 1,
-                minWidth: 0.2,
-                maxWidth: 0.45
-            });
-            return `
-            <section class="artifact-inspector-metadata">
-                <div class="artifact-inspector-metadata__scroll-glyphs" aria-hidden="true">
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                </div>
-                <h2 class="artifact-inspector-metadata__id general-h">${idRedact}</h2>
-                <div class="artifact-inspector-metadata__grid">
-                    <dl class="artifact-inspector-metadata__details general-t">
-                        <div><dt>מחבר</dt><dd>${NoteCensor.buildMetadataValueHTML('author', item)}</dd></div>
-                        <div><dt>תאריך כתיבה</dt><dd>${NoteCensor.buildMetadataValueHTML('date', item)}</dd></div>
-                        <div><dt>מספר סידורי</dt><dd>${NoteCensor.buildMetadataValueHTML('serial', item)}</dd></div>
-                        <div><dt>מבנה טיפולוגי</dt><dd>${NoteCensor.buildMetadataValueHTML('typology', item)}</dd></div>
-                    </dl>
-                </div>
-            </section>
-        `;
-        }
-
-        const author = item.authorCode
-            ? String(item.authorCode).trim().toUpperCase()
-            : (item.authorFullName || '—');
-        const date = item.dateWritten || '—';
-        const serial = item.id || '—';
-        const typology = typeof getTypologyLabel === 'function'
-            ? (getTypologyLabel(item.typology) || item.typology || '—')
-            : (item.typology || '—');
-        const blocksHtml = typeof MicroMock !== 'undefined'
-            ? MicroMock.buildTagsRowHTML(item)
-            : '';
-        return `
-            <section class="artifact-inspector-metadata">
-                <div class="artifact-inspector-metadata__scroll-glyphs" aria-hidden="true">
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                    <span class="artifact-inspector-metadata__scroll-glyph general-h">^</span>
-                </div>
-                <h2 class="artifact-inspector-metadata__id general-h">${this.escapeHtml(item.id || '')}</h2>
-                <div class="artifact-inspector-metadata__grid">
-                    <div class="artifact-inspector-metadata__tags">
-                        <h3 class="general-t">תגיות</h3>
-                        <div class="artifact-inspector-metadata__tag-list">${blocksHtml}</div>
-                    </div>
-                    <dl class="artifact-inspector-metadata__details general-t">
-                        <div><dt>מחבר</dt><dd>${this.escapeHtml(author)}</dd></div>
-                        <div><dt>תאריך כתיבה</dt><dd>${this.escapeHtml(date)}</dd></div>
-                        <div><dt>מספר סידורי</dt><dd>${this.escapeHtml(serial)}</dd></div>
-                        <div><dt>מבנה טיפולוגי</dt><dd>${this.escapeHtml(typology)}</dd></div>
-                    </dl>
-                </div>
-            </section>
         `;
     },
 
@@ -797,10 +699,13 @@ const ArtifactInspector = {
         this.panel.setAttribute('aria-hidden', 'true');
         const noteId = this.panel?.dataset?.noteId;
         this._restoreSourceCard(noteId);
+        if (typeof NoteIdSticky !== 'undefined') {
+            NoteIdSticky.unbindFocusPanel();
+            NoteIdSticky.resetFocusIds();
+        }
         this.panel.innerHTML = '';
         this.panel.style.removeProperty('width');
         this.panel.style.removeProperty('left');
-        this.panel.style.removeProperty('--inspector-metadata-gap');
         delete this.panel.dataset.noteId;
 
         if (this.flyer) {

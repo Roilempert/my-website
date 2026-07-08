@@ -128,12 +128,145 @@ const ActionWarehouse = {
 
     syncClearControlVisibility() {
         document.body.classList.toggle('is-clear-visible', this.hasClearableSelection());
+        this.syncLauncherStudyGate();
+    },
+
+    isWordStudyLauncherGated() {
+        if (!this.isWordPanelLevelActive()) return false;
+        return typeof NoteCensor === 'undefined' || !NoteCensor.hasCommittedWord();
+    },
+
+    syncLauncherStudyGate() {
+        const gated = this.isWordStudyLauncherGated();
+        document.body.classList.toggle('is-warehouse-launcher-gated', gated);
+
+        if (this.launcherElement) {
+            this.launcherElement.disabled = gated;
+            this.launcherElement.setAttribute('aria-disabled', gated ? 'true' : 'false');
+        }
+
+
+        if (!gated) return;
+
+        if (this.isLauncherStripMode?.()) {
+            if (this.launcherStripPinned || (this.launcherExpandProgress ?? 0) > 0) {
+                this.unpinLauncherStrip(true);
+            }
+        } else if (this.popupOpen) {
+            this.closePopup();
+        }
     },
 
     clearWordPanel() {
         if (!this.trayBlocksElement) return;
         this.trayBlocksElement.querySelectorAll('.word-panel__chip').forEach((el) => el.remove());
         if (this._wordPanelWords) this._wordPanelWords.clear();
+    },
+
+    /** Abort an in-flight block drag so layer navigation can reset state. */
+    cancelActiveDrag() {
+        if (!this.dragState) return;
+
+        const drag = this.dragState;
+        cancelAnimationFrame(drag.rafId);
+        document.removeEventListener('pointermove', this.boundMove);
+        document.removeEventListener('pointerup', this.boundUp);
+
+        const block = drag.block;
+        block?.element?.classList.remove('is-dragging');
+        this.dragState = null;
+    },
+
+    _clearAllNoteInteractionVisuals(bodiesData) {
+        this.restoreAllFilterVisuals(bodiesData);
+        document.querySelectorAll('.note-wrapper').forEach(wrapper => {
+            wrapper.classList.remove(
+                'is-molecule-focused',
+                'is-molecule-muted',
+                'is-layout-excluded',
+                'is-study-unlocked'
+            );
+            wrapper.querySelectorAll('.layer-dot').forEach(dot => {
+                dot.classList.remove('is-dot-focused', 'is-dot-muted');
+            });
+        });
+    },
+
+    _returnAllActiveBlocksToDock() {
+        this.clearMacroIndicationGhost();
+        this.ensurePhysicsMaps();
+        this.stretchBindingByNote.clear();
+        this.stretchGroupCounts.clear();
+        this.orbitAngleByNote.clear();
+        this.orbitRingCountByBlock.clear();
+        this.filteredNoteIndices.clear();
+        this.filterExitByNote.clear();
+        this.workspaceSlotLayout = null;
+        if (typeof PhysicsEngine !== 'undefined') {
+            this._clearAllNoteInteractionVisuals(PhysicsEngine.bodiesData);
+            PhysicsEngine.bodiesData?.forEach(item => {
+                item.overrideTarget = null;
+                item.smoothTarget = null;
+            });
+        }
+
+        if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
+            DepthV2.clearFringeZone();
+            const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+            if (level >= 2) {
+                DepthV2.relayoutForFilterChange({ force: true });
+            }
+        }
+
+        this.unmountDeployedBlocksFromDepthBar();
+
+        this.blocks.forEach(block => {
+            if (block.state !== 'active' || block.nestedIn) return;
+            this.returnToDock(block);
+        });
+
+        this.workspaceCenters = null;
+        this.workspaceGridRush = null;
+        this.workspaceGridRushUntil = 0;
+        this.shellElement?.classList.remove('is-workspace-active');
+        this.depthBlockBarElement?.classList.remove('has-blocks');
+        this.clearDepthDropIndicator?.();
+
+        document.body.classList.remove(
+            'is-block-focus',
+            'is-block-filter',
+            'is-catalog-lens',
+            'is-depth-workspace-active',
+            'is-depth-filter-layout'
+        );
+
+        this.updateWorkspaceState();
+        this.updateDotFocusFilter();
+        if (typeof CatalogState !== 'undefined') {
+            CatalogState.resetForLayerSwitch?.();
+            CatalogState.rebuildFromWarehouse();
+        }
+    },
+
+    /** Clear blocks / word study from the layer being left before depth navigation. */
+    clearStudyStateForLayerLeave(prevLevel) {
+        this.cancelActiveDrag();
+
+        if (prevLevel === 3) {
+            if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
+                ArtifactInspector.close();
+            }
+            this.clearWordPanel();
+            if (typeof NoteCensor !== 'undefined' && NoteCensor.resetForLayerLeave) {
+                NoteCensor.resetForLayerLeave();
+            }
+        }
+
+        if (prevLevel === 1 || prevLevel === 3) {
+            this._returnAllActiveBlocksToDock();
+        }
+
+        this.syncClearControlVisibility();
     },
 
     init() {
@@ -295,6 +428,7 @@ const ActionWarehouse = {
         const cfg = this.getLauncherExpandTeaserCfg();
         if (cfg.enabled === false) return false;
         if (!this.isLauncherExpandDragMode()) return false;
+        if (this.isWordStudyLauncherGated()) return false;
         if (this.hasSeenLauncherExpandTeaser()) return false;
         if (this.launcherExpandTeaserActive) return false;
         if (this.launcherStripPinned) return false;
@@ -422,25 +556,7 @@ const ActionWarehouse = {
             const u = Math.max(0, Math.min(1, (now - startTime) / durationMs));
             const progress = this.sampleLauncherExpandTeaserProgress(u, segments);
             this.applyLauncherExpandSize(progress, true);
-
-            const rail = this.getLauncherExpandRail(bounds);
-            const pt = this._launcherPointerXY || {
-                x: window.innerWidth * 0.5,
-                y: window.innerHeight * 0.5
-            };
-            if (progress > 0.02) {
-                const wrapRect = wrap?.getBoundingClientRect();
-                if (wrapRect) {
-                    const cx = wrapRect.right - bounds.collapsedW / 2;
-                    const cy = wrapRect.bottom - bounds.collapsedH / 2;
-                    this.updateLauncherGlyphRotation(
-                        cx - rail.ux * progress * rail.length,
-                        cy - rail.uy * progress * rail.length
-                    );
-                }
-            } else {
-                this.updateLauncherGlyphRotation(pt.x, pt.y);
-            }
+            this.updateLauncherGlyphRotation(0, 0);
 
             if (u < 1) {
                 this._launcherExpandTeaserRaf = requestAnimationFrame(step);
@@ -449,6 +565,10 @@ const ActionWarehouse = {
 
             this.applyLauncherExpandSize(0, false);
             this.cancelLauncherExpandTeaser();
+            const pt = this._launcherPointerXY || {
+                x: window.innerWidth * 0.5,
+                y: window.innerHeight * 0.5
+            };
             this.updateLauncherGlyphRotation(pt.x, pt.y);
         };
 
@@ -473,41 +593,27 @@ const ActionWarehouse = {
         };
     },
 
-    /** Diagonal rail — tilt matches expand panel growth (width vs height delta). */
+    /** Vertical rail — drag upward; width grows symmetrically via progress. */
     getLauncherExpandRail(bounds = null) {
         const b = bounds || this.getLauncherExpandBounds();
         const deltaW = Math.max(0, b.expandedW - b.collapsedW);
         const deltaH = Math.max(0, b.expandedH - b.collapsedH);
-        const length = Math.hypot(deltaW, deltaH) || 1;
+        const length = deltaH || 1;
         return {
             deltaW,
             deltaH,
             length,
-            ux: deltaW / length,
-            uy: deltaH / length
+            ux: 0,
+            uy: 1
         };
     },
 
     getLauncherExpandRailArrowDeg() {
-        const popupCfg = CONFIG.warehouse?.popup;
-        const baseDeg = popupCfg?.launcherArrowBaseDeg ?? -90;
-        const rail = this.getLauncherExpandRail();
-        const aimDeg = Math.atan2(-rail.deltaH, -rail.deltaW) * (180 / Math.PI);
-        return aimDeg - baseDeg;
+        return 0;
     },
 
-    getLauncherExpandRetractArrowDeg() {
-        const popupCfg = CONFIG.warehouse?.popup;
-        const baseDeg = popupCfg?.launcherArrowBaseDeg ?? -90;
-        const wrap = this.launcherWrapElement;
-        const launcher = this.launcherElement;
-        if (!wrap || !launcher) return 0;
-        const wrapRect = wrap.getBoundingClientRect();
-        const launcherRect = launcher.getBoundingClientRect();
-        const cx = launcherRect.left + launcherRect.width / 2;
-        const cy = launcherRect.top + launcherRect.height / 2;
-        const aimDeg = Math.atan2(wrapRect.bottom - cy, wrapRect.right - cx) * (180 / Math.PI);
-        return aimDeg - baseDeg;
+    getLauncherExpandOpenArrowDeg() {
+        return 180;
     },
 
     applyLauncherExpandHandlePosition(clamped, isDragging) {
@@ -515,33 +621,22 @@ const ActionWarehouse = {
         if (!launcher || !this.isLauncherExpandDragMode()) return;
 
         const bounds = this.getLauncherExpandBounds();
-        const lw = bounds.collapsedW;
         const lh = bounds.collapsedH;
         const pinned = this.launcherStripPinned && clamped >= 1 && !isDragging;
+        const progress = pinned ? 1 : clamped;
 
-        launcher.style.left = '';
-        launcher.style.top = '';
-        launcher.style.right = '';
-        launcher.style.bottom = '';
-        launcher.style.transform = '';
-
-        if (pinned) {
-            launcher.style.left = '0';
-            launcher.style.top = '0';
-            return;
-        }
-
-        if (clamped <= 0 && !isDragging) {
-            launcher.style.right = '0';
-            launcher.style.bottom = '0';
-            return;
-        }
-
-        const tx = -clamped * (bounds.expandedW - lw);
-        const ty = -clamped * (bounds.expandedH - lh);
-        launcher.style.right = '0';
+        launcher.style.left = '50%';
+        launcher.style.right = 'auto';
+        launcher.style.top = 'auto';
         launcher.style.bottom = '0';
-        launcher.style.transform = `translate(${tx}px, ${ty}px)`;
+
+        if (progress <= 0 && !isDragging) {
+            launcher.style.transform = 'translateX(-50%)';
+            return;
+        }
+
+        const ty = -progress * (bounds.expandedH - lh);
+        launcher.style.transform = `translate(-50%, ${ty}px)`;
     },
 
     applyLauncherExpandSize(progress, isDragging) {
@@ -562,7 +657,7 @@ const ActionWarehouse = {
 
         const launcher = this.launcherElement;
         if (launcher && this.isLauncherExpandDragMode()) {
-            launcher.style.transition = isDragging ? 'none' : `transform ${ease}, left ${ease}, top ${ease}, right ${ease}, bottom ${ease}`;
+            launcher.style.transition = isDragging ? 'none' : `transform ${ease}`;
             this.applyLauncherExpandHandlePosition(clamped, isDragging);
         }
 
@@ -578,6 +673,9 @@ const ActionWarehouse = {
                 NavigationMap.resizeCanvas?.();
                 if (NavigationMap.isMapReady?.()) NavigationMap.scheduleRender?.();
             });
+        }
+        if (showContent) {
+            requestAnimationFrame(() => this.syncLauncherStripTrayPinnedLayout());
         }
         this.updateScrollReserve();
     },
@@ -690,6 +788,7 @@ const ActionWarehouse = {
 
         this.launcherElement.addEventListener('click', (e) => {
             e.stopPropagation();
+            if (this.isWordStudyLauncherGated()) return;
             if (expandDrag) {
                 if (this.isLauncherExpandDismissBlocked()) return;
                 if (this.launcherExpandDragState) return;
@@ -762,6 +861,8 @@ const ActionWarehouse = {
         } else {
             this.syncPopupState(popupCfg.defaultOpen === true);
         }
+
+        this.syncLauncherStudyGate();
     },
 
     initLauncherGlyphTracking() {
@@ -815,6 +916,21 @@ const ActionWarehouse = {
                     }
                 });
                 this._launcherStripPeekObserver.observe(this.launcherWrapElement);
+            } else {
+                this._launcherStripRow2ResizeBound = () => {
+                    if (this.launcherStripPinned) this.syncLauncherStripTrayPinnedLayout();
+                };
+                window.addEventListener('resize', this._launcherStripRow2ResizeBound, { passive: true });
+                this._launcherStripRow2Observer = new ResizeObserver(() => {
+                    if (this.launcherStripPinned) this.syncLauncherStripTrayPinnedLayout();
+                });
+                if (this.launcherStripTrayElement) {
+                    this._launcherStripRow2Observer.observe(this.launcherStripTrayElement);
+                }
+                this._launcherStripRow2WrapObserver = new ResizeObserver(() => {
+                    if (this.launcherStripPinned) this.syncLauncherStripTrayPinnedLayout();
+                });
+                this._launcherStripRow2WrapObserver.observe(this.launcherWrapElement);
             }
         }
 
@@ -830,23 +946,16 @@ const ActionWarehouse = {
         const baseDeg = popupCfg?.launcherArrowBaseDeg ?? -90;
 
         if (this.isLauncherStripMode() && this.launcherWrapElement) {
-            const hovered = this.launcherWrapElement.matches(':hover');
-            const open = this.launcherStripPinned ||
-                this.launcherExpandDragState ||
-                (this.launcherExpandProgress ?? 0) > 0;
             if (this.isLauncherExpandDragMode()) {
-                const retracting = this.launcherStripPinned ||
-                    (this.launcherExpandDragState?.startProgress ?? 0) >= 1 ||
-                    (this.launcherExpandProgress ?? 0) >= 0.92;
-                if (retracting && (hovered || open)) {
-                    glyph.style.transform = `rotate(${this.getLauncherExpandRetractArrowDeg()}deg)`;
-                    return;
-                }
-                if (hovered || open) {
-                    glyph.style.transform = `rotate(${this.getLauncherExpandRailArrowDeg()}deg)`;
-                    return;
-                }
-            } else if (this.launcherStripPinned || hovered) {
+                const deg = this.launcherStripPinned
+                    ? this.getLauncherExpandOpenArrowDeg()
+                    : this.getLauncherExpandRailArrowDeg();
+                glyph.style.transform = `rotate(${deg}deg)`;
+                return;
+            }
+            const hovered = this.launcherWrapElement.matches(':hover');
+            const open = this.launcherStripPinned;
+            if (open || hovered) {
                 glyph.style.transform = `rotate(${popupCfg?.launcherArrowHoverDeg ?? -90}deg)`;
                 return;
             }
@@ -895,6 +1004,17 @@ const ActionWarehouse = {
             this.syncLauncherStripPeek();
         } else {
             this.applyLauncherExpandSize(pinned ? 1 : 0, false);
+            if (pinned) {
+                if (this.launcherStripTrayElement) {
+                    this.launcherStripTrayElement.scrollTop = 0;
+                }
+                requestAnimationFrame(() => {
+                    this.syncLauncherStripTrayPinnedLayout();
+                    requestAnimationFrame(() => this.syncLauncherStripTrayPinnedLayout());
+                });
+            } else {
+                this.syncLauncherStripTrayPinnedLayout();
+            }
         }
     },
 
@@ -961,6 +1081,7 @@ const ActionWarehouse = {
 
         const onPointerDown = (e) => {
             if (e.button !== 0) return;
+            if (this.isWordStudyLauncherGated()) return;
             if (this.launcherExpandTeaserActive) return;
             e.stopPropagation();
             if (this.dragState) return;
@@ -1029,6 +1150,38 @@ const ActionWarehouse = {
 
         this.applyLauncherExpandSize(progress, true);
         this.updateLauncherGlyphRotation(clientX, clientY);
+    },
+
+    syncLauncherStripTrayPinnedLayout() {
+        const tray = this.launcherStripTrayElement;
+        if (!tray || !this.isLauncherExpandDragMode()) return;
+
+        tray.querySelectorAll('.warehouse-launcher-strip__row-break').forEach((el) => el.remove());
+        tray.querySelectorAll('.block-slot--row-lead').forEach((el) => el.remove());
+
+        const progress = this.launcherExpandProgress ?? 0;
+        if (!this.launcherStripPinned && progress < 0.99) return;
+
+        const slots = [...tray.querySelectorAll('.block-slot:not(.is-empty)')];
+        if (slots.length < 2) return;
+
+        const firstTop = slots[0].getBoundingClientRect().top;
+        let lastRow1Index = 0;
+        for (let i = 1; i < slots.length; i++) {
+            const slotTop = slots[i].getBoundingClientRect().top;
+            if (slotTop <= firstTop + 1) {
+                lastRow1Index = i;
+            } else {
+                break;
+            }
+        }
+
+        if (lastRow1Index >= slots.length - 1) return;
+
+        const rowBreak = document.createElement('div');
+        rowBreak.className = 'warehouse-launcher-strip__row-break';
+        rowBreak.setAttribute('aria-hidden', 'true');
+        slots[lastRow1Index].after(rowBreak);
     },
 
     syncLauncherStripPeek() {
@@ -1396,20 +1549,17 @@ const ActionWarehouse = {
 
     buildSlotGhostInnerHTML(block) {
         const label = this.getBlockGhostLabel(block);
-        const safeLabel = typeof escapeTypologyHtml === 'function'
-            ? escapeTypologyHtml(label)
-            : String(label || '').replace(/</g, '&lt;');
+        const safeLabel = String(label || '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;');
         return `<span class="block-slot__glyph-ring" aria-hidden="true"></span>` +
             `<span class="block-slot__ghost-label">${safeLabel}</span>`;
     },
 
     getBlockGhostLabel(block) {
         if (block.type === 'author') return block.author || '';
-        if (block.type === 'typology') {
-            return typeof getTypologyLabel === 'function'
-                ? getTypologyLabel(block.typology)
-                : (block.typology || '');
-        }
         return block.tag || '';
     },
 
@@ -1464,30 +1614,7 @@ const ActionWarehouse = {
             return;
         }
 
-        this.clearMacroIndicationGhost();
-        this.ensurePhysicsMaps();
-        this.stretchBindingByNote.clear();
-        this.stretchGroupCounts.clear();
-        this.orbitAngleByNote.clear();
-        this.orbitRingCountByBlock.clear();
-        this.filteredNoteIndices.clear();
-        this.filterExitByNote.clear();
-        this.workspaceSlotLayout = null;
-        this.restoreAllFilterVisuals(PhysicsEngine.bodiesData);
-
-        if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
-            DepthV2.clearFringeZone();
-            if (DepthController.currentLevel >= 2) {
-                DepthV2.relayoutForFilterChange({ force: true });
-            }
-        }
-
-        this.unmountDeployedBlocksFromDepthBar();
-
-        this.blocks.forEach(block => {
-            if (block.state !== 'active' || block.nestedIn) return;
-            this.returnToDock(block);
-        });
+        this._returnAllActiveBlocksToDock();
         this.syncClearControlVisibility();
     },
 
@@ -1509,17 +1636,6 @@ const ActionWarehouse = {
             this.createBlock({ type: 'tag', tag: tagName, color: color });
         });
 
-        const retired = new Set(CONFIG.data.retiredTypologies || []);
-        const typologies = new Set();
-        AppState.items.forEach(item => {
-            if (item.typology && !retired.has(item.typology)) typologies.add(item.typology);
-        });
-        [...typologies]
-            .sort((a, b) => getTypologySortIndex(a) - getTypologySortIndex(b) || a.localeCompare(b))
-            .forEach(name => {
-            this.createBlock({ type: 'typology', typology: name });
-        });
-
         const authorCodes = new Set();
         AppState.items.forEach(item => {
             if (item.authorCode) authorCodes.add(item.authorCode);
@@ -1534,11 +1650,12 @@ const ActionWarehouse = {
         this.captureDockTrayBaseOrder();
         this.updateWarehouseCapacityUI();
         this.syncLauncherStripPeek();
+        this.syncLauncherStripTrayPinnedLayout();
     },
 
     captureDockTrayBaseOrder() {
         this._dockTrayBaseOrder = this.blocks.filter(
-            b => (b.type === 'tag' || b.type === 'author' || b.type === 'typology') && b.slotElement
+            b => (b.type === 'tag' || b.type === 'author') && b.slotElement
         );
     },
 
@@ -1558,7 +1675,7 @@ const ActionWarehouse = {
         });
     },
 
-    reorderDockTrayByRelevance(coTags, coAuthors, coTypologies = new Set()) {
+    reorderDockTrayByRelevance(coTags, coAuthors) {
         if (!this.trayBlocksElement) return;
         this.ensureDockTrayBaseOrder();
 
@@ -1586,7 +1703,7 @@ const ActionWarehouse = {
                 return;
             }
 
-            if (this.isDockBlockCoRelevant(block, coTags, coAuthors, coTypologies)) {
+            if (this.isDockBlockCoRelevant(block, coTags, coAuthors)) {
                 relevant.push(block);
             } else {
                 irrelevant.push(block);
@@ -1613,36 +1730,25 @@ const ActionWarehouse = {
 
         const el = document.createElement('div');
         const isAuthor = def.type === 'author';
-        const isTypology = def.type === 'typology';
         el.classList.add('action-block', 'general-t');
         if (isAuthor) el.classList.add('action-block--author');
-        if (isTypology) {
-            el.classList.add('action-block--typology');
-            el.dataset.typology = def.typology;
-            el.dataset.typologyPattern = typeof getTypologyPattern === 'function'
-                ? getTypologyPattern(def.typology)
-                : 'regular';
-        }
         el.dataset.type = def.type || 'tag';
         if (def.color) el.style.setProperty('--block-tag-color', def.color);
 
-        const label = isAuthor ? def.author : (isTypology ? null : def.tag);
-        const glyphHTML = (isAuthor || isTypology)
+        const label = isAuthor ? def.author : def.tag;
+        const glyphHTML = isAuthor
             ? ''
             : `<span class="block-glyph" style="background-color: ${def.color}"></span>`;
-        const typologyHTML = isTypology && typeof buildTypologyBlockInnerHTML === 'function'
-            ? buildTypologyBlockInnerHTML(def.typology)
-            : `<span class="block-label">${label}</span>`;
-        el.innerHTML = isTypology ? typologyHTML : `${glyphHTML}${typologyHTML}`;
+        const labelHTML = `<span class="block-label">${label}</span>`;
+        el.innerHTML = `${glyphHTML}${labelHTML}`;
         slot.appendChild(el);
         const trayParent = this.getBlockTrayParent(def);
         if (trayParent) trayParent.appendChild(slot);
 
         const block = {
             type: def.type || 'tag',
-            tag: (isAuthor || isTypology) ? null : def.tag,
+            tag: isAuthor ? null : def.tag,
             author: isAuthor ? def.author : null,
-            typology: isTypology ? def.typology : null,
             color: def.color || null,
             frameKind: null,
             element: el,
@@ -1797,8 +1903,7 @@ const ActionWarehouse = {
         return (frame.nestedBlocks || []).some(n =>
             n.type === block.type &&
             ((block.type === 'tag' && n.tag === block.tag) ||
-             (block.type === 'author' && n.author === block.author) ||
-             (block.type === 'typology' && n.typology === block.typology))
+             (block.type === 'author' && n.author === block.author))
         );
     },
 
@@ -3036,9 +3141,7 @@ const ActionWarehouse = {
                     const matchesTag = block.type === 'tag' && block.tag && noteTags.has(block.tag);
                     const matchesAuthor = block.type === 'author' && block.author &&
                         (item.authorCode === block.author || item.authorFullName === block.author);
-                    const matchesTypology = block.type === 'typology' && block.typology &&
-                        item.typology === block.typology;
-                    if (!matchesTag && !matchesAuthor && !matchesTypology) return;
+                    if (!matchesTag && !matchesAuthor) return;
 
                     blockNoteConnections++;
                     connectedNotes.add(noteIndex);
@@ -3197,14 +3300,13 @@ const ActionWarehouse = {
             !CatalogLayoutEngine.isLegacyMode() &&
             !isV2Depth;
 
-        const { tags: activeTags, authors: activeAuthors, typologies: activeTypologies } =
+        const { tags: activeTags, authors: activeAuthors } =
             this.getActiveFocusCriteria();
 
-        const { tags: filterTags, authors: filterAuthors, typologies: filterTypologies } =
+        const { tags: filterTags, authors: filterAuthors } =
             this.getFilterCriteria();
-        const focus = activeTags.size > 0 || activeAuthors.size > 0 || activeTypologies.size > 0;
-        const hasFilterCriteria = filterTags.size > 0 || filterAuthors.size > 0 ||
-            filterTypologies.size > 0;
+        const focus = activeTags.size > 0 || activeAuthors.size > 0;
+        const hasFilterCriteria = filterTags.size > 0 || filterAuthors.size > 0;
         const shouldPeel = hasFilterCriteria && isMacro;
 
         document.body.classList.toggle(
@@ -3227,7 +3329,7 @@ const ActionWarehouse = {
 
         wrappers.forEach((wrapper, noteIndex) => {
             if (hasFilterCriteria &&
-                this.moleculeMatchesFilter(noteIndex, filterTags, filterAuthors, filterTypologies)) {
+                this.moleculeMatchesFilter(noteIndex, filterTags, filterAuthors)) {
                 shouldFilter.add(noteIndex);
             }
         });
@@ -3284,14 +3386,11 @@ const ActionWarehouse = {
             const moleculeTags = [...dots]
                 .map(dot => dot.dataset.tag)
                 .filter(Boolean);
-            const noteTypology = this.getNoteTypology(noteIndex, wrapper);
             const isRelevant = this.noteMatchesActiveFocus(
                 moleculeTags,
                 authorCode,
                 activeTags,
-                activeAuthors,
-                noteTypology,
-                activeTypologies
+                activeAuthors
             );
 
             wrapper.classList.toggle('is-molecule-focused', isRelevant);
@@ -3303,8 +3402,7 @@ const ActionWarehouse = {
                 const tag = dot.dataset.tag || '';
                 const dotMatchesTag = tag && activeTags.has(tag);
                 const dotMatchesAuthor = authorCode && activeAuthors.has(authorCode);
-                const dotMatchesTypology = noteTypology && activeTypologies.has(noteTypology);
-                const dotMatches = dotMatchesTag || dotMatchesAuthor || dotMatchesTypology;
+                const dotMatches = dotMatchesTag || dotMatchesAuthor;
                 dot.classList.toggle('is-dot-focused', dotMatches);
                 dot.classList.toggle('is-dot-muted', !dotMatches);
             });
@@ -3322,9 +3420,11 @@ const ActionWarehouse = {
 
         if (isV2Depth && level === 3 && typeof DepthV2 !== 'undefined') {
             ActionWarehouse.syncDeployedBlocksForDepth?.();
-            DepthV2.relayoutForFilterChange({ force: true });
-            if (typeof MicroMock !== 'undefined') {
-                MicroMock.applyAll?.();
+            const app = document.getElementById('app');
+            const needsRelayout = app?.classList.contains('has-filter-fringe') ||
+                (typeof CatalogState !== 'undefined' && CatalogState.hasFocus);
+            if (needsRelayout) {
+                DepthV2.relayoutForFilterChange({ force: false });
             }
         }
 

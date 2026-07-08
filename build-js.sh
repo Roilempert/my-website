@@ -16,7 +16,10 @@ cd "$ROOT/js"
     meso-gradient-engine.js \
     meso-gradient-p5.js \
     meso-silhouette-cache.js \
+    word-normalize.js \
+    word-cluster-cache.js \
     note-censor.js \
+    note-id-sticky.js \
     meso-mock.js \
     micro-mock.js \
     render-engine.js \

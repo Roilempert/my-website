@@ -21,6 +21,7 @@ const SpatialNavigation = {
         startY: 0,
         didMove: false
     },
+    _studyTap: null,
 
     init() {
         this.navSurface = document.getElementById('nav-surface');
@@ -67,8 +68,32 @@ const SpatialNavigation = {
                 return;
             }
             if (!e.target?.closest?.('#app')) return;
-            if (e.target === this.navSurface) return;
-            if (!this.canStartPan(e)) return;
+            if (e.target === this.navSurface) {
+                if (e.button === 0 && !this.isPaused && this.isDepthCanvasLevel() &&
+                    typeof NoteCensor !== 'undefined' && NoteCensor.isActive() &&
+                    NoteCensor.isStudyTapTarget?.(e.clientX, e.clientY) &&
+                    !this.isPanBlockedTarget(e.target)) {
+                    this._studyTap = {
+                        pointerId: e.pointerId,
+                        startX: e.clientX,
+                        startY: e.clientY
+                    };
+                }
+                return;
+            }
+            if (!this.canStartPan(e)) {
+                if (e.button === 0 && !this.isPaused && this.isDepthCanvasLevel() &&
+                    typeof NoteCensor !== 'undefined' && NoteCensor.isActive() &&
+                    NoteCensor.isStudyTapTarget?.(e.clientX, e.clientY) &&
+                    !this.isPanBlockedTarget(e.target)) {
+                    this._studyTap = {
+                        pointerId: e.pointerId,
+                        startX: e.clientX,
+                        startY: e.clientY
+                    };
+                }
+                return;
+            }
             this.handlePanDown(e);
         }, { capture: true });
         document.addEventListener('pointermove', this.onPanMove);
@@ -81,6 +106,40 @@ const SpatialNavigation = {
     },
 
     handleWheel(e) {
+        const wheelCfg = CONFIG.navigation.wheel || {};
+        const pinchZoom = !!(e.ctrlKey && wheelCfg.depthZoom !== false);
+
+        if (pinchZoom && typeof DepthController !== 'undefined') {
+            if (this.isPaused || DepthController.isWheelLocked()) {
+                e.preventDefault();
+                return;
+            }
+            if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
+                e.preventDefault();
+                return;
+            }
+            if (this.isPanBlockedTarget(e.target)) return;
+            if (typeof isPointOverSiteNavigationUI === 'function' &&
+                isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+                return;
+            }
+
+            const threshold = wheelCfg.zoomThreshold ?? 12;
+            if (Math.abs(e.deltaY) < threshold) {
+                e.preventDefault();
+                return;
+            }
+
+            e.preventDefault();
+            if (e.deltaY > 0) {
+                if (typeof NoteCensor !== 'undefined' && NoteCensor.blocksLayerZoomOut?.()) return;
+                DepthController.zoomOut();
+            } else {
+                DepthController.zoomIn();
+            }
+            return;
+        }
+
         if (e.ctrlKey) return;
 
         if (this.isPaused ||
@@ -249,12 +308,17 @@ const SpatialNavigation = {
     },
 
     dispatchDepthNoteTap(clientX, clientY) {
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            if (NoteCensor.commitWordAt(clientX, clientY)) {
+                return true;
+            }
+            if (NoteCensor.tryOpenStudyNoteAt?.(clientX, clientY)) {
+                return true;
+            }
+        }
+
         const wrapper = this.hitTestDepthNote(clientX, clientY);
         if (!wrapper) return false;
-
-        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
-            if (!NoteCensor.isNoteStudyUnlocked(wrapper)) return false;
-        }
 
         if (typeof isPointOverSiteNavigationUI === 'function' &&
             isPointOverSiteNavigationUI(clientX, clientY)) {
@@ -288,7 +352,7 @@ const SpatialNavigation = {
         if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
             const overWord = NoteCensor.hitWordAt(clientX, clientY);
             if (overWord) {
-                this.navSurface.style.cursor = 'default';
+                this.navSurface.style.cursor = 'pointer';
                 return;
             }
             const wrapper = this.hitTestDepthNote(clientX, clientY);
@@ -315,6 +379,11 @@ const SpatialNavigation = {
         if (this.isPaused || e.button !== 0) return false;
         if (this.isPanBlockedTarget(e.target)) return false;
 
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
+            if (NoteCensor.isStudyTapTarget?.(e.clientX, e.clientY)) return false;
+            if (NoteCensor.hitWordAt(e.clientX, e.clientY)) return false;
+        }
+
         if (this.spaceHeld) return true;
 
         const target = e.target;
@@ -330,6 +399,20 @@ const SpatialNavigation = {
 
     handlePanDown(e) {
         if (this.pan.active) return;
+
+        if (e.button === 0 && !this.isPaused && this.isDepthCanvasLevel() &&
+            typeof NoteCensor !== 'undefined' && NoteCensor.isActive() &&
+            NoteCensor.isStudyTapTarget?.(e.clientX, e.clientY) &&
+            !this.isPanBlockedTarget(e.target)) {
+            this._studyTap = {
+                pointerId: e.pointerId,
+                startX: e.clientX,
+                startY: e.clientY
+            };
+            e.preventDefault();
+            return;
+        }
+
         if (!this.canStartPan(e)) return;
 
         e.preventDefault();
@@ -385,6 +468,16 @@ const SpatialNavigation = {
     },
 
     handlePanEnd(e) {
+        const studyTap = this._studyTap;
+        if (studyTap && e.pointerId === studyTap.pointerId) {
+            this._studyTap = null;
+            const threshold = CONFIG.depth?.clickDragThreshold ?? 6;
+            const moved = Math.hypot(e.clientX - studyTap.startX, e.clientY - studyTap.startY);
+            if (moved < threshold) {
+                this.dispatchDepthNoteTap(studyTap.startX, studyTap.startY);
+            }
+        }
+
         if (!this.pan.active || e.pointerId !== this.pan.pointerId) return;
 
         const wasTap = !this.pan.didMove;

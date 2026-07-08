@@ -126,7 +126,7 @@ const DepthFocusLinks = {
 
         return ActionWarehouse.blocks.filter(block => {
             if (block.state !== 'active') return false;
-            if (block.type !== 'tag' && block.type !== 'author' && block.type !== 'typology') return false;
+            if (block.type !== 'tag' && block.type !== 'author') return false;
             if (block.nestedIn?.frameKind === 'filter') return false;
             if (!ActionWarehouse.isBlockFocusEligible(block)) return false;
 
@@ -165,12 +165,6 @@ const DepthFocusLinks = {
         const authorCode = wrapper.dataset.authorCode || '';
         if (block.type === 'author') {
             return !!block.author && authorCode === block.author;
-        }
-
-        if (block.type === 'typology' && block.typology) {
-            const noteTypology = wrapper.dataset.typology ||
-                ActionWarehouse.getNoteTypology(noteIndex, wrapper);
-            return noteTypology === block.typology;
         }
 
         if (block.type === 'tag' && block.tag) {

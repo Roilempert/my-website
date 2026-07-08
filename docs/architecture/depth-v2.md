@@ -97,15 +97,34 @@ CONFIG.depth.v2.meso.mockColorEnrich
 
 Grid preparation clears texture bake cache.
 
-## L1 → L2 filtering (implemented)
+## Layer isolation (L1 ↔ L2)
 
-**Modes:**
+**Rule:** Filters, block deployment, and word-study selection on one layer **do not carry** to the other. Every L1↔L2 switch resets to default:
 
-- **Focus** (block on surface): `is-block-focus` / `is-catalog-lens` — muted/focused at L1/L2
+- All active blocks return to the warehouse dock (L1 surface + L2 depth bar)
+- Filter/focus lens cleared (`filteredNoteIndices`, focus/mute classes, workspace grid)
+- Censored L2 word commits, study unlocks, and word panel chips cleared when leaving L2
+- `CatalogState` lens snapshot cleared; grid relayouts without exclusions
+
+**Entry point:** `DepthController.changeLevel()` → `ActionWarehouse.clearStudyStateForLayerLeave(prevLevel)` before the level swap.
+
+**Modules:**
+
+```
+js/warehouse-core.js   — clearStudyStateForLayerLeave, _returnAllActiveBlocksToDock
+js/note-censor.js      — resetForLayerLeave (word study)
+js/catalog-state.js    — resetForLayerSwitch
+```
+
+## L1 → L2 filtering (per-layer, reset on switch)
+
+**Modes** *(active only while staying on the same layer)*:
+
+- **Focus** (block on surface / depth bar): `is-block-focus` / `is-catalog-lens` — muted/focused
 - **Filter** (filter frame): `filteredNoteIndices` + `is-molecule-filtered-out`
   - L1: peel animation + physics suspend
-  - L2: `#filter-fringe-zone` at canvas edges; central grid for visible only
-- **Spatial snapshot:** `MesoSpatialLayout.captureAndStoreSnapshot()` on L1→L2 transition; column sort by `macroRank`
+  - L2: central grid for visible only (`.is-layout-excluded` for filtered notes)
+- **Spatial rank:** `CatalogState.macroRank` — cleared on layer switch
 
 **Modules:**
 
@@ -126,11 +145,10 @@ CONFIG.depth.v2.fringe.cellScale
 
 **Verification:**
 
-1. L1: peel + filter frame
-2. L2: fringe at edges, grid without holes
-3. Remove filter block at L2 → return to grid
-4. RESET → clear fringe
-5. L1↔L2: consistent state
+1. L1: deploy block + filter → switch to L2 → clean grid, no blocks, no word panel
+2. L2: commit words + deploy filter block → switch to L1 → full macro field, blocks in dock
+3. Return to either layer → previous layer state is **not** restored
+4. `נקה לוח` still clears within the current layer only
 
 **legacy (not V2):** `CatalogLayoutEngine` uses `visibleNoteIndices` + `macroRank` when present.
 

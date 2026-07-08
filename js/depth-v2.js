@@ -215,10 +215,9 @@ const DepthV2 = {
             const titleLines = Math.max(0, Math.ceil(titleChars / 24));
             const bodyLines = Math.max(1, Math.ceil(bodyChars / 38));
             const tagBonus = (item.tags?.length || 0) * 90;
-            const typologyBonus = item.typology ? 60 : 0;
             const lineWeight = titleLines * 150 + bodyLines * 95;
             const minBlock = level === 3 ? 720 : 480;
-            return Math.max(minBlock, lineWeight + tagBonus + typologyBonus);
+            return Math.max(minBlock, lineWeight + tagBonus);
         }
 
         return level === 3 ? 720 : 480;
@@ -633,6 +632,7 @@ const DepthV2 = {
     layoutMicroGrid(options = {}) {
         if (DepthController.currentLevel !== 3) return;
 
+
         const app = document.getElementById('app');
         const grid = this.getGrid(3);
         if (!app || !grid) return;
@@ -703,6 +703,7 @@ const DepthV2 = {
         if (typeof updateSiteGridCrosses === 'function') {
             updateSiteGridCrosses({ force: true });
         }
+
     },
 
     relayoutForFilterChange(options = {}) {
@@ -710,7 +711,7 @@ const DepthV2 = {
         const level = DepthController.currentLevel;
         if (level === 3) {
             this.layoutMicroGrid(options);
-            if (typeof MicroMock !== 'undefined') MicroMock.applyAll();
+            if (typeof MicroMock !== 'undefined') MicroMock.applyAll({ force: options.force === true });
             if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
                 AppState.centerMicroFocusCluster({ smooth: options.smooth !== false });
             }
@@ -993,32 +994,46 @@ const DepthV2 = {
         return this._mesoLayoutReadyPromise;
     },
 
-    prepareMicroGrid() {
+    prepareMicroGrid(options = {}) {
         if (DepthController.currentLevel !== 3) return;
+
+        const force = options.force === true;
+        const app = document.getElementById('app');
+        const hasLayout = app?.classList.contains('is-micro-grid-layout');
+        const hasCards = !!app?.querySelector('.micro-mock__note');
+        if (!force && hasLayout && hasCards) {
+            return;
+        }
+
 
         this.layoutMicroGrid({ force: true });
 
-        if (typeof AppState !== 'undefined') {
-            AppState.syncNoteDomFromItems();
+        const cardsReady = typeof MicroMock !== 'undefined' && MicroMock.isPrewarmComplete();
+        const applyForce = force || !cardsReady;
+
+        if (typeof MicroMock !== 'undefined') {
+            MicroMock.applyAll({ force: applyForce });
         }
 
-        const applyMocks = () => {
-            if (typeof MicroMock !== 'undefined') {
-                MicroMock.applyAll();
-            }
-            void document.getElementById('app')?.offsetHeight;
-            if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
-                AppState.centerMicroFocusCluster({ smooth: true });
-            } else if (typeof AppState !== 'undefined') {
-                AppState.scheduleViewportCenter({ passes: 4 });
-            }
-        };
+
+        void app?.offsetHeight;
+        if (typeof CatalogState !== 'undefined' && CatalogState.hasFocus && typeof AppState !== 'undefined') {
+            AppState.centerMicroFocusCluster({ smooth: true });
+        } else if (typeof AppState !== 'undefined') {
+            AppState.scheduleViewportCenter({ passes: 4 });
+        }
 
         const fontReady = document.fonts?.ready;
         if (fontReady?.then) {
-            fontReady.then(() => requestAnimationFrame(applyMocks)).catch(() => applyMocks());
-        } else {
-            requestAnimationFrame(applyMocks);
+            fontReady.then(() => {
+                if (DepthController.currentLevel !== 3) return;
+                requestAnimationFrame(() => {
+                    void document.getElementById('app')?.offsetHeight;
+                    if (typeof AppState !== 'undefined') {
+                        AppState.scheduleViewportCenter({ passes: 2 });
+                    }
+                });
+            }).catch(() => {});
         }
     },
 
@@ -1054,7 +1069,8 @@ const DepthV2 = {
         if (level === 3) {
             this._lastMesoPreparedLevel = 3;
             if (typeof MesoMock !== 'undefined') MesoMock.unbindShaderLiveHover();
-            this.prepareMicroGrid();
+            const cardsReady = typeof MicroMock !== 'undefined' && MicroMock.isPrewarmComplete();
+            this.prepareMicroGrid({ force: !cardsReady });
             return;
         }
 
@@ -1069,6 +1085,8 @@ const DepthV2 = {
         if (level !== 3) return;
         this.ensureShell();
         this.applyGridTokens(3);
-        this.prepareMicroGrid();
+        if (!document.getElementById('app')?.querySelector('.micro-mock__note')) {
+            this.prepareMicroGrid({ force: true });
+        }
     }
 };

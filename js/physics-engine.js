@@ -1832,7 +1832,7 @@ const PhysicsEngine = {
     getMoleculeHoverFont() {
         const root = getComputedStyle(document.documentElement);
         const weight = root.getPropertyValue('--type-display-weight').trim() || '400';
-        const size = root.getPropertyValue('--type-display-size').trim() || '2rem';
+        const size = root.getPropertyValue('--type-display-size').trim() || '1.6667rem';
         const family = root.getPropertyValue('--type-family-note-h').trim() || 'TheBasics-Dots, sans-serif';
         return `normal ${weight} ${size} ${family}`;
     },
@@ -1866,7 +1866,6 @@ const PhysicsEngine = {
         if (!item) return false;
         if (Array.isArray(item.tags) && item.tags.length > 0) return true;
         if (String(item.authorCode || item.authorFullName || '').trim()) return true;
-        if (String(item.typology || '').trim()) return true;
         return false;
     },
 
@@ -1876,7 +1875,6 @@ const PhysicsEngine = {
         if (Array.isArray(item.tags) && item.tags.length > 0) {
             count += item.tags.length;
         }
-        if (String(item.typology || '').trim()) count += 1;
         if (String(item.authorCode || item.authorFullName || '').trim()) count += 1;
         return count;
     },
@@ -1906,12 +1904,74 @@ const PhysicsEngine = {
         if (!label) return;
         label.textContent = '';
         label.replaceChildren();
-        label.classList.remove('is-title-chip', 'is-blocks-row', 'note-title', 'note-body');
+        label.classList.remove('is-title-chip', 'is-blocks-row', 'note-title', 'note-body', 'is-row-gap-y');
     },
 
-    positionMoleculeHoverLabel(label, bounds, isLtr) {
+    _macroRowStridePx: 0,
+
+    getMacroRowStridePx() {
+        if (this._macroRowStridePx > 0) return this._macroRowStridePx;
+        const app = document.getElementById('app');
+        if (!app) return 0;
+        const probe = document.createElement('div');
+        probe.style.cssText = 'position:absolute;visibility:hidden;pointer-events:none;height:var(--site-macro-row-stride);';
+        app.appendChild(probe);
+        const h = probe.getBoundingClientRect().height;
+        probe.remove();
+        if (h > 0) this._macroRowStridePx = h;
+        return h;
+    },
+
+    parseMacroGridRowStart(wrapper) {
+        const raw = wrapper?.style?.gridRow;
+        if (!raw) return -1;
+        const match = String(raw).match(/^(\d+)/);
+        return match ? parseInt(match[1], 10) : -1;
+    },
+
+    resolveMacroRowGapCenterY(noteIndex) {
+        const wrappers = [...document.querySelectorAll('#app .note-wrapper')];
+        const wrapper = wrappers[noteIndex];
+        if (!wrapper) return null;
+
+        const rect = wrapper.getBoundingClientRect();
+        if (rect.height < 1) return null;
+
+        const rowStep = CONFIG.siteGrid?.macroGridRowStep ?? CONFIG.siteGrid?.macroGridStep ?? 2;
+        const startRow = this.parseMacroGridRowStart(wrapper);
+
+        if (startRow > 1) {
+            const prevWrapper = wrappers.find((w) => this.parseMacroGridRowStart(w) === startRow - rowStep);
+            if (prevWrapper) {
+                const prevRect = prevWrapper.getBoundingClientRect();
+                if (prevRect.height > 0) {
+                    return (prevRect.bottom + rect.top) * 0.5;
+                }
+            }
+        }
+
+        const stride = this.getMacroRowStridePx();
+        if (stride <= 0) return null;
+        const slotHeight = rowStep * stride;
+        const margin = (slotHeight - rect.height) * 0.5;
+        if (margin <= 0) return null;
+        return rect.top - margin * 0.5;
+    },
+
+    shouldAlignHoverToMacroRowGap() {
+        if (DepthController.currentLevel !== 1) return false;
+        if (!document.body.classList.contains('site-grid')) return false;
+        const warehouse = typeof ActionWarehouse !== 'undefined' ? ActionWarehouse : null;
+        if (!warehouse || typeof warehouse.getCrowdedBlockCount !== 'function') return true;
+        return warehouse.getCrowdedBlockCount() === 0;
+    },
+
+    positionMoleculeHoverLabel(label, bounds, isLtr, noteIndex = -1) {
         if (!label || !bounds) return;
-        label.style.top = `${bounds.minY}px`;
+        const useRowGapY = noteIndex >= 0 && this.shouldAlignHoverToMacroRowGap();
+        const gapCenterY = useRowGapY ? this.resolveMacroRowGapCenterY(noteIndex) : null;
+        label.classList.toggle('is-row-gap-y', useRowGapY && gapCenterY != null);
+        label.style.top = `${gapCenterY ?? bounds.minY}px`;
         label.style.left = `${isLtr ? bounds.minX : bounds.maxX}px`;
     },
 
@@ -2034,7 +2094,7 @@ const PhysicsEngine = {
 
         label.classList.toggle('is-note-ltr', isLtr);
         label.classList.toggle('is-note-rtl', !isLtr);
-        this.positionMoleculeHoverLabel(label, bounds, isLtr);
+        this.positionMoleculeHoverLabel(label, bounds, isLtr, noteIndex);
         label.classList.add('is-visible');
         this.moleculeHoverPinnedIndex = noteIndex;
     }

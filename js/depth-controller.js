@@ -120,6 +120,7 @@ const DepthController = {
     },
 
     zoomOut() {
+        if (typeof NoteCensor !== 'undefined' && NoteCensor.blocksLayerZoomOut?.()) return false;
         const next = getDepthAdjacentLevel(this.currentLevel, -1);
         if (next === this.currentLevel || this.isWheelLocked()) return false;
         if (typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
@@ -137,6 +138,9 @@ const DepthController = {
         if (!isDepthLevelActive(newLevel)) return false;
 
         const prevLevel = this.currentLevel;
+        if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.clearStudyStateForLayerLeave) {
+            ActionWarehouse.clearStudyStateForLayerLeave(prevLevel);
+        }
         const isMacroMesoTransition =
             (prevLevel === 1 && newLevel === 2) || (prevLevel === 2 && newLevel === 1);
 

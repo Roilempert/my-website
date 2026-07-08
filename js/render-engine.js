@@ -55,7 +55,6 @@ const RenderEngine = {
         wrapper.dataset.noteId = item.id;
         if (noteIndex >= 0) wrapper.dataset.noteIndex = String(noteIndex);
         if (item.authorCode) wrapper.dataset.authorCode = item.authorCode;
-        if (item.typology) wrapper.dataset.typology = item.typology;
 
         const hoverDeg = this.getStableMicroHoverRotationDeg(item, noteIndex >= 0 ? noteIndex : 0);
         wrapper.style.setProperty('--note-micro-hover-rotation', `${hoverDeg}deg`);
@@ -112,6 +111,8 @@ const RenderEngine = {
 
         wrapper.addEventListener('click', (e) => {
             if (e.target.closest('.layer-dot')) return;
+            if (e.target.closest('.note-redact__word')) return;
+            if (typeof NoteCensor !== 'undefined' && NoteCensor.shouldSuppressNoteOpen?.()) return;
             if (typeof isPointOverSiteNavigationUI === 'function' &&
                 isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
                 return;
@@ -130,6 +131,13 @@ const RenderEngine = {
 
                 if (typeof DepthV2 !== 'undefined' && DepthV2.isActive()) {
                     DepthController.changeLevel(3);
+                    if (!(typeof NoteCensor !== 'undefined' && NoteCensor.blocksNoteFocus())) {
+                        requestAnimationFrame(() => {
+                            if (DepthController.currentLevel === 3) {
+                                ArtifactInspector.open(wrapper);
+                            }
+                        });
+                    }
                     return;
                 }
 
@@ -137,10 +145,6 @@ const RenderEngine = {
                     DepthTransitionOrchestrator.runNoteClick(noteIndex, wrapper);
                 }
                 return;
-            }
-
-            if (typeof NoteCensor !== 'undefined' && NoteCensor.isActive()) {
-                if (!NoteCensor.isNoteStudyUnlocked(wrapper)) return;
             }
 
             if (ArtifactInspector.isActive) {

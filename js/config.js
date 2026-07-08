@@ -9,10 +9,10 @@ const scale = (px) => Math.round(px * VISUAL_SCALE);
 const TYPE_SCALE = {
     generalH: { sizePt: 71.33, linePt: 69.33, weight: 700 },
     generalT: { sizeRem: 1, line: 1, weight: 700 },
-    noteH:    { sizePt: 24, line: 0.9, weight: 400, style: 'normal' },
+    noteH:    { sizePt: 20, line: 0.9, weight: 400, style: 'normal' },
     noteT:    { sizePt: 18, line: 1.2, weight: 400 },
     /* Legacy aliases for gradual migration */
-    display: { sizeRem: 2, sizePx: 32, line: 0.9, weight: 400, style: 'normal' },
+    display: { sizeRem: 1.6667, sizePx: 26.67, line: 0.9, weight: 400, style: 'normal' },
     body:    { sizeRem: 1.125, sizePx: 18, line: 1.2, weight: 400, maxCh: 55 },
     meta:    { sizeRem: 1, sizePx: 16, line: 1, weight: 700 },
     ui:      { sizeRem: 1, line: 1, weight: 700 },
@@ -49,7 +49,7 @@ const CONFIG = {
             filterFringe: { colStart: 23, colEnd: 25, rowStart: 1, rowEnd: 11 },
             navigationLayers: { colStart: 23, colEnd: 25, rowStart: 1, rowEnd: 7  },
             navigationMaps:   { colStart: 21, colEnd: 25, rowStart: 11, rowEnd: 13 }, // alias: warehouseMap
-            about:            { colStart: 7, colEnd: 19, rowStart: 1, rowEnd: 3 }
+            about:            { colStart: 1, colEnd: 13, rowStart: 11, rowEnd: 13 }
             // reset button: centered above warehouse shell — not a grid region
         },
         regionsByLevel: {
@@ -89,30 +89,50 @@ const CONFIG = {
             direction: 10
         },
         fallbackTagColor: '#898989',
-        typologyPatterns: {
-            Block: 'regular',
-            List: 'dashed',
-            Fragment: 'dotted',
-            Stanza: 'wavy'
-        },
         typologyLabels: {
             Block: 'בלוק',
             List: 'רשימה',
             Fragment: 'מקטע',
             Stanza: 'מחרוזת'
-        },
-        typologyOrder: ['Block', 'List', 'Fragment', 'Stanza'],
-        retiredTypologies: ['Quote', 'quote']
+        }
     },
 
     /* --- About panel (bottom pull-up sheet) --- */
     about: {
         label: 'על הפרויקט',
-        bodyHtml: '',
+        bodyHtml: [
+            '<p>רשימת קניות, הודעת פרידה, מתכון לספינג׳. הרבה מילים נכתבות בפתקים בטלפון. כל פתק כזה הוא שבריר של מחשבה, המשאיר אחריו עקבות למי שאנחנו. עקבות אלו מספקים הזדמנות להיכנס למחשבה ולנפש של אדם אחר, ומעניקים לגיטימציה ליצר הסקרנות והחטטנות הבסיסי – הדחף לנבור בסודות ובטיוטות של זרים. הפרויקט הוא ארכיון האוסף פתקים מטלפונים של אנשים שונים, ומציע דרך אלטרנטיבית לחקור אותם. באמצעות ניתוק המחשבות החשופות מהקשרן המקורי, הפרויקט הופך אותן למאגר נתונים המאפשר שיטוט ולמידה מחודשת על טבע האדם.</p>'
+        ].join(''),
+        intro: 'פרויקט גמר במחלקה לתקשורת חזותית,<br>בצלאל אקדמיה לאמנות ועיצוב, ירושלים',
+        credits: [
+            { category: 'בהנחיית', output: 'אורי סוכרי ואלי מגזינר' },
+            { category: 'תודה מיוחדת', output: 'ניר שקד, מאיר סדן וענת קציר' },
+            {
+                category: 'פונטים בשימוש',
+                output: [
+                    'TheBasics, פרנקריהל Universal — הגילדה',
+                    'נרקיס יאיר — פונטף'
+                ]
+            },
+            { category: 'יעוץ ומחקר', output: 'איתי שרף ואלון צוקרמן' },
+            { category: 'עיצוב מחקר ופיתוח', output: 'רועי למפרט' }
+        ],
+        mainTitle: 'הדברים',
+        titleMaxPx: 400,
+        titleMinPx: 24,
+        titleReducePt: 12,
+        titleLetterSpacingBoost: 1.581,
         logoSrc: 'assets/ui/Bezalel_academy_of_arts_and_design_new_logo.svg',
+        arrowSrc: 'assets/ui/arrow.svg',
         panelCols: 12,
-        openHeightVh: 65,
-        openMaxPx: 640,
+        panelColStart: 1,
+        tabColStart: 2,
+        logoCols: 1,
+        textCols: 5.5,
+        detailsCols: 5,
+        openToVh: 50,
+        panelHeightVh: 38,
+        openMaxPx: 960,
         snapThreshold: 0.35
     },
 
@@ -127,15 +147,27 @@ const CONFIG = {
     /* --- Visual theme --- */
     theme: {
         mode: 'censored',           // 'default' | 'censored' — L3 only: redaction bars, word panel
-        dwellMs: 700,               // hover this long to commit word + add to panel
-        wordPanelMessage: 'החזיקו על מילה לגילוי',
+        dwellMs: 700,               // legacy — word commit is click-only on L2 censored
+        wordPanelMessage: 'לחצו על מילה לגילוי',
         wordLinks: {
             duration: 1650,
             stagger: 175,
             revertDuration: 920,
-            strokeWidthStart: 0.9,
-            strokeWidthEnd: 2.5,
-            opacityMax: 0.82
+            strokeWidthStart: 0.2 * (96 / 72),
+            strokeWidthEnd: 0.2 * (96 / 72),
+            opacityMax: 0.48,
+            soloProbeLength: 96,
+            soloProbeDuration: 720,
+            soloProbeHoldMs: 160,
+            soloProbeFadeMs: 480,
+            soloLoopRise: 58,
+            soloProbeRevertDuration: 640
+        },
+        wordClusterCache: {
+            enabled: true,
+            url: 'assets/cache/word-clusters.json',
+            fetchCache: 'default',
+            version: 1
         }
     },
 
@@ -271,8 +303,8 @@ const CONFIG = {
             'assets/fonts/FrankRuhl_Universal-Mono.woff2'
         ],
         labels: {
-            title: 'עקבות',
-            subtitle: 'מבט אל תוך מילים שנכתבו בטלפון — הזמנה להתעניין, לשוטט, לחקור.',
+            title: 'הדברים',
+            subtitle: 'רשימת קניות, הודעת פרידה, מתכון לספינג׳. המילים שנכתבות בטלפון.',
             continue: 'כניסה'
         }
     },
@@ -582,7 +614,9 @@ const CONFIG = {
             minDrag: 2                // px before pan engages (ignores micro-jitter)
         },
         wheel: {
-            speed: 1                  // multiplier on trackpad / mouse wheel delta
+            speed: 1,                  // multiplier on trackpad / mouse wheel delta
+            depthZoom: true,           // ctrl+wheel / pinch zoom L1↔L2
+            zoomThreshold: 12          // min |deltaY| before level change
         },
         spacePanKey: 'Space',
         toroidalWrap: {
@@ -877,16 +911,19 @@ const CONFIG = {
             launcherArrowSrc: 'assets/ui/arrow.svg',
             launcherArrowBaseDeg: -90,
             launcherArrowHoverDeg: -135,
-            launcherSize: { width: 80, height: 40 },
+            launcherSize: { width: 86, height: 46 },
+            launcherPad: 5,
             stayOpenWhileDragging: true,
             closeOnOutsideClick: true,
             closeOnEscape: true,
             launcherStrip: {
                 enabled: true,
                 expandDrag: true,
-                expandCols: 9,
-                expandRows: 3,
-                mapCols: 4,
+                expandCols: 12,
+                expandRows: 4,
+                mapCols: 3,
+                blockCols: 9,
+                mapRows: 2,
                 showMap: true,
                 tagOnly: true,
                 snapThreshold: 0.82,
@@ -1027,50 +1064,12 @@ const CONFIG = {
     }
 };
 
-function getTypologyPattern(name) {
-    const patterns = CONFIG.data.typologyPatterns || {};
-    const fallback = {
-        block: 'regular',
-        list: 'dashed',
-        fragment: 'dotted',
-        stanza: 'wavy'
-    };
-    if (!name) return 'regular';
-    if (patterns[name]) return patterns[name];
-    const key = Object.keys(patterns).find(k => k.toLowerCase() === String(name).toLowerCase());
-    if (key) return patterns[key];
-    return fallback[String(name).toLowerCase()] || 'regular';
-}
-
 function getTypologyLabel(name) {
     const labels = CONFIG.data.typologyLabels || {};
     if (!name) return '';
     if (labels[name]) return labels[name];
     const key = Object.keys(labels).find(k => k.toLowerCase() === String(name).toLowerCase());
     return key ? labels[key] : String(name);
-}
-
-function escapeTypologyHtml(text) {
-    return String(text || '')
-        .replace(/&/g, '&amp;')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;');
-}
-
-function buildTypologyBlockInnerHTML(typology) {
-    const heLabel = getTypologyLabel(typology);
-    const pattern = getTypologyPattern(typology);
-    return `<span class="block-typology-stack">` +
-        `<span class="block-label block-label--typology">${escapeTypologyHtml(heLabel)}</span>` +
-        `<span class="block-typology-mark" data-typology-pattern="${pattern}" aria-hidden="true"></span>` +
-        `</span>`;
-}
-
-function getTypologySortIndex(name) {
-    const order = CONFIG.data.typologyOrder || [];
-    const idx = order.findIndex(k => k.toLowerCase() === String(name).toLowerCase());
-    return idx >= 0 ? idx : 999;
 }
 
 function getDepthUnitScales() {
@@ -1247,12 +1246,19 @@ function isWarehouseLauncherMapEnabled() {
 function applyWarehouseLauncherStripTokens(root = document.documentElement) {
     const stripCfg = CONFIG.warehouse?.popup?.launcherStrip;
     if (!isWarehouseLauncherStripMode() || !stripCfg) return;
-    const mapCols = Math.max(1, stripCfg.mapCols ?? 4);
-    const expandCols = Math.max(1, stripCfg.expandCols ?? 9);
-    const expandRows = Math.max(1, stripCfg.expandRows ?? 3);
+    const mapCols = Math.max(1, stripCfg.mapCols ?? 3);
+    const expandCols = Math.max(1, stripCfg.expandCols ?? 12);
+    const expandRows = Math.max(1, stripCfg.expandRows ?? 4);
+    const blockCols = Math.max(1, stripCfg.blockCols ?? Math.max(1, expandCols - mapCols));
+    const mapRows = Math.max(1, stripCfg.mapRows ?? 2);
     root.style.setProperty('--warehouse-launcher-expand-width', siteGridSpanWidth(expandCols));
     root.style.setProperty('--warehouse-launcher-expand-height', siteGridSpanHeight(expandRows));
     root.style.setProperty('--warehouse-launcher-map-width', siteGridSpanWidth(mapCols));
+    root.style.setProperty('--warehouse-launcher-blocks-width', siteGridSpanWidth(blockCols));
+    root.style.setProperty('--warehouse-launcher-map-height', siteGridSpanHeight(mapRows));
+    root.style.setProperty('--warehouse-launcher-handle-band', siteGridSpanHeight(1));
+    root.style.setProperty('--warehouse-launcher-blocks-pad-end', 'var(--space-20)');
+    root.style.setProperty('--warehouse-launcher-blocks-shift-left', 'var(--space-10)');
     if (isWarehouseLauncherExpandDragMode()) return;
     const peekCols = Math.max(1, stripCfg.expandCols ?? 6);
     const pinCols = Math.max(1, stripCfg.pinCols ?? 8);
@@ -1270,10 +1276,12 @@ function applyWarehouseLauncherTokens(root = document.documentElement) {
     const size = CONFIG.warehouse?.popup?.launcherSize || { width: 80, height: 40 };
     const width = Math.max(1, size.width ?? 80);
     const height = Math.max(1, size.height ?? 40);
+    const pad = Math.max(0, CONFIG.warehouse?.popup?.launcherPad ?? 5);
     root.style.setProperty('--warehouse-launcher-width', `${width}px`);
     root.style.setProperty('--warehouse-launcher-height', `${height}px`);
     root.style.setProperty('--warehouse-launcher-size', `${height}px`);
     root.style.setProperty('--warehouse-launcher-radius', `${height / 2}px`);
+    root.style.setProperty('--warehouse-launcher-pad', `${pad}px`);
 }
 
 /** L1 viewport chrome below the canvas region — aligned to warehouse shell top. */
@@ -1493,6 +1501,10 @@ function applySiteGridContentScale(root = document.documentElement) {
     root.style.setProperty('--site-micro-col-width', siteGridContentColumnWidth(3));
     const microMinRows = g.microNoteMinRows ?? 6;
     root.style.setProperty('--site-micro-note-min-height', siteGridSpanHeight(microMinRows));
+    root.style.setProperty(
+        '--note-id-sticky-inset',
+        'calc((var(--site-micro-note-min-height) - 1.2em) / 2)'
+    );
     root.style.setProperty(
         '--site-macro-canvas-width',
         `calc(2 * var(--site-grid-padding) + ${macroCols} * var(--site-grid-cell-w) + ${Math.max(0, macroCols - 1)} * var(--site-grid-gap))`

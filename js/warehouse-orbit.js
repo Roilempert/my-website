@@ -849,7 +849,7 @@ Object.assign(ActionWarehouse, {
 
     // First dot in bodiesData order matching the block tag — never body.position
     pickStableAnchorDot(block, bodiesData, noteIndex) {
-        if (block.type === 'author' || block.type === 'typology') {
+        if (block.type === 'author') {
             return bodiesData.find(d => d.noteIndex === noteIndex) || null;
         }
         return bodiesData.find(d => d.noteIndex === noteIndex && d.tag === block.tag) || null;
@@ -1444,7 +1444,7 @@ Object.assign(ActionWarehouse, {
             bodiesData.forEach(d => {
                 if (this.isNotePhysicsSuspended(d.noteIndex)) return;
                 if (!this.dotMatchesBlock(block, d)) return;
-                if (block.type === 'author' || block.type === 'typology') {
+                if (block.type === 'author') {
                     const firstOfNote = bodiesData.find(bd => bd.noteIndex === d.noteIndex);
                     if (d !== firstOfNote) return;
                 }
@@ -1492,13 +1492,11 @@ Object.assign(ActionWarehouse, {
 
             const ringDots = block.type === 'author'
                 ? this.getAuthorRingDots(block, bodiesData)
-                : block.type === 'typology'
-                    ? this.getTypologyRingDots(block, bodiesData)
-                    : bodiesData.filter(d =>
-                        d.tag === block.tag &&
-                        !this.stretchedNotes.has(d.noteIndex) &&
-                        !this.isNotePhysicsSuspended(d.noteIndex)
-                    );
+                : bodiesData.filter(d =>
+                    d.tag === block.tag &&
+                    !this.stretchedNotes.has(d.noteIndex) &&
+                    !this.isNotePhysicsSuspended(d.noteIndex)
+                );
             const ringCount = ringDots.length;
             if (ringCount === 0) return;
 

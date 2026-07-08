@@ -2,20 +2,23 @@
    Note censor — L3 redacted theme (same grid/cards as original, bars not text)
    ========================================================================== */
 const NoteCensor = {
-    _boundRevealMove: null,
     _wordIndex: null,
     _linkSvg: null,
     _linkAnimToken: 0,
     _activeSourceWord: null,
     _activeKey: null,
     _activeRoutes: [],
-    _dwellTimer: null,
-    _dwellWord: null,
+    _boundWordClick: null,
     _committedKeys: null,
     _persistedRoutes: null,
     _persistedSources: null,
     _retractingRoutes: null,
     _wordNoteIndex: null,
+    _soloHoverWord: null,
+    _soloHoverRoutes: null,
+    _soloProbeTimer: null,
+    _boundWordHoverOver: null,
+    _boundWordHoverOut: null,
 
     _initPersistState() {
         if (!this._committedKeys) {
@@ -25,69 +28,95 @@ const NoteCensor = {
         }
     },
 
-    _dwellMs() {
-        return this.cfg().dwellMs ?? 1000;
-    },
-
     _isCommitted(key) {
         this._initPersistState();
         return !!key && this._committedKeys.has(key);
     },
 
-    _cancelDwell() {
-        if (this._dwellTimer) {
-            clearTimeout(this._dwellTimer);
-            this._dwellTimer = null;
+    hasCommittedWord() {
+        this._initPersistState();
+        return this._committedKeys.size > 0;
+    },
+
+    /** Public entry for spatial tap / pointer commit paths. */
+    commitWordElement(sourceWord) {
+        this._commitWord(sourceWord);
+    },
+
+    commitWordAt(clientX, clientY) {
+        const word = this.hitWordAt(clientX, clientY);
+        if (!word) return false;
+        this._commitWord(word);
+        return true;
+    },
+
+    _commitWord(sourceWord) {
+        if (!sourceWord?.isConnected || !this.isActive()) return;
+
+        const key = this._wordKey(sourceWord);
+        if (!key || this._isCommitted(key)) return;
+
+
+        this._releaseActiveHover(true);
+        this._activeSourceWord = sourceWord;
+        this._activeKey = key;
+        this._uncoverMatches(key);
+
+        this._cancelLinkAnimations();
+        this._clearActiveRouteGroups();
+
+        const matches = this._wordsForKey(key);
+        this._releaseSoloHover(true);
+
+        if (matches.length > 1) {
+            this._buildActiveRoutes(sourceWord, matches);
+        } else {
+            this._playSoloProbe(sourceWord, { persist: true });
         }
-        this._dwellWord = null;
-    },
-
-    _startDwell(word) {
-        this._cancelDwell();
-        if (!word || this._isCommitted(this._wordKey(word))) return;
-        this._dwellWord = word;
-        this._dwellTimer = setTimeout(() => {
-            this._dwellTimer = null;
-            this._commitActiveHover();
-        }, this._dwellMs());
-    },
-
-    _commitActiveHover() {
-        if (!this._activeSourceWord || this._dwellWord !== this._activeSourceWord) return;
 
         this._initPersistState();
-        const key = this._activeKey;
-        const sourceWord = this._activeSourceWord;
-        if (!key || !sourceWord) return;
-
         this._committedKeys.add(key);
         this._persistedSources.set(key, sourceWord);
 
-        const cfg = this._linkCfg();
-        this._linkAnimToken += 1;
-        const token = this._linkAnimToken;
+        if (matches.length > 1) {
+            const cfg = this._linkCfg();
+            this._linkAnimToken += 1;
+            const token = this._linkAnimToken;
 
-        const routes = this._activeRoutes.slice();
-        this._activeRoutes = [];
+            const routes = this._activeRoutes.slice();
+            this._activeRoutes = [];
 
-        routes.forEach((route) => {
-            route.key = key;
-            route.sourceWord = sourceWord;
-            route.isPersisted = true;
-            this._persistedRoutes.push(route);
-            this._completeRouteStretch(route.trail, token, cfg);
-        });
+            routes.forEach((route) => {
+                route.key = key;
+                route.sourceWord = sourceWord;
+                route.isPersisted = true;
+                this._persistedRoutes.push(route);
+                this._completeRouteStretch(route.trail, token, cfg);
+            });
+        }
 
-        this._cancelDwell();
         this._activeSourceWord = null;
         this._activeKey = null;
         this._wordsForKey(key).forEach((word) => word.classList.add('is-word-committed'));
+
+        this._scheduleClearOpenSuppress();
 
         if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.syncClearControlVisibility) {
             ActionWarehouse.syncClearControlVisibility();
         }
 
         this.refreshStudyUnlocks();
+        this._syncLayerZoomOutGate();
+    },
+
+    _syncLayerZoomOutGate() {
+        if (typeof NavigationMap !== 'undefined') {
+            const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
+            NavigationMap.syncActiveState(level);
+        }
+        if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.syncLauncherStudyGate) {
+            ActionWarehouse.syncLauncherStudyGate();
+        }
     },
 
     _removeRouteGroups(routes) {
@@ -113,6 +142,8 @@ const NoteCensor = {
 
     _linkCfg() {
         const cfg = this.cfg().wordLinks || {};
+        const blockNote = CONFIG.warehouse?.linkage?.blockNote || {};
+        const hairline = blockNote.width ?? (0.2 * (96 / 72));
         return {
             duration: cfg.duration ?? 1650,
             stagger: cfg.stagger ?? 175,
@@ -121,11 +152,167 @@ const NoteCensor = {
             revertDuration: cfg.revertDuration ?? 920,
             maxLinks: cfg.maxLinks ?? 48,
             opacityMin: cfg.opacityMin ?? 0,
-            opacityMax: cfg.opacityMax ?? 0.82,
-            strokeWidthStart: cfg.strokeWidthStart ?? 0.9,
-            strokeWidthEnd: cfg.strokeWidthEnd ?? 2.5,
-            curveBend: cfg.curveBend ?? 0.24
+            opacityMax: cfg.opacityMax ?? blockNote.opacity ?? 0.48,
+            strokeWidthStart: cfg.strokeWidthStart ?? hairline,
+            strokeWidthEnd: cfg.strokeWidthEnd ?? hairline,
+            curveBend: cfg.curveBend ?? 0.24,
+        soloProbeLength: cfg.soloProbeLength ?? 96,
+        soloProbeDuration: cfg.soloProbeDuration ?? 720,
+        soloProbeHoldMs: cfg.soloProbeHoldMs ?? 160,
+        soloProbeFadeMs: cfg.soloProbeFadeMs ?? 480,
+        soloLoopRise: cfg.soloLoopRise ?? 58,
+        soloProbeRevertDuration: cfg.soloProbeRevertDuration ?? 640
         };
+    },
+
+    _isSoloWordKey(key) {
+        if (!key) return false;
+        return this._wordsForKey(key).length <= 1;
+    },
+
+    _buildSoloLoopPath(sourceWord) {
+        const rect = sourceWord.getBoundingClientRect();
+        const card = sourceWord.closest('.micro-mock__card');
+        const isLtr = card?.getAttribute('dir') === 'ltr';
+        const cfg = this._linkCfg();
+        const loopRise = cfg.soloLoopRise ?? 58;
+        const spread = Math.max(rect.width * 0.55, (cfg.soloProbeLength ?? 96) * 0.45);
+        const baselineY = rect.top + rect.height * 0.76;
+        const startFrac = isLtr ? 0.94 : 0.06;
+        const endFrac = isLtr ? 0.06 : 0.94;
+        const start = { x: rect.left + rect.width * startFrac, y: baselineY };
+        const end = { x: rect.left + rect.width * endFrac, y: baselineY };
+        const apexX = (start.x + end.x) / 2 + (isLtr ? spread * 0.12 : -spread * 0.12);
+        const apexY = rect.top - loopRise;
+        const outSign = isLtr ? 1 : -1;
+        const cp1 = {
+            x: start.x + outSign * spread * 0.42,
+            y: start.y - loopRise * 0.52
+        };
+        const cp2 = {
+            x: end.x - outSign * spread * 0.42,
+            y: end.y - loopRise * 0.52
+        };
+        return `M ${start.x} ${start.y} C ${cp1.x} ${cp1.y} ${apexX} ${apexY} ${end.x} ${end.y}`;
+    },
+
+    _createSoloLoopRoute(sourceWord) {
+        if (!this.isActive() || !sourceWord?.isConnected) return null;
+
+        if (!this._linkSvg) this._ensureLinkOverlay();
+        const d = this._buildSoloLoopPath(sourceWord);
+        const group = document.createElementNS('http://www.w3.org/2000/svg', 'g');
+        group.setAttribute('class', 'note-censor-word-links__route note-censor-word-links__route--solo');
+
+        const trail = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+        trail.setAttribute('class', 'note-censor-word-links__trail');
+        trail.setAttribute('d', d);
+        trail.setAttribute('fill', 'none');
+
+        group.appendChild(trail);
+        this._linkSvg.appendChild(group);
+        this._linkSvg.classList.add('is-active');
+        return { group, trail, sourceWord };
+    },
+
+    _clearSoloProbeTimer() {
+        if (this._soloProbeTimer) {
+            clearTimeout(this._soloProbeTimer);
+            this._soloProbeTimer = null;
+        }
+    },
+
+    _fadeOutRoute(route, token, onComplete) {
+        const trail = route?.trail;
+        const group = route?.group;
+        if (!trail?.isConnected) {
+            onComplete?.();
+            return;
+        }
+
+        const cfg = this._linkCfg();
+        const duration = cfg.soloProbeFadeMs ?? 480;
+        const startAt = performance.now();
+        const startOp = Number.parseFloat(trail.style.opacity);
+        const baseOp = Number.isFinite(startOp) ? startOp : cfg.opacityMax;
+
+        const tick = (now) => {
+            if (token !== this._linkAnimToken || !trail.isConnected) {
+                onComplete?.();
+                return;
+            }
+            const t = Math.min(1, (now - startAt) / duration);
+            trail.style.opacity = String(baseOp * (1 - t));
+            if (t >= 1) {
+                group?.remove?.();
+                onComplete?.();
+            } else {
+                requestAnimationFrame(tick);
+            }
+        };
+
+        requestAnimationFrame(tick);
+    },
+
+    _playSoloProbe(sourceWord, options = {}) {
+        const route = this._createSoloLoopRoute(sourceWord);
+        if (!route) return;
+
+        const cfg = this._linkCfg();
+        const token = ++this._linkAnimToken;
+        this._animateRoute(route.trail, 0, token, cfg.soloProbeDuration);
+
+        if (options.persist) {
+            this._initPersistState();
+            const key = this._wordKey(sourceWord);
+            route.key = key;
+            route.sourceWord = sourceWord;
+            route.isPersisted = true;
+            route.isSoloLoop = true;
+            this._persistedRoutes.push(route);
+            return;
+        }
+
+        this._clearSoloProbeTimer();
+        this._soloProbeTimer = setTimeout(() => {
+            this._soloProbeTimer = null;
+            if (token !== this._linkAnimToken || !route.trail.isConnected) return;
+            this._fadeOutRoute(route, token, () => this._syncLinkOverlayActive());
+        }, cfg.soloProbeDuration + cfg.soloProbeHoldMs);
+    },
+
+    _startSoloHoverProbe(sourceWord) {
+        const route = this._createSoloLoopRoute(sourceWord);
+        if (!route) return;
+
+        this._soloHoverRoutes = [route];
+        const cfg = this._linkCfg();
+        this._animateRoute(route.trail, 0, this._linkAnimToken, cfg.soloProbeDuration);
+    },
+
+    _releaseSoloHover(immediate = false) {
+        this._clearSoloProbeTimer();
+        const routes = this._soloHoverRoutes?.slice() || [];
+        this._soloHoverRoutes = [];
+        this._soloHoverWord = null;
+
+        if (!routes.length) return;
+
+        if (immediate) {
+            this._linkAnimToken += 1;
+            this._removeRouteGroups(routes);
+            this._syncLinkOverlayActive();
+            return;
+        }
+
+        const token = ++this._linkAnimToken;
+        let remaining = routes.length;
+        routes.forEach((route) => {
+            this._fadeOutRoute(route, token, () => {
+                remaining -= 1;
+                if (remaining <= 0) this._syncLinkOverlayActive();
+            });
+        });
     },
 
     _routeStaggerMs(count, spreadMs, cfg) {
@@ -165,40 +352,332 @@ const NoteCensor = {
         return typeof DepthController !== 'undefined' && DepthController.currentLevel === 3;
     },
 
+    _boundWordPointerDown: null,
+    _boundWordPointerUp: null,
+    _wordTapState: null,
+    _studyOpenTapState: null,
+    _studyNoteTapState: null,
+    _suppressOpenThisGesture: false,
+
+    shouldSuppressNoteOpen() {
+        return !!this._suppressOpenThisGesture;
+    },
+
+    _scheduleClearOpenSuppress() {
+        this._suppressOpenThisGesture = true;
+        requestAnimationFrame(() => {
+            requestAnimationFrame(() => {
+                this._suppressOpenThisGesture = false;
+            });
+        });
+    },
+
+    tryOpenStudyNoteAt(clientX, clientY) {
+        if (!this.isActive() || this.shouldSuppressNoteOpen()) return false;
+
+        const wrapper = this.hitStudyNoteAt(clientX, clientY);
+        if (!wrapper) return false;
+
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(clientX, clientY)) {
+            return false;
+        }
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(clientX, clientY)) {
+            return false;
+        }
+        if (typeof ArtifactInspector === 'undefined') return false;
+
+
+        if (ArtifactInspector.isActive) return true;
+        return this.openStudyNote(wrapper);
+    },
+
+    openStudyNote(wrapper) {
+        if (!wrapper || !this.isNoteStudyUnlocked(wrapper)) {
+            return false;
+        }
+        if (typeof ArtifactInspector === 'undefined') return false;
+        if (ArtifactInspector.isActive) return true;
+        ArtifactInspector.open(wrapper);
+        return true;
+    },
+
+    hitStudyNoteAt(clientX, clientY) {
+        if (!this.isActive()) return null;
+
+        if (typeof document.elementsFromPoint === 'function') {
+            const stack = document.elementsFromPoint(clientX, clientY);
+            for (const el of stack) {
+                const wrapper = el.closest?.('.note-wrapper');
+                if (wrapper?.closest?.('#app') && this.isNoteStudyUnlocked(wrapper)) {
+                    return wrapper;
+                }
+            }
+        }
+
+        const wrapper = typeof SpatialNavigation !== 'undefined'
+            ? SpatialNavigation.hitTestDepthNote(clientX, clientY)
+            : null;
+        return wrapper && this.isNoteStudyUnlocked(wrapper) ? wrapper : null;
+    },
+
+    isStudyTapTarget(clientX, clientY) {
+        if (!this.isActive()) return false;
+        if (this.hitWordAt(clientX, clientY)) return true;
+
+        if (typeof document.elementsFromPoint === 'function') {
+            const stack = document.elementsFromPoint(clientX, clientY);
+            for (const el of stack) {
+                const word = el.closest?.('.note-redact__word');
+                if (!word) continue;
+                const wrapper = word.closest?.('.note-wrapper');
+                if (wrapper && this._isCommitted(this._wordKey(word)) && this.isNoteStudyUnlocked(wrapper)) {
+                    return true;
+                }
+            }
+        }
+
+        return !!this.hitStudyNoteAt(clientX, clientY);
+    },
+
+    _onWordPointerDown(e) {
+        if (!this.isActive() || e.button !== 0) return;
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+            return;
+        }
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(e.clientX, e.clientY)) {
+            return;
+        }
+
+        const word = e.target.closest?.('.note-redact__word');
+        if (!word || !word.closest?.('#app')) {
+            const note = e.target.closest?.('.note-wrapper.is-study-unlocked .micro-mock__note');
+            if (note) {
+                const wrapper = note.closest('.note-wrapper');
+                if (wrapper) {
+                    this._studyNoteTapState = {
+                        wrapper,
+                        x: e.clientX,
+                        y: e.clientY,
+                        id: e.pointerId
+                    };
+                }
+            }
+            return;
+        }
+
+        const key = this._wordKey(word);
+        if (this._isCommitted(key)) {
+            const wrapper = word.closest('.note-wrapper');
+            if (this.isNoteStudyUnlocked(wrapper)) {
+                this._studyOpenTapState = { word, x: e.clientX, y: e.clientY, id: e.pointerId };
+            }
+            return;
+        }
+
+        this._wordTapState = { word, x: e.clientX, y: e.clientY, id: e.pointerId };
+    },
+
+    _onWordPointerUp(e) {
+        const noteTap = this._studyNoteTapState;
+        if (noteTap && e.pointerId === noteTap.id) {
+            this._studyNoteTapState = null;
+            const threshold = CONFIG.depth?.clickDragThreshold ?? 6;
+            const moved = Math.hypot(e.clientX - noteTap.x, e.clientY - noteTap.y);
+            if (moved <= threshold && noteTap.wrapper?.isConnected && !this.shouldSuppressNoteOpen()) {
+                e.preventDefault();
+                e.stopPropagation();
+                this.openStudyNote(noteTap.wrapper);
+            }
+            return;
+        }
+
+        const openTap = this._studyOpenTapState;
+        if (openTap && e.pointerId === openTap.id) {
+            this._studyOpenTapState = null;
+            const threshold = CONFIG.depth?.clickDragThreshold ?? 6;
+            const moved = Math.hypot(e.clientX - openTap.x, e.clientY - openTap.y);
+            if (moved <= threshold && openTap.word?.isConnected && !this.shouldSuppressNoteOpen()) {
+                const wrapper = openTap.word.closest('.note-wrapper');
+                if (this.isNoteStudyUnlocked(wrapper) && typeof ArtifactInspector !== 'undefined') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    this.openStudyNote(wrapper);
+                }
+            }
+            return;
+        }
+
+        const tap = this._wordTapState;
+        if (!tap || e.pointerId !== tap.id) return;
+        this._wordTapState = null;
+
+        const threshold = CONFIG.depth?.clickDragThreshold ?? 6;
+        const moved = Math.hypot(e.clientX - tap.x, e.clientY - tap.y);
+        if (moved > threshold) return;
+        if (!tap.word?.isConnected) return;
+        if (this._isCommitted(this._wordKey(tap.word))) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+        this._commitWord(tap.word);
+    },
+
     init() {
         const level = typeof DepthController !== 'undefined' ? DepthController.currentLevel : 1;
         this.onLevelChange(level);
-        if (!this._boundRevealMove) {
-            this._boundRevealMove = (e) => this._updateWordReveal(e.clientX, e.clientY);
+        if (!this._boundRevealScroll) {
             this._boundRevealScroll = () => this._onRevealLayoutChange();
             this._boundRevealResize = () => this._onRevealLayoutChange();
-            window.addEventListener('mousemove', this._boundRevealMove, { passive: true });
             window.addEventListener('scroll', this._boundRevealScroll, { passive: true, capture: true });
             window.addEventListener('resize', this._boundRevealResize, { passive: true });
         }
+        if (!this._boundWordClick) {
+            this._boundWordClick = (e) => this._onWordClick(e);
+            document.addEventListener('click', this._boundWordClick, { capture: true });
+        }
+        if (!this._boundStudyCardClick) {
+            this._boundStudyCardClick = (e) => this._onStudyCardClick(e);
+            document.addEventListener('click', this._boundStudyCardClick, { capture: true });
+        }
+        if (!this._boundWordPointerDown) {
+            this._boundWordPointerDown = (e) => this._onWordPointerDown(e);
+            this._boundWordPointerUp = (e) => this._onWordPointerUp(e);
+            document.addEventListener('pointerdown', this._boundWordPointerDown, { capture: true });
+            document.addEventListener('pointerup', this._boundWordPointerUp, { capture: true });
+            document.addEventListener('pointercancel', this._boundWordPointerUp, { capture: true });
+        }
+    },
+
+    _onWordHoverOver(e) {
+        if (!this.isActive()) return;
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+            return;
+        }
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(e.clientX, e.clientY)) {
+            return;
+        }
+
+        const word = e.target.closest?.('.note-redact__word');
+        if (!word || !word.closest?.('#app')) return;
+
+        const key = this._wordKey(word);
+        if (this._isCommitted(key) || !this._isSoloWordKey(key)) return;
+        if (this._soloHoverWord === word) return;
+
+        this._releaseSoloHover(true);
+        this._soloHoverWord = word;
+        this._startSoloHoverProbe(word);
+    },
+
+    _onWordHoverOut(e) {
+        const word = e.target.closest?.('.note-redact__word');
+        const related = e.relatedTarget?.closest?.('.note-redact__word');
+        if (word && word === this._soloHoverWord && word !== related) {
+            this._releaseSoloHover(false);
+        }
+    },
+
+    _onWordClick(e) {
+        if (!this.isActive()) return;
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+            return;
+        }
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(e.clientX, e.clientY)) {
+            return;
+        }
+
+        const word = e.target.closest?.('.note-redact__word');
+        if (!word || !word.closest?.('#app')) return;
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        const key = this._wordKey(word);
+        if (this._isCommitted(key)) {
+            if (this.shouldSuppressNoteOpen()) return;
+            const wrapper = word.closest('.note-wrapper');
+            if (this.isNoteStudyUnlocked(wrapper) && typeof ArtifactInspector !== 'undefined') {
+                if (!ArtifactInspector.isActive) {
+                    this.openStudyNote(wrapper);
+                }
+            }
+            return;
+        }
+
+        this._commitWord(word);
+    },
+
+    _onStudyCardClick(e) {
+        if (!this.isActive() || e.button !== 0) return;
+        if (typeof isPointOverSiteNavigationUI === 'function' &&
+            isPointOverSiteNavigationUI(e.clientX, e.clientY)) {
+            return;
+        }
+        if (typeof isPointOverWarehouseChrome === 'function' &&
+            isPointOverWarehouseChrome(e.clientX, e.clientY)) {
+            return;
+        }
+
+        const wrapper = e.target.closest?.('.note-wrapper.is-study-unlocked');
+        if (!wrapper?.closest?.('#app')) {
+            const hit = this.hitStudyNoteAt(e.clientX, e.clientY);
+            if (!hit) return;
+            if (this.shouldSuppressNoteOpen()) return;
+            e.preventDefault();
+            e.stopPropagation();
+            this.openStudyNote(hit);
+            return;
+        }
+        if (e.target.closest('.note-redact__word')) return;
+        if (!e.target.closest?.('.micro-mock__note')) return;
+        if (this.shouldSuppressNoteOpen()) {
+            e.preventDefault();
+            e.stopPropagation();
+            return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+        this.openStudyNote(wrapper);
+    },
+
+    /** Full reset when leaving L2 — keep committed words; clear hover/routes only. */
+    resetForLayerLeave() {
+        this._clearTransientStudyState();
+        this._invalidateWordHitCache();
+    },
+
+    _clearTransientStudyState() {
+        this._initPersistState();
+        this._activeSourceWord = null;
+        this._activeKey = null;
+        this._cancelLinkAnimations();
+        this._activeRoutes = [];
+        this._retractingRoutes = [];
+        this._releaseSoloHover(true);
+        this._clearWordLinks();
     },
 
     onLevelChange(level) {
         document.body.classList.toggle('is-theme-censored', this.isThemeEnabled() && level === 3);
         if (!(this.isThemeEnabled() && level === 3)) {
-            this._releaseActiveHover(true);
-            this._invalidateWordHitCache();
+            this.resetForLayerLeave();
         } else {
             this._initPersistState();
-            this._committedKeys.forEach((key) => {
-                this._uncoverMatches(key);
-                this._wordsForKey(key).forEach((word) => word.classList.add('is-word-committed'));
-            });
-            this._refreshPersistedRoutes();
             this.refreshStudyUnlocks();
         }
         if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.syncWordPanelMode) {
             ActionWarehouse.syncWordPanelMode(level);
         }
-        if (this.isThemeEnabled() && level === 3 &&
-            typeof ArtifactInspector !== 'undefined' && ArtifactInspector.isActive) {
-            ArtifactInspector.close();
-        }
+        this._syncLayerZoomOutGate();
     },
 
     /** Topmost censored word under pointer — skips already-committed tokens. */
@@ -218,6 +697,39 @@ const NoteCensor = {
 
         if (!word || this._isCommitted(this._wordKey(word))) return null;
         return word;
+    },
+
+    blocksLayerZoomOut() {
+        return this.isActive() && !this.hasCommittedWord();
+    },
+
+    _hitWordByRect(clientX, clientY) {
+        const now = performance.now();
+        if (!this._wordHitCache || now - this._wordHitCacheAt > 400) {
+            const vw = window.innerWidth;
+            const vh = window.innerHeight;
+            this._wordHitCache = [];
+            document.querySelectorAll('.note-redact__word').forEach((word) => {
+                const r = word.getBoundingClientRect();
+                if (r.width <= 0 || r.height <= 0) return;
+                if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) return;
+                this._wordHitCache.push({ word, r });
+            });
+            this._wordHitCacheAt = now;
+        }
+
+        let best = null;
+        let bestArea = Infinity;
+        for (const { word, r } of this._wordHitCache) {
+            if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) continue;
+            if (this._isCommitted(this._wordKey(word))) continue;
+            const area = r.width * r.height;
+            if (area < bestArea) {
+                bestArea = area;
+                best = word;
+            }
+        }
+        return best;
     },
 
     _invalidateWordHitCache() {
@@ -240,7 +752,15 @@ const NoteCensor = {
     },
 
     _wordKey(wordEl) {
-        return String(wordEl?.textContent || '');
+        const raw = String(wordEl?.textContent || '');
+        if (typeof WordClusterCache !== 'undefined' && WordClusterCache.clusterKey) {
+            return WordClusterCache.clusterKey(raw);
+        }
+        if (typeof normalizeWordSurface === 'function') {
+            const normalized = normalizeWordSurface(raw);
+            return normalized ? ('exact:' + normalized) : '';
+        }
+        return raw;
     },
 
     _buildWordIndex() {
@@ -316,7 +836,6 @@ const NoteCensor = {
     },
 
     _clearAllHoverState() {
-        this._cancelDwell();
         this._initPersistState();
         this._committedKeys.forEach((key) => {
             this._wordsForKey(key).forEach((word) => {
@@ -333,16 +852,17 @@ const NoteCensor = {
         this._cancelLinkAnimations();
         this._activeRoutes = [];
         this._retractingRoutes = [];
+        this._releaseSoloHover(true);
         this._clearWordLinks();
         if (typeof ActionWarehouse !== 'undefined' && ActionWarehouse.syncClearControlVisibility) {
             ActionWarehouse.syncClearControlVisibility();
         }
         this.refreshStudyUnlocks();
+        this._syncLayerZoomOutGate();
     },
 
     _releaseActiveHover(immediate = false, onComplete) {
         if (!this._activeSourceWord && !this._activeRoutes.length && !this._retractingRoutes?.length) {
-            this._cancelDwell();
             onComplete?.();
             return;
         }
@@ -351,7 +871,6 @@ const NoteCensor = {
         const committed = this._isCommitted(key);
         this._activeSourceWord = null;
         this._activeKey = null;
-        this._cancelDwell();
 
         if (!committed) {
             this._coverMatches(key);
@@ -375,51 +894,6 @@ const NoteCensor = {
 
     _resetHoverState(immediate = false, onComplete) {
         this._releaseActiveHover(immediate, onComplete);
-    },
-
-    _activateHover(sourceWord) {
-        if (!sourceWord) return;
-
-        const key = this._wordKey(sourceWord);
-        if (this._isCommitted(key)) return;
-
-        this._activeSourceWord = sourceWord;
-        this._activeKey = key;
-        this._uncoverMatches(key);
-
-        this._cancelLinkAnimations();
-        this._clearActiveRouteGroups();
-
-        const matches = this._wordsForKey(key);
-        if (matches.length > 1) {
-            this._buildActiveRoutes(sourceWord, matches);
-        }
-
-        this._startDwell(sourceWord);
-    },
-
-    _switchActiveHover(sourceWord) {
-        if (!sourceWord) return;
-
-        const key = this._wordKey(sourceWord);
-        if (this._isCommitted(key)) {
-            this._releaseActiveHover(true);
-            return;
-        }
-
-        const oldKey = this._activeKey;
-        const sameKey = oldKey === key;
-
-        if (sameKey) {
-            this._activeSourceWord = sourceWord;
-            this._cancelDwell();
-            this._startDwell(sourceWord);
-            this._refreshActiveRoutes();
-            return;
-        }
-
-        this._releaseActiveHover(true);
-        this._activateHover(sourceWord);
     },
 
     _stopStretchAndRetract(routes, onComplete) {
@@ -473,6 +947,30 @@ const NoteCensor = {
 
         this._persistedRoutes = this._persistedRoutes.filter((route) => {
             if (route.key !== key) return true;
+
+            if (route.isSoloLoop) {
+                if (!sourceWord?.isConnected) {
+                    route.group?.remove?.();
+                    return false;
+                }
+                const snapFull = this._routeStretchProgress(route.trail) >= 0.995;
+                const d = this._buildSoloLoopPath(sourceWord);
+                const trail = route.trail;
+                const prevLen = trail.getTotalLength();
+                const prevOffset = Number.parseFloat(trail.style.strokeDashoffset);
+                trail.setAttribute('d', d);
+                if (snapFull) {
+                    this._finishRoute(trail, cfg);
+                } else if (prevLen > 0 && Number.isFinite(prevOffset)) {
+                    const progress = Math.max(0, Math.min(1, (prevLen - prevOffset) / prevLen));
+                    const nextLen = trail.getTotalLength();
+                    trail.style.strokeDasharray = `${nextLen}`;
+                    trail.style.strokeDashoffset = `${nextLen * (1 - progress)}`;
+                }
+                route.sourceWord = sourceWord;
+                return true;
+            }
+
             if (!route.targetWord?.isConnected) {
                 route.group?.remove?.();
                 return false;
@@ -632,8 +1130,9 @@ const NoteCensor = {
         requestAnimationFrame(tick);
     },
 
-    _animateRoute(trail, delayMs, token) {
+    _animateRoute(trail, delayMs, token, durationMs) {
         const cfg = this._linkCfg();
+        const duration = durationMs ?? cfg.duration;
         const startAt = performance.now() + delayMs;
         const len = trail.getTotalLength();
 
@@ -651,7 +1150,7 @@ const NoteCensor = {
             }
 
             const len = trail.getTotalLength();
-            const t = Math.min(1, (now - startAt) / cfg.duration);
+            const t = Math.min(1, (now - startAt) / duration);
             const flight = this._easeFlight(t);
             const strokeP = this._easeStroke(t);
             const traveled = len * flight;
@@ -671,8 +1170,9 @@ const NoteCensor = {
         requestAnimationFrame(tick);
     },
 
-    _retractRoute(trail, delayMs, token, onComplete) {
+    _retractRoute(trail, delayMs, token, onComplete, durationMs) {
         const cfg = this._linkCfg();
+        const revertDuration = durationMs ?? cfg.revertDuration;
         const group = trail.parentNode;
         const startAt = performance.now() + delayMs;
         const len = trail.getTotalLength();
@@ -711,7 +1211,7 @@ const NoteCensor = {
                 return;
             }
 
-            const t = Math.min(1, (now - startAt) / cfg.revertDuration);
+            const t = Math.min(1, (now - startAt) / revertDuration);
             const flight = this._easeFlight(t);
             const traveled = visible * (1 - flight);
 
@@ -784,64 +1284,6 @@ const NoteCensor = {
         this._persistedRoutes = [];
     },
 
-    _hitWordByRect(clientX, clientY) {
-        const now = performance.now();
-        if (!this._wordHitCache || now - this._wordHitCacheAt > 400) {
-            const vw = window.innerWidth;
-            const vh = window.innerHeight;
-            this._wordHitCache = [];
-            document.querySelectorAll('.note-redact__word').forEach((word) => {
-                const r = word.getBoundingClientRect();
-                if (r.width <= 0 || r.height <= 0) return;
-                if (r.bottom < 0 || r.top > vh || r.right < 0 || r.left > vw) return;
-                this._wordHitCache.push({ word, r });
-            });
-            this._wordHitCacheAt = now;
-        }
-
-        let best = null;
-        let bestArea = Infinity;
-        for (const { word, r } of this._wordHitCache) {
-            if (clientX < r.left || clientX > r.right || clientY < r.top || clientY > r.bottom) continue;
-            if (this._isCommitted(this._wordKey(word))) continue;
-            const area = r.width * r.height;
-            if (area < bestArea) {
-                bestArea = area;
-                best = word;
-            }
-        }
-        return best;
-    },
-
-    _updateWordReveal(clientX, clientY) {
-        if (!this.isActive()) {
-            this._clearAllHoverState();
-            return;
-        }
-        if (this._revealRaf) return;
-        this._revealPending = { x: clientX, y: clientY };
-        this._revealRaf = requestAnimationFrame(() => {
-            this._revealRaf = null;
-            const pending = this._revealPending;
-            if (!pending) return;
-
-            const word = this.hitWordAt(pending.x, pending.y);
-
-            if (word === this._activeSourceWord) return;
-
-            if (this._activeSourceWord) {
-                if (word) {
-                    this._switchActiveHover(word);
-                } else {
-                    this._resetHoverState(false);
-                }
-                return;
-            }
-
-            if (word) this._activateHover(word);
-        });
-    },
-
     /** Censored theme — skip L1→L3 auto-open inspector; L3 study opens via allowsStudyNoteOpen. */
     blocksNoteFocus() {
         return this.isThemeEnabled();
@@ -879,7 +1321,7 @@ const NoteCensor = {
         return ` style="--word-cover-color:${color}"`;
     },
 
-    /** Split visible text into hover-reveal word tokens (whitespace-separated). */
+    /** Split visible text into click-reveal word tokens (whitespace-separated). */
     tokenizeWords(text) {
         return String(text || '').split(/\s+/).filter(Boolean);
     },
@@ -979,7 +1421,7 @@ const NoteCensor = {
     buildIdHTML(item) {
         const idText = String(item?.id || '').trim();
         if (!idText) return '';
-        return `<div class="note-idcode general-t">${this.escapeHTML(idText)}</div>`;
+        return `<div class="note-id-rail"><div class="note-idcode general-t">${this.escapeHTML(idText)}</div></div>`;
     },
 
     buildCardOnlyHTML(item, options = {}) {
