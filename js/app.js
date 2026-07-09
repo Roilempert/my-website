@@ -1,4 +1,4 @@
-/* app build 20260708113231 */
+/* app build 20260709014056 */
 /* ==========================================================================
    01. SYSTEM BOOTSTRAP
    ========================================================================== */
@@ -118,6 +118,7 @@ const AppState = {
                         if (typeof NavigationMap !== 'undefined') {
                             NavigationMap.onBootComplete();
                         }
+                        this.onWorldReady();
                     }
                 });
             } catch (err) {
@@ -129,6 +130,7 @@ const AppState = {
                 } catch (mapErr) {
                     console.warn('NavigationMap.onBootComplete failed:', mapErr);
                 }
+                this.onWorldReady();
             }
         };
 
@@ -163,6 +165,38 @@ const AppState = {
             this.appContainer.classList.add('is-ready');
             this.appContainer.style.opacity = '1';
         });
+    },
+
+    _worldReady: false,
+    onWorldReady() {
+        if (this._worldReady) return;
+        this._worldReady = true;
+
+        try {
+            if (typeof MicroMock !== 'undefined' && !MicroMock.isPrewarmComplete()) {
+                MicroMock.prewarmAllSync();
+            }
+        } catch (err) {
+            console.warn('Micro prewarm on world-ready failed:', err);
+        }
+
+        this._fadeOutEntryCover();
+    },
+
+    _fadeOutEntryCover() {
+        const root = document.documentElement;
+        if (!root.classList.contains('is-screen-entering')) return;
+
+        const fadeMs = CONFIG?.opening?.screenTransition?.fadeMs ?? 600;
+        root.style.setProperty('--screen-transition-fade', `${fadeMs}ms`);
+
+        const cover = document.getElementById('screen-transition-cover');
+        root.classList.remove('is-screen-entering');
+        if (!cover) return;
+
+        const remove = () => cover.remove();
+        cover.addEventListener('transitionend', remove, { once: true });
+        setTimeout(remove, fadeMs + 400);
     },
 
     flushPendingBoot() {
@@ -14773,10 +14807,33 @@ const SiteAbout = {
     _dragThresholdPx: 8,
     _dragStartY: 0,
     _dragStartProgress: 0,
+    _wheelSnapTimer: null,
     _onResize: null,
 
     cfg() {
         return CONFIG.about || {};
+    },
+
+    _escapeHtml(text) {
+        return String(text ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    },
+
+    _cornerNoteLines() {
+        const lines = this.cfg().cornerNoteLines;
+        if (Array.isArray(lines) && lines.length) return lines;
+        const fallback = this.cfg().cornerNoteText ?? 'רועי היה פה';
+        const parts = String(fallback).trim().split(/\s+/);
+        if (parts.length >= 2) return [parts[0], parts.slice(1).join(' ')];
+        return [fallback];
+    },
+
+    _cornerNoteLabelHtml() {
+        return this._cornerNoteLines()
+            .map((line) => `<span class="site-about__corner-note-line">${this._escapeHtml(line)}</span>`)
+            .join('');
     },
 
     _renderDetailsHtml() {
@@ -14813,6 +14870,7 @@ const SiteAbout = {
         const logoHtml = logoSrc
             ? `<div class="site-about__brand"><img class="site-about__logo" src="${logoSrc}" alt="בצלאל אקדמיה לאמנות ועיצוב"></div>`
             : '';
+        const cornerNoteLines = this._cornerNoteLines();
 
         this.root = document.createElement('div');
         this.root.className = 'site-about';
@@ -14847,7 +14905,7 @@ const SiteAbout = {
                     ${arrowGlyph}
                 </div>
                 <div class="site-about__content">
-                    <h2 class="site-about__headline main-t" dir="rtl">${mainTitle}</h2>
+                    <h2 class="site-about__headline opening-screen__title main-t" dir="rtl">${mainTitle}</h2>
                     ${logoHtml}
                     <div class="site-about__text general-t" dir="rtl">${bodyHtml}</div>
                     <div class="site-about__details" dir="rtl">${detailsHtml}</div>
@@ -14855,8 +14913,30 @@ const SiteAbout = {
             </section>
         `;
 
+        this.cornerNote = document.createElement('div');
+        this.cornerNote.className = 'site-about__corner-note opening-screen__entry-note note-title';
+        this.cornerNote.setAttribute('role', 'group');
+        this.cornerNote.setAttribute('aria-label', cornerNoteLines.join(' '));
+
+        this.cornerNoteLabel = document.createElement('div');
+        this.cornerNoteLabel.className = 'opening-screen__entry-note-label site-about__corner-note-editor';
+        this.cornerNoteLabel.contentEditable = 'plaintext-only';
+        this.cornerNoteLabel.setAttribute('role', 'textbox');
+        this.cornerNoteLabel.setAttribute('aria-multiline', 'true');
+        this.cornerNoteLabel.setAttribute('spellcheck', 'false');
+        this.cornerNoteLabel.setAttribute('tabindex', '0');
+        this.cornerNoteLabel.innerHTML = this._cornerNoteLabelHtml();
+
+        this.cornerNote.appendChild(this.cornerNoteLabel);
+
+        this.cornerNoteLabel.addEventListener('mousedown', (e) => e.stopPropagation());
+        this.cornerNoteLabel.addEventListener('pointerdown', (e) => e.stopPropagation());
+        this.cornerNoteLabel.addEventListener('click', (e) => e.stopPropagation());
+        this.cornerNoteLabel.addEventListener('keydown', (e) => e.stopPropagation());
+
         this.sheet.appendChild(this.trigger);
         this.sheet.appendChild(this.panel);
+        this.sheet.appendChild(this.cornerNote);
         this.root.appendChild(this.backdrop);
         this.root.appendChild(this.sheet);
         document.body.appendChild(this.root);
@@ -14869,8 +14949,16 @@ const SiteAbout = {
         this.trigger.addEventListener('click', (e) => e.preventDefault());
         this.trigger.addEventListener('keydown', (e) => this._onTriggerKeyDown(e));
 
+        this._onWheel = (e) => this._handleWheel(e);
+        this.root.addEventListener('wheel', this._onWheel, { passive: false, capture: true });
+
         this._onKeyDown = (e) => {
             if (e.key === 'Escape' && this._progress > 0) {
+                if (this.cornerNoteLabel?.contains(document.activeElement)) {
+                    e.preventDefault();
+                    this.cornerNoteLabel.blur();
+                    return;
+                }
                 e.preventDefault();
                 this.close();
             }
@@ -14879,12 +14967,15 @@ const SiteAbout = {
 
         this._onResize = () => {
             const wasOpen = this.isOpen;
+            this._syncBackdropTokens();
             this._measureDimensions();
             this._fitMainTitle();
             this._progress = wasOpen ? 1 : 0;
             this._applyProgress(false);
         };
         window.addEventListener('resize', this._onResize);
+
+        this._syncBackdropTokens();
 
         requestAnimationFrame(() => {
             this._measureDimensions();
@@ -14893,49 +14984,114 @@ const SiteAbout = {
         });
     },
 
+    _titleFitCfg() {
+        const opening = CONFIG.opening?.titleFit || {};
+        const about = this.cfg();
+        return {
+            fontSizePx: opening.fontSizePx ?? about.titleFontSizePx ?? null,
+            minPx: opening.minPx ?? about.titleMinPx ?? 24,
+            maxPx: opening.maxPx ?? about.titleMaxPx ?? 400,
+            reducePt: opening.reducePt ?? about.titleReducePt ?? 32,
+            sizeScale: opening.sizeScale ?? about.titleSizeScale ?? 1,
+            letterGapPx: opening.letterGapPx ?? about.titleLetterGapPx ?? 56
+        };
+    },
+
+    _titleChars(text) {
+        return [...(text || '')];
+    },
+
+    _ensureTitleSkeleton(headline) {
+        const text = (headline.dataset.titleText || headline.textContent || '').trim();
+        const chars = this._titleChars(text);
+        if (!headline || !chars.length) return;
+
+        const skeletonKey = chars.join('');
+        if (
+            headline.dataset.titleSkeletonText === skeletonKey
+            && headline.querySelectorAll('.opening-screen__title-char').length === chars.length
+        ) {
+            return;
+        }
+
+        headline.dataset.titleSkeletonText = skeletonKey;
+        headline.dataset.titleText = text;
+        headline.textContent = '';
+        const frag = document.createDocumentFragment();
+
+        chars.forEach((ch, index) => {
+            const span = document.createElement('span');
+            span.className = 'opening-screen__title-char';
+            span.textContent = ch;
+            frag.appendChild(span);
+            if (index < chars.length - 1) {
+                const gap = document.createElement('span');
+                gap.className = 'opening-screen__title-gap';
+                gap.setAttribute('aria-hidden', 'true');
+                frag.appendChild(gap);
+            }
+        });
+
+        headline.appendChild(frag);
+    },
+
+    _syncBackdropTokens() {
+        const openingBg = CONFIG.opening?.background || {};
+        const blurScale = openingBg.blurScale ?? 0.028;
+        const canvasBlurPx = 6;
+        const contentBlurPx = Math.max(
+            8,
+            Math.min(24, Math.round(window.innerHeight * blurScale * 0.85))
+        );
+        const blurPx = contentBlurPx + canvasBlurPx;
+        const grainTilePx = openingBg.grainTilePx ?? 40;
+        const grainAlpha = (openingBg.grainAlpha ?? 14) / 255;
+        const grainBlendMode = openingBg.grainBlendMode ?? 'soft-light';
+        const washPct = Math.round((openingBg.glowAlpha ?? 0.07) * 100);
+        const noteRotateDeg = this.cfg().cornerNoteRotateDeg ?? 25;
+        const noteOffsetX = this.cfg().cornerNoteOffsetX ?? 20;
+        const noteOffsetY = this.cfg().cornerNoteOffsetY ?? -40;
+        const noteLineHeightScale = this.cfg().cornerNoteLineHeightScale ?? 1.1;
+        const targets = [document.documentElement, this.root].filter(Boolean);
+
+        targets.forEach((el) => {
+            el.style.setProperty('--site-about-bg-blur', `${blurPx}px`);
+            el.style.setProperty('--site-about-backdrop-wash', `${washPct}%`);
+            el.style.setProperty('--site-about-backdrop-grain-opacity', String(grainAlpha));
+            el.style.setProperty('--site-about-backdrop-grain-blend', grainBlendMode);
+            el.style.setProperty('--site-about-backdrop-grain-tile', `${grainTilePx}px`);
+            el.style.setProperty('--site-about-corner-note-rotate', `${noteRotateDeg}deg`);
+            el.style.setProperty('--site-about-corner-note-offset-x', `${noteOffsetX}px`);
+            el.style.setProperty('--site-about-corner-note-offset-y', `${noteOffsetY}px`);
+            el.style.setProperty('--site-about-corner-note-line-height-scale', String(noteLineHeightScale));
+        });
+    },
+
     _fitMainTitle() {
         const headline = this.panel?.querySelector('.site-about__headline');
         if (!headline) return;
 
-        headline.style.fontSize = '';
-        headline.style.letterSpacing = '0px';
+        const text = (this.cfg().mainTitle || headline.dataset.titleText || headline.textContent || '').trim();
+        if (!text) return;
 
-        const minPx = this.cfg().titleMinPx ?? 24;
-        const maxPx = this.cfg().titleMaxPx ?? 400;
-        const reducePt = this.cfg().titleReducePt ?? 12;
-        const reducePx = reducePt * (96 / 72);
-        const spacingBoost = this.cfg().titleLetterSpacingBoost ?? 1.55;
-        const maxWidth = headline.clientWidth;
-        if (maxWidth <= 0) return;
+        headline.dataset.titleText = text;
+        this._ensureTitleSkeleton(headline);
 
-        let lo = minPx;
-        let hi = maxPx;
-        let best = minPx;
+        const cfg = this._titleFitCfg();
+        const reducePx = cfg.reducePt * (96 / 72);
+        const targetPx = cfg.fontSizePx ?? Math.max(cfg.minPx, (cfg.maxPx - reducePx) * cfg.sizeScale);
+        const lineHeight = 0.88;
 
-        while (lo <= hi) {
-            const mid = Math.floor((lo + hi) / 2);
-            headline.style.fontSize = `${mid}px`;
-            headline.style.letterSpacing = '0px';
-            if (headline.scrollWidth <= maxWidth) {
-                best = mid;
-                lo = mid + 1;
-            } else {
-                hi = mid - 1;
-            }
-        }
-
-        const targetPx = Math.max(minPx, best - reducePx);
         headline.style.fontSize = `${targetPx}px`;
         headline.style.letterSpacing = '0px';
+        headline.style.minHeight = `${targetPx * lineHeight}px`;
+        headline.style.setProperty('--opening-title-gap', `${cfg.letterGapPx}px`);
+        headline.style.setProperty('--opening-title-font-size', `${targetPx}px`);
+        headline.style.setProperty('--opening-title-line-height', String(lineHeight));
 
-        const text = (headline.textContent || '').trim();
-        const units = [...text].length;
-        if (units <= 1) return;
-
-        const naturalWidth = headline.scrollWidth;
-        if (naturalWidth >= maxWidth) return;
-
-        headline.style.letterSpacing = `${((maxWidth - naturalWidth) / (units - 1)) * spacingBoost}px`;
+        headline.querySelectorAll('.opening-screen__title-char').forEach((el) => {
+            el.classList.remove('is-pending');
+        });
     },
 
     _cssVarPx(varName) {
@@ -15063,11 +15219,13 @@ const SiteAbout = {
         this.root?.style.setProperty('--site-about-panel-cols', String(cols));
 
         const logoCols = this.cfg().logoCols ?? 1;
-        const textCols = this.cfg().textCols ?? 6;
+        const textCols = this.cfg().textCols ?? 5;
         const detailsCols = this.cfg().detailsCols ?? 5;
+        const contentGapCols = this.cfg().contentGapCols ?? 1;
         const logoStart = 1;
         const detailsStart = logoCols + 1;
-        const textStart = detailsStart + detailsCols;
+        const detailsGridSpan = Math.floor(Number(detailsCols));
+        const textStart = detailsStart + detailsGridSpan + contentGapCols;
 
         this.root?.style.setProperty('--site-about-logo-cols', String(logoCols));
         this.root?.style.setProperty('--site-about-logo-col-start', String(logoStart));
@@ -15092,6 +15250,62 @@ const SiteAbout = {
 
     _dragTravel() {
         return this._openLift || 1;
+    },
+
+    _wheelHitTarget(e) {
+        const hit = document.elementFromPoint(e.clientX, e.clientY);
+        return hit && this.root?.contains(hit) ? hit : null;
+    },
+
+    _isPanelScrollable() {
+        if (!this.panel) return false;
+        return this.panel.scrollHeight > this.panel.clientHeight + 1;
+    },
+
+    _shouldPanelConsumeWheel(e, hit) {
+        if (!this.panel || this._progress < 1 || !this._isPanelScrollable()) return false;
+        if (!this.panel.contains(hit)) return false;
+
+        const atTop = this.panel.scrollTop <= 0;
+        const atBottom = this.panel.scrollTop + this.panel.clientHeight >= this.panel.scrollHeight - 1;
+
+        // At scroll top, wheel-down closes the sheet — leave that to the sheet handler.
+        if (atTop && e.deltaY < 0) return false;
+
+        if (e.deltaY > 0 && !atTop) return true;
+        if (e.deltaY < 0 && !atBottom) return true;
+        return false;
+    },
+
+    _applyWheelDelta(deltaY) {
+        const travel = this._dragTravel();
+        // Match tab drag + natural trackpad direction (up on tab opens, down closes).
+        this._progress = Math.min(1, Math.max(0, this._progress + deltaY / travel));
+        this.root.classList.add('is-dragging');
+        this._applyProgress(false);
+
+        clearTimeout(this._wheelSnapTimer);
+        this._wheelSnapTimer = setTimeout(() => {
+            this._wheelSnapTimer = null;
+            this.root.classList.remove('is-dragging');
+            const threshold = this.cfg().snapThreshold ?? 0.35;
+            this._progress = this._progress >= threshold ? 1 : 0;
+            this._applyProgress(true);
+        }, this.cfg().wheelSnapMs ?? 140);
+    },
+
+    _handleWheel(e) {
+        if (!this.root || this._pointerActive) return;
+
+        const hit = this._wheelHitTarget(e);
+        if (!hit) return;
+
+        if (hit.closest?.('.site-about__corner-note')) return;
+
+        if (this._shouldPanelConsumeWheel(e, hit)) return;
+
+        e.preventDefault();
+        this._applyWheelDelta(e.deltaY);
     },
 
     _onPointerDown(e) {
@@ -15201,6 +15415,7 @@ const SiteAbout = {
         const lift = this._progress * this._openLift;
         this.root.style.setProperty('--site-about-lift', `${lift}px`);
         this.root.style.setProperty('--site-about-progress', String(this._progress));
+        document.documentElement.style.setProperty('--site-about-progress', String(this._progress));
         this.isOpen = this._progress >= 1;
 
         this.root.classList.toggle('is-open', this.isOpen);
@@ -15211,6 +15426,8 @@ const SiteAbout = {
         this.trigger?.setAttribute('aria-expanded', this.isOpen ? 'true' : 'false');
         this.panel?.setAttribute('aria-hidden', this._progress <= 0 ? 'true' : 'false');
         document.body.classList.toggle('is-site-about-open', this._progress > 0);
+        document.body.classList.toggle('is-site-about-snap', !!animate);
+        document.body.classList.toggle('is-site-about-dragging', this.root.classList.contains('is-dragging'));
 
         this._setBackgroundFrozen(this._progress > 0);
 
@@ -15248,6 +15465,10 @@ const PhysicsEngine = {
     syncLoopLastTs: 0,
     navPhysicsTickLastTs: 0,
     renderStepTs: 0,
+    _moleculeBoundsCache: null,
+    _moleculeBoundsCacheScrollX: -1,
+    _moleculeBoundsCacheScrollY: -1,
+    _uniqueNoteIndices: null,
 
     setTransitionFrozen(value) {
         this.transitionFrozen = !!value;
@@ -15373,9 +15594,6 @@ const PhysicsEngine = {
             this.mouseWorldY = e.pageY;
             this.mouseClientX = e.clientX;
             this.mouseClientY = e.clientY;
-            if (DepthController.currentLevel === 1 && this.bodiesData.length > 0) {
-                this.updateMoleculeHoverState();
-            }
         });
 
         this.initMoleculePointer();
@@ -16769,6 +16987,7 @@ const PhysicsEngine = {
 
         ActionWarehouse.refreshWorkspaceGrid();
         ActionWarehouse.updateDotFocusFilter();
+        this.invalidateMoleculeBoundsCache();
         this.captureRenderSnapshot();
     },
 
@@ -16809,6 +17028,25 @@ const PhysicsEngine = {
         });
     },
 
+    invalidateMoleculeBoundsCache() {
+        this._moleculeBoundsCache = null;
+        this._uniqueNoteIndices = null;
+    },
+
+    getUniqueNoteIndices() {
+        if (!this._uniqueNoteIndices) {
+            this._uniqueNoteIndices = [...new Set(this.bodiesData.map(d => d.noteIndex))];
+        }
+        return this._uniqueNoteIndices;
+    },
+
+    isPointInMoleculeBounds(clientX, clientY, noteIndex, pad = CONFIG.depth.moleculeClickPadding ?? 16) {
+        const b = this.moleculeViewportBounds(noteIndex);
+        if (!b) return false;
+        return clientX >= b.minX - pad && clientX <= b.maxX + pad &&
+            clientY >= b.minY - pad && clientY <= b.maxY + pad;
+    },
+
     syncLoop() {
         requestAnimationFrame(() => this.syncLoop());
 
@@ -16821,6 +17059,8 @@ const PhysicsEngine = {
         const depthFocusLinks = typeof DepthFocusLinks !== 'undefined' &&
             DepthFocusLinks.shouldDraw();
         const skipCanvasDraw = this.shouldThrottleMacroCanvas();
+
+        this.invalidateMoleculeBoundsCache();
 
         if (!macroVisualActive && !depthFocusLinks) {
             if (this.isActive) {
@@ -16839,7 +17079,9 @@ const PhysicsEngine = {
         if (macroVisualActive) {
             this.isActive = true;
             this.syncDotTransforms();
-            this.updateMoleculeHoverState();
+            if (!ActionWarehouse?.dragState) {
+                this.updateMoleculeHoverState();
+            }
         } else {
             this.isActive = false;
         }
@@ -16881,13 +17123,25 @@ const PhysicsEngine = {
 
     // Axis-aligned bounds of a note's hull in viewport coordinates
     moleculeViewportBounds(noteIndex) {
+        const scrollX = window.pageXOffset;
+        const scrollY = window.pageYOffset;
+        if (!this._moleculeBoundsCache ||
+            this._moleculeBoundsCacheScrollX !== scrollX ||
+            this._moleculeBoundsCacheScrollY !== scrollY) {
+            this._moleculeBoundsCache = new Map();
+            this._moleculeBoundsCacheScrollX = scrollX;
+            this._moleculeBoundsCacheScrollY = scrollY;
+        }
+
+        if (this._moleculeBoundsCache.has(noteIndex)) {
+            return this._moleculeBoundsCache.get(noteIndex);
+        }
+
         const pad = CONFIG.outlines.padding + CONFIG.physics.body.radius;
         let minX = Infinity;
         let minY = Infinity;
         let maxX = -Infinity;
         let maxY = -Infinity;
-        const scrollX = window.pageXOffset;
-        const scrollY = window.pageYOffset;
 
         this.bodiesData.forEach(item => {
             if (item.noteIndex !== noteIndex) return;
@@ -16901,17 +17155,17 @@ const PhysicsEngine = {
             maxY = Math.max(maxY, y + pad);
         });
 
-        if (minX === Infinity) return null;
-        return { minX, minY, maxX, maxY };
+        const bounds = minX === Infinity ? null : { minX, minY, maxX, maxY };
+        this._moleculeBoundsCache.set(noteIndex, bounds);
+        return bounds;
     },
 
     hitTestMolecule(clientX, clientY) {
-        const notes = new Set(this.bodiesData.map(d => d.noteIndex));
         let hit = -1;
         let bestDist = Infinity;
         const pad = CONFIG.depth.moleculeClickPadding ?? 16;
 
-        notes.forEach(noteIndex => {
+        this.getUniqueNoteIndices().forEach(noteIndex => {
             if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
             const b = this.moleculeViewportBounds(noteIndex);
             if (!b) return;
@@ -17015,7 +17269,7 @@ const PhysicsEngine = {
 
         const maxWords = CONFIG.depth?.moleculeHoverMaxWords ?? 8;
         const phraseClip = this.clipHoverAtPhraseBoundary(line, maxWords);
-        return this.fitHoverLabelToWidth(phraseClip, this.getMoleculeHoverMaxWidthPx());
+        return this.fitHoverLabelToWidth(phraseClip, this.getMoleculeHoverContentWidthPx());
     },
 
     clipHoverAtPhraseBoundary(line, maxWords) {
@@ -17070,21 +17324,37 @@ const PhysicsEngine = {
         return Math.min(window.innerWidth * vw / 100, rem * rootPx);
     },
 
+    /** Content width inside `.molecule-hover-title` after inline padding. */
+    getMoleculeHoverContentWidthPx() {
+        const root = getComputedStyle(document.documentElement);
+        const rootPx = parseFloat(root.fontSize) || 16;
+        const space10 = root.getPropertyValue('--space-10').trim();
+        const padEach = space10.endsWith('rem')
+            ? parseFloat(space10) * rootPx
+            : parseFloat(space10) || rootPx * 0.625;
+        const fudge = 2; // canvas vs DOM subpixel slack
+        return Math.max(0, this.getMoleculeHoverMaxWidthPx() - padEach * 2 - fudge);
+    },
+
     fitHoverLabelToWidth(text, maxWidth) {
-        if (!text || maxWidth <= 0) return text || '';
+        if (!text) return '';
+        const contentMax = maxWidth > 0 ? maxWidth : this.getMoleculeHoverContentWidthPx();
+        if (contentMax <= 0) return '';
+
         const ctx = this.getMoleculeHoverMeasureCtx();
         ctx.font = this.getMoleculeHoverFont();
 
-        if (ctx.measureText(text).width <= maxWidth) return text;
+        if (ctx.measureText(text).width <= contentMax) return text;
 
         const words = text.split(/\s+/).filter(Boolean);
         let result = '';
         for (const word of words) {
             const candidate = result ? `${result} ${word}` : word;
-            if (ctx.measureText(candidate).width > maxWidth) break;
+            if (ctx.measureText(candidate).width > contentMax) break;
             result = candidate;
         }
-        return result || words[0] || '';
+        // Whole words only — never return an overflowing word for CSS to clip mid-glyph.
+        return result;
     },
 
     noteHasAttachedBlocks(item) {
@@ -17245,6 +17515,11 @@ const PhysicsEngine = {
             return;
         }
 
+        if (warehouse?.dragState) {
+            hideHover();
+            return;
+        }
+
         if (document.body.classList.contains('is-space-pan') ||
             document.body.classList.contains('is-canvas-panning')) {
             hideHover();
@@ -17260,6 +17535,15 @@ const PhysicsEngine = {
         if (typeof isPointOverWarehouseChrome === 'function' &&
             isPointOverWarehouseChrome(this.mouseClientX, this.mouseClientY)) {
             hideHover();
+            return;
+        }
+
+        const pinned = this.moleculeHoverPinnedIndex;
+        if (pinned >= 0 &&
+            label?.classList.contains('is-visible') &&
+            this.isPointInMoleculeBounds(this.mouseClientX, this.mouseClientY, pinned)) {
+            this.hoveredNoteIndex = pinned;
+            document.body.classList.add('is-molecule-hover');
             return;
         }
 
@@ -17496,8 +17780,7 @@ const ActionWarehouse = {
 
         const drag = this.dragState;
         cancelAnimationFrame(drag.rafId);
-        document.removeEventListener('pointermove', this.boundMove);
-        document.removeEventListener('pointerup', this.boundUp);
+        this.unwireDragPointerTracking(drag.block, null);
 
         const block = drag.block;
         block?.element?.classList.remove('is-dragging');
@@ -19724,6 +20007,56 @@ const ActionWarehouse = {
 
     /* --- Drag mechanics (spring-follow + velocity tilt) --- */
 
+    wireDragPointerTracking(block, e) {
+        this.boundMove = (ev) => this.onPointerMove(ev);
+        this.boundUp = (ev) => this.endDrag(ev);
+        this.boundCancel = (ev) => this.endDrag(ev);
+        const opts = { capture: true };
+        document.addEventListener('pointermove', this.boundMove, opts);
+        document.addEventListener('pointerup', this.boundUp, opts);
+        document.addEventListener('pointercancel', this.boundCancel, opts);
+        if (block?.element?.setPointerCapture && e?.pointerId != null) {
+            try { block.element.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
+        }
+    },
+
+    unwireDragPointerTracking(block, e) {
+        if (!this.boundMove) return;
+        const opts = { capture: true };
+        document.removeEventListener('pointermove', this.boundMove, opts);
+        document.removeEventListener('pointerup', this.boundUp, opts);
+        document.removeEventListener('pointercancel', this.boundCancel, opts);
+        if (block?.element?.releasePointerCapture && e?.pointerId != null) {
+            try { block.element.releasePointerCapture(e.pointerId); } catch (_) { /* noop */ }
+        }
+    },
+
+    /** Promote click-pending → live drag without releasing pointer capture (critical for surface blocks). */
+    promoteClickPendingToDrag(e, drag) {
+        const block = drag.block;
+        const restoreX = block.element.getBoundingClientRect().left;
+        const restoreY = block.element.getBoundingClientRect().top;
+        this.clearMacroIndicationGhost();
+        this.beginDragLift(block, e, {
+            depthUi: !!drag.depthUiClickDeploy,
+            liftFromSurface: drag.surfaceReposition ||
+                (!drag.depthUiClickDeploy && !drag.macroClickIndicate),
+            startClientX: drag.startClientX,
+            startClientY: drag.startClientY,
+            restoreX,
+            restoreY
+        });
+        if (!this.dragState) return;
+        this.dragState.pointerX = e.clientX;
+        this.dragState.pointerY = e.clientY;
+        block.x = e.clientX - this.dragState.grabDX;
+        block.y = e.clientY - this.dragState.grabDY;
+        this.applyTransform(block, 0);
+        if (!this.dragState.depthUi) {
+            this.syncBody(block, { reuseCachedMetrics: true });
+        }
+    },
+
     beginDragLift(block, e, dragMeta = {}) {
         const depthUi = dragMeta.depthUi === true;
         const pullFromFrame = !!block.nestedIn;
@@ -19742,7 +20075,7 @@ const ActionWarehouse = {
 
         block.element.classList.add('is-dragging');
         block.element.classList.remove('is-deployed', 'is-nested', 'is-depth-ui-mounted');
-        if (!pullFromFrame) {
+        if (!pullFromFrame && !liftFromSurface) {
             this.markSlotEmpty(block);
         }
         document.body.appendChild(block.element);
@@ -19794,12 +20127,22 @@ const ActionWarehouse = {
         }
 
         this.dragLoop();
+
+        // Keep / re-assert capture on the same element — never release mid-gesture.
+        if (e?.pointerId != null && block.element.setPointerCapture) {
+            try { block.element.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
+        }
     },
 
     startDrag(block, e) {
         const depthUi = this.isDepthUiLevel();
         if (this.dragState || (!depthUi && DepthController.currentLevel !== 1)) return;
+        // Block grabs from a collapsed strip only for blocks still docked in their
+        // tray slot. Deployed blocks keep their home slot in the strip tray, and the
+        // grab pointerdown itself unpins the strip (outside-click handler runs first) —
+        // without the docked check they could never be re-grabbed from the surface.
         if (this.isLauncherStripMode() &&
+            block.state === 'docked' &&
             block.slotElement?.parentElement === this.launcherStripTrayElement &&
             !this.launcherStripPinned) {
             return;
@@ -19823,16 +20166,14 @@ const ActionWarehouse = {
             this.dragState = {
                 block: block,
                 clickPending: true,
+                surfaceReposition: true,
                 depthUi: false,
                 startClientX: e.clientX,
                 startClientY: e.clientY,
                 pointerX: e.clientX,
                 pointerY: e.clientY
             };
-            this.boundMove = (ev) => this.onPointerMove(ev);
-            this.boundUp = (ev) => this.endDrag(ev);
-            document.addEventListener('pointermove', this.boundMove);
-            document.addEventListener('pointerup', this.boundUp);
+            this.wireDragPointerTracking(block, e);
             return;
         }
 
@@ -19850,10 +20191,7 @@ const ActionWarehouse = {
                 pointerX: e.clientX,
                 pointerY: e.clientY
             };
-            this.boundMove = (ev) => this.onPointerMove(ev);
-            this.boundUp = (ev) => this.endDrag(ev);
-            document.addEventListener('pointermove', this.boundMove);
-            document.addEventListener('pointerup', this.boundUp);
+            this.wireDragPointerTracking(block, e);
             return;
         }
 
@@ -19869,10 +20207,7 @@ const ActionWarehouse = {
                 pointerX: e.clientX,
                 pointerY: e.clientY
             };
-            this.boundMove = (ev) => this.onPointerMove(ev);
-            this.boundUp = (ev) => this.endDrag(ev);
-            document.addEventListener('pointermove', this.boundMove);
-            document.addEventListener('pointerup', this.boundUp);
+            this.wireDragPointerTracking(block, e);
             return;
         }
 
@@ -19888,19 +20223,13 @@ const ActionWarehouse = {
                 pointerX: e.clientX,
                 pointerY: e.clientY
             };
-            this.boundMove = (ev) => this.onPointerMove(ev);
-            this.boundUp = (ev) => this.endDrag(ev);
-            document.addEventListener('pointermove', this.boundMove);
-            document.addEventListener('pointerup', this.boundUp);
+            this.wireDragPointerTracking(block, e);
             return;
         }
 
         this.clearMacroIndicationGhost();
         this.beginDragLift(block, e, { depthUi });
-        this.boundMove = (ev) => this.onPointerMove(ev);
-        this.boundUp = (ev) => this.endDrag(ev);
-        document.addEventListener('pointermove', this.boundMove);
-        document.addEventListener('pointerup', this.boundUp);
+        this.wireDragPointerTracking(block, e);
     },
 
     onPointerMove(e) {
@@ -19914,25 +20243,8 @@ const ActionWarehouse = {
             );
             const clickThreshold = CONFIG.depth.clickDragThreshold ?? 6;
             if (moved >= clickThreshold) {
-                const block = drag.block;
-                const restoreX = block.element.getBoundingClientRect().left;
-                const restoreY = block.element.getBoundingClientRect().top;
-                document.removeEventListener('pointermove', this.boundMove);
-                document.removeEventListener('pointerup', this.boundUp);
-                this.dragState = null;
-                this.clearMacroIndicationGhost();
-                this.beginDragLift(block, e, {
-                    depthUi: !!drag.depthUiClickDeploy,
-                    liftFromSurface: !drag.depthUiClickDeploy && !drag.macroClickIndicate,
-                    startClientX: drag.startClientX,
-                    startClientY: drag.startClientY,
-                    restoreX,
-                    restoreY
-                });
-                this.boundMove = (ev) => this.onPointerMove(ev);
-                this.boundUp = (ev) => this.endDrag(ev);
-                document.addEventListener('pointermove', this.boundMove);
-                document.addEventListener('pointerup', this.boundUp);
+                // Do not unwire / release capture here — that drops the gesture.
+                this.promoteClickPendingToDrag(e, drag);
             }
             return;
         }
@@ -19982,7 +20294,7 @@ const ActionWarehouse = {
                      Math.min(CONFIG.warehouse.drag.maxTilt, drag.velX * 0.6));
         this.applyTransform(block, tilt);
         if (!drag.depthUi) {
-            this.syncBody(block);
+            this.syncBody(block, { reuseCachedMetrics: true });
         }
         if (block.type === 'frame' && (block.nestedBlocks || []).length > 0) {
             this.refreshFrameLayout(block);
@@ -20001,8 +20313,7 @@ const ActionWarehouse = {
         const block = drag.block;
 
         if (drag.clickPending) {
-            document.removeEventListener('pointermove', this.boundMove);
-            document.removeEventListener('pointerup', this.boundUp);
+            this.unwireDragPointerTracking(block, e);
             this.dragState = null;
 
             const moved = Math.hypot(
@@ -20015,19 +20326,31 @@ const ActionWarehouse = {
                     this.animateDeployToDepthBar(block);
                 } else if (drag.macroClickIndicate) {
                     this.animateMacroDeployIndication(block);
-                } else if (drag.depthUiReturn ||
-                    block.element.classList.contains('is-removable')) {
+                } else if (drag.depthUiReturn) {
+                    this.returnToDock(block);
+                } else if (drag.surfaceReposition &&
+                    typeof DepthTransitionOrchestrator !== 'undefined') {
+                    DepthTransitionOrchestrator.runBlockClick(block);
+                } else if (block.element.classList.contains('is-removable')) {
                     this.returnToDock(block);
                 } else if (typeof DepthTransitionOrchestrator !== 'undefined') {
                     DepthTransitionOrchestrator.runBlockClick(block);
                 }
+                return;
+            }
+
+            // Moved past threshold without a live promote (rare) — snap to release offset.
+            const rect = block.element.getBoundingClientRect();
+            const releasePageX = rect.left + (e.clientX - drag.startClientX) + window.pageXOffset;
+            const releasePageY = rect.top + (e.clientY - drag.startClientY) + window.pageYOffset;
+            if (drag.surfaceReposition || block.element.classList.contains('is-deployed')) {
+                this.deployBlockAtPageCoords(block, releasePageX, releasePageY);
             }
             return;
         }
 
         cancelAnimationFrame(drag.rafId);
-        document.removeEventListener('pointermove', this.boundMove);
-        document.removeEventListener('pointerup', this.boundUp);
+        this.unwireDragPointerTracking(block, e);
 
         const moved = Math.hypot(
             e.clientX - drag.startClientX,
@@ -20039,26 +20362,17 @@ const ActionWarehouse = {
             drag.liftFromSurface &&
             drag.wasCaptureOnSurface &&
             moved < clickThreshold &&
-            DepthController.currentLevel === 1 &&
-            typeof DepthTransitionOrchestrator !== 'undefined'
+            DepthController.currentLevel === 1
         ) {
             this.dragState = null;
             block.isDragging = false;
             block.carryOrbitWhileDragging = false;
-            block.x = drag.restoreX;
-            block.y = drag.restoreY;
             block.element.classList.remove('is-dragging');
-            block.element.classList.add('is-deployed');
-            this.applyTransform(block, 0);
-            this.syncBlockRemovable(block);
-            if (block.body) {
-                Matter.Body.setPosition(block.body, { x: block.bodyX, y: block.bodyY });
-            }
-            if (block.element.classList.contains('is-removable')) {
-                this.returnToDock(block);
-                return;
-            }
-            DepthTransitionOrchestrator.runBlockClick(block);
+            this.deployBlockAtPageCoords(
+                block,
+                drag.restoreX + window.pageXOffset,
+                drag.restoreY + window.pageYOffset
+            );
             return;
         }
 
@@ -20117,8 +20431,11 @@ const ActionWarehouse = {
             return;
         }
 
-        // Deployed blocks stay static: immovable anchors the dots organize around.
-        // Convert viewport coords to page coords so the block scrolls with the canvas.
+        if (block.element.releasePointerCapture) {
+            try { block.element.releasePointerCapture(e.pointerId); } catch (_) { /* noop */ }
+        }
+
+        // Reposition on canvas — viewport drag coords → page space for scroll sync.
         block.x += window.pageXOffset;
         block.y += window.pageYOffset;
         this.deployBlockAtPageCoords(block, block.x, block.y);
@@ -20133,8 +20450,12 @@ const ActionWarehouse = {
             block.element.parentElement === block.slotElement;
         if (docked) {
             this.markSlotEmpty(block);
-            document.body.appendChild(block.element);
             block.element.classList.remove('is-deployed', 'is-nested', 'is-depth-ui-mounted', 'is-dragging');
+        }
+
+        // Always keep deployed blocks on body so L1 `#app { pointer-events: none }` cannot swallow hits.
+        if (block.element.parentElement !== document.body) {
+            document.body.appendChild(block.element);
         }
 
         const { width, height } = this.blockMetrics(block);
@@ -20156,6 +20477,7 @@ const ActionWarehouse = {
         this.syncFrameBodyOwnership(block);
         if (block.type === 'frame') this.refreshFrameLayout(block);
         this.syncBlockRemovable(block);
+        this.markCaptureBlockCoordsDirty();
         this.updateWorkspaceState();
         if (typeof NavigationMap !== 'undefined') {
             NavigationMap.flushPendingBlockLayoutRender();
@@ -20198,6 +20520,7 @@ const ActionWarehouse = {
         block.state = 'docked';
         block.nestedIn = null;
         block.carryOrbitWhileDragging = false;
+        this.markCaptureBlockCoordsDirty?.();
         if (this.isDepthUiLevel()) {
             this.updateDotFocusFilter();
         } else {
@@ -20247,10 +20570,16 @@ const ActionWarehouse = {
         block.body = null;
     },
 
-    syncBody(block) {
-        const { width, height } = this.blockMetrics(block);
-        block.collisionW = width;
-        block.collisionH = height;
+    syncBody(block, { reuseCachedMetrics = false } = {}) {
+        let width = block.collisionW;
+        let height = block.collisionH;
+        if (!reuseCachedMetrics || !(width > 0) || !(height > 0)) {
+            const metrics = this.blockMetrics(block);
+            width = metrics.width;
+            height = metrics.height;
+            block.collisionW = width;
+            block.collisionH = height;
+        }
         block.bodyX = block.x + width / 2 + window.pageXOffset;
         block.bodyY = block.y + height / 2 + window.pageYOffset;
         if (block.body) Matter.Body.setPosition(block.body, { x: block.bodyX, y: block.bodyY });
@@ -21099,7 +21428,7 @@ Object.assign(ActionWarehouse, {
     syncDeployedBlockPositions() {
         this.blocks.forEach(block => {
             if (!block.isDragging || !block.body) return;
-            this.syncBody(block);
+            this.syncBody(block, { reuseCachedMetrics: true });
         });
     },
 
@@ -21324,13 +21653,25 @@ Object.assign(ActionWarehouse, {
     },
 
     refreshCaptureBlockCoords() {
+        const scrollX = window.pageXOffset;
+        const scrollY = window.pageYOffset;
+        const scrollChanged = this._captureScrollX !== scrollX || this._captureScrollY !== scrollY;
+        if (!scrollChanged && !this._captureCoordsDirty) return;
+        this._captureScrollX = scrollX;
+        this._captureScrollY = scrollY;
+        this._captureCoordsDirty = false;
+
         this.getActiveCaptureBlocks().forEach(block => {
             if (block.isDragging || !block.element) return;
             const rect = block.element.getBoundingClientRect();
             block.x = rect.left;
             block.y = rect.top;
-            this.syncBody(block);
+            this.syncBody(block, { reuseCachedMetrics: true });
         });
+    },
+
+    markCaptureBlockCoordsDirty() {
+        this._captureCoordsDirty = true;
     },
 
     clampTargetToBlockRing(x, y, block, maxRing = scale(280)) {
@@ -23967,8 +24308,14 @@ const OpeningBackground = {
         const mirrorDiv = this._mirrorDivisor(cfg);
         const dotMin = cfg.dotCountMin ?? 2;
         const dotMax = cfg.dotCountMax ?? 5;
-        const maxUnique = Math.max(1, Math.ceil((cfg.blobCount ?? 8) / mirrorDiv));
-        const pillUnique = Math.max(0, Math.ceil((cfg.pillCount ?? 0) / mirrorDiv));
+        const uniqueMolecules = typeof cfg.scatterUniqueMolecules === 'number'
+            ? cfg.scatterUniqueMolecules
+            : Math.max(1, Math.ceil((cfg.blobCount ?? 8) / mirrorDiv));
+        const uniquePills = typeof cfg.scatterUniquePills === 'number'
+            ? cfg.scatterUniquePills
+            : Math.max(0, Math.ceil((cfg.pillCount ?? 0) / mirrorDiv));
+        const maxUnique = uniqueMolecules;
+        const pillUnique = uniquePills;
         const maxDotSlots = maxUnique * dotMax + pillUnique;
         let remaining = Math.min(paletteLen, maxDotSlots) - pillUnique;
         remaining = Math.max(0, remaining);
@@ -24026,7 +24373,6 @@ const OpeningBackground = {
 
         for (let i = 0; i < count; i++) {
             if (cursor >= pool.length) {
-                console.warn('OpeningBackground: tag color pool exhausted, reusing from start');
                 cursor = 0;
             }
             colors.push(pool[cursor++]);
@@ -24962,6 +25308,56 @@ const OpeningBackground = {
         ctx.globalCompositeOperation = 'source-over';
     },
 
+    _sampleMirrorRadius(minDim, rand, cfg, slotIndex = null, slotCount = 1) {
+        const rMin = minDim * (cfg.scatterRadiusMin ?? 0.08);
+        const rMax = minDim * (cfg.scatterRadiusMax ?? 0.28);
+        const span = Math.max(0, rMax - rMin);
+
+        if (cfg.scatterRadiusStratify && slotIndex != null && slotCount > 0) {
+            const bands = Math.max(1, cfg.scatterRadiusBands ?? 3);
+            const bandIndex = slotIndex % bands;
+            const bandSize = span / bands;
+            const jitter = bandSize * (cfg.scatterRadiusJitter ?? 0.68);
+            const inset = (bandSize - jitter) * 0.5;
+            return rMin + bandSize * bandIndex + inset + rand() * jitter;
+        }
+
+        return rMin + rand() * span;
+    },
+
+    _sampleMirrorScatterXY(minDim, centerX, centerY, rand, cfg, slotIndex = null, slotCount = 1) {
+        if (cfg.scatterAngular) {
+            const degMin = cfg.scatterAngleMinDeg ?? 0;
+            const degMax = cfg.scatterAngleMaxDeg ?? 90;
+            const span = Math.max(0, degMax - degMin);
+            let angleDeg;
+            if (cfg.scatterAngularStratify && slotIndex != null && slotCount > 1) {
+                const slice = span / slotCount;
+                const jitter = slice * (cfg.scatterAngleJitter ?? 0.72);
+                const inset = (slice - jitter) * 0.5;
+                angleDeg = degMin + slice * slotIndex + inset + rand() * jitter;
+            } else {
+                angleDeg = degMin + rand() * span;
+            }
+            const angle = angleDeg * (Math.PI / 180);
+            const r = this._sampleMirrorRadius(minDim, rand, cfg, slotIndex, slotCount);
+            return {
+                cx: centerX + Math.cos(angle) * r,
+                cy: centerY - Math.sin(angle) * r
+            };
+        }
+
+        const spread = minDim * (cfg.scatterSpread ?? 0.28);
+        const insetRatio = cfg.scatterMirrorInset ?? 0.04;
+        const reach = cfg.scatterMirrorReach ?? 1;
+        const inset = spread * insetRatio;
+        const range = Math.max(inset, (spread - inset) * reach);
+        return {
+            cx: centerX + inset + rand() * range,
+            cy: centerY - inset - rand() * range
+        };
+    },
+
     _buildScatterMolecules(w, h, targetCount, rand, cfg, safeRect = null) {
         const minDim = Math.min(w, h);
         const radiusMin = minDim * (cfg.radiusMin ?? 0.04);
@@ -24972,7 +25368,9 @@ const OpeningBackground = {
         const mirrorFolds = cfg.mirrorFolds ?? 2;
         const useMirror = mirrorFolds >= 2;
         const mirrorDivisor = useMirror ? 4 : 1;
-        const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
+        const uniqueCount = typeof cfg.scatterUniqueMolecules === 'number'
+            ? cfg.scatterUniqueMolecules
+            : Math.max(1, Math.ceil(targetCount / mirrorDivisor));
         const blobs = [];
 
         const maxAttempts = cfg.scatterMaxAttempts ?? 32;
@@ -24983,18 +25381,18 @@ const OpeningBackground = {
             let cy;
             let placed = false;
 
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const sampleXY = () => {
                 if (useMirror) {
-                    const insetRatio = cfg.scatterMirrorInset ?? 0.04;
-                    const reach = cfg.scatterMirrorReach ?? 1;
-                    const inset = spread * insetRatio;
-                    const range = Math.max(inset, (spread - inset) * reach);
-                    cx = centerX + inset + rand() * range;
-                    cy = centerY - inset - rand() * range;
-                } else {
-                    cx = centerX + (rand() - 0.5) * 2 * spread;
-                    cy = centerY + (rand() - 0.5) * 2 * spread;
+                    return this._sampleMirrorScatterXY(minDim, centerX, centerY, rand, cfg, i, uniqueCount);
                 }
+                return {
+                    cx: centerX + (rand() - 0.5) * 2 * spread,
+                    cy: centerY + (rand() - 0.5) * 2 * spread
+                };
+            };
+
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                ({ cx, cy } = sampleXY());
 
                 if (!safeRect || !this._pointInSafeRect(cx, cy, scale, safeRect)) {
                     placed = true;
@@ -25002,7 +25400,9 @@ const OpeningBackground = {
                 }
             }
 
-            if (!placed) continue;
+            if (!placed) {
+                ({ cx, cy } = sampleXY());
+            }
 
             const colorRand = this._rand((this._layoutSeed + i * 7919) >>> 0);
             const spec = this._sampleMoleculeSpec(colorRand, cfg, i);
@@ -25025,7 +25425,9 @@ const OpeningBackground = {
         const mirrorFolds = cfg.mirrorFolds ?? 2;
         const useMirror = mirrorFolds >= 2;
         const mirrorDivisor = useMirror ? 4 : 1;
-        const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
+        const uniqueCount = typeof cfg.scatterUniquePills === 'number'
+            ? cfg.scatterUniquePills
+            : Math.max(1, Math.ceil(targetCount / mirrorDivisor));
         const pills = [];
 
         const maxAttempts = cfg.scatterMaxAttempts ?? 32;
@@ -25036,18 +25438,18 @@ const OpeningBackground = {
             let placed = false;
             const hitR = minDim * 0.05;
 
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const sampleXY = () => {
                 if (useMirror) {
-                    const insetRatio = cfg.scatterMirrorInset ?? 0.06;
-                    const reach = cfg.scatterMirrorReach ?? 0.92;
-                    const inset = spread * insetRatio;
-                    const range = Math.max(inset, (spread - inset) * reach);
-                    cx = centerX + inset + rand() * range;
-                    cy = centerY - inset - rand() * range;
-                } else {
-                    cx = centerX + (rand() - 0.5) * 2 * spread;
-                    cy = centerY + (rand() - 0.5) * 2 * spread;
+                    return this._sampleMirrorScatterXY(minDim, centerX, centerY, rand, cfg, i, uniqueCount);
                 }
+                return {
+                    cx: centerX + (rand() - 0.5) * 2 * spread,
+                    cy: centerY + (rand() - 0.5) * 2 * spread
+                };
+            };
+
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                ({ cx, cy } = sampleXY());
 
                 if (!safeRect || !this._pointInSafeRect(cx, cy, hitR, safeRect)) {
                     placed = true;
@@ -25055,7 +25457,9 @@ const OpeningBackground = {
                 }
             }
 
-            if (!placed) continue;
+            if (!placed) {
+                ({ cx, cy } = sampleXY());
+            }
 
             pills.push(this._buildPillBlock(cx, cy, minDim, rand, cfg, i));
         }
@@ -25127,9 +25531,10 @@ const OpeningBackground = {
             ? this._buildScatterPills(w, h, pillTarget, rand, cfg, safeRect)
             : [];
         const drawBlobs = [];
+        const openingArt = this._isOpeningArt();
 
         const pushBlob = (instance) => {
-            if (safeRect && this._blobHitsSafeRect(instance, safeRect)) return;
+            if (!openingArt && safeRect && this._blobHitsSafeRect(instance, safeRect)) return;
             drawBlobs.push(instance);
         };
 
@@ -26248,6 +26653,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             console.warn('NavigationMap.onBootComplete failed:', err);
         }
+        if (typeof AppState.onWorldReady === 'function') AppState.onWorldReady();
     }, safetyMs);
 
     AppState.init()
@@ -26262,6 +26668,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (mapErr) {
                 console.warn('NavigationMap.onBootComplete failed:', mapErr);
             }
+            if (typeof AppState.onWorldReady === 'function') AppState.onWorldReady();
         })
         .finally(() => {
             clearTimeout(safetyTimer);

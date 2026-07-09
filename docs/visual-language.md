@@ -160,12 +160,12 @@ Tab at physical col 2; panel **12 shell cols** wide (cols 1–12). Pull-up sheet
 - **Hover / grab / pressed:** outer (**color 6**); inner pill (**color 3**); arrow (**color 6**)
 - **Hover:** arrow points **up** (collapsed / expanding)
 - **Open (pinned):** arrow points **down**, **color 3** (including hover while open)
-- **Open layout:** **12 cols × 4 rows** — row **1** handle band; rows **2–4** split **3 cols × 2 rows map** (left) + **9 cols blocks** (right, extra row under arrow); blocks **20px** inset end + **10px** shift left; scroll flush to content top
-- **Open:** drag straight **upward** on the vertical center axis until **12 cols × 4 rows**; handle + arrow travel **vertical only** (bottom-anchored `translateY`, no top/bottom anchor swap); handle rests **top-center** when pinned
+- **Open layout:** **12 cols × 3 rows** — row **1** handle band; rows **2–3** split **3 cols × 2 rows map** (left) + **9 cols blocks** (right, below handle band); blocks **20px** inset end + **10px** shift left; block tray top aligned to handle band (same as map)
+- **Open:** drag straight **upward** on the vertical center axis until **12 cols × 3 rows**; handle + arrow travel **vertical only** (bottom-anchored `translateY`, no top/bottom anchor swap); handle rests **top-center** when pinned
 - **Open:** drag the pill upward past the snap threshold, or **click** the arrow button while collapsed
 - **While dragging:** map + blocks clip-reveal inside the growing panel; blocks muted until fully snapped
 - **Close:** drag the pill back along the rail, **click** the arrow button, click outside, or Escape
-- Full panel: minimap (**3 cols × 2 rows**, left) + tag blocks (**9 cols**, rows 2–4) + launcher handle (**top-center** when open)
+- Full panel: minimap (**3 cols × 2 rows**, left) + tag blocks (**9 cols**, rows 2–3, below handle band) + launcher handle (**top-center** when open)
 
 **Legacy launcher strip** (`expandDrag: false`): hover peek + click pin — see changelog.
 
@@ -199,7 +199,7 @@ All block/tag pills share dimensions site-wide; chrome varies by **context/state
 |---------|---------|------|------|--------|------------------|
 | **Default** | Dock, deployed, depth bar | color 3 | color 1 | none | sheet tag color (tags only) |
 | **Default hover** | Dock tag pills | color 3 | color 1 | **2px** sheet tag color | sheet tag color |
-| **Remove hover** | Selected/deployed removable blocks | color 3 | color 1 | none | **×** — tag color (tags) or color 1 (author); click returns to dock |
+| **Remove hover** | Selected/deployed removable blocks | color 3 | color 1 | none | **×** — tag color (tags) or color 1 (author); **×** click returns to dock; L1 surface block **drag** repositions (molecules follow); L1 surface **tap** opens L3 filter view |
 | **Attached to note** | L2 / inspector pills below cards | color 1 | color 4 | none | sheet tag color — not clickable |
 | **Irrelevant / muted** | Capture-full + co-occurrence dock mute | color 2 | color 5 | none | color 5 filled circle (tags only) |
 | **Empty slot** | Reserved dock ghost after deploy | color 6 | color 2 | **2px** color 2 | hollow ring color 2 |
@@ -228,7 +228,7 @@ All block/tag pills share dimensions site-wide; chrome varies by **context/state
 
 - Hull outline **0.4pt** (`CONFIG.outlines.width`); on hover the hull **fills with color 6** (`--color-6`, `hoverFillMode: 'token'`; canvas layer behind DOM dots; `body.is-molecule-hover`)
 - **Idle breathing:** whole-molecule visual drift (`CONFIG.physics.breathing`) — sine offset on draw positions only; physics bodies unchanged; quieter when captured or on bank grid
-- **Title mode** (`moleculeHoverMode: 'title'` — current default): floating `.molecule-hover-title` pinned on hover start at fixed viewport coords; **10px** (`var(--space-10)`) outside the hull top corner (RTL `maxX` / LTR `minX`); when **no blocks** are on the surface, vertically centered in the macro **inter-row corridor** between molecule rows (`.is-row-gap-y`, `translateY(-50%)`); with blocks deployed, stays above the hull corner; does not track molecule motion after pin; **truncation rule** (no ellipsis): first title line only (body fallback) → phrase clip within **8 words** (prefer sentence `.!?…`, else clause `,;:—`) → pixel-fit to `.note-h` at `min(28rem, 42vw)` whole words only; `.note-h` scale, transparent background
+- **Title mode** (`moleculeHoverMode: 'title'` — current default): floating `.molecule-hover-title` pinned on hover start at fixed viewport coords; **10px** (`var(--space-10)`) outside the hull top corner on the horizontal axis (RTL `maxX` / LTR `minX`); vertical offset uses `--molecule-hover-shift-y` (**10px** down from the prior above-hull gap, so the label sits flush with the hull top); when **no blocks** are on the surface, vertically centered in the macro **inter-row corridor** between molecule rows (`.is-row-gap-y`, `translateY(-50% + shift)`); with blocks deployed, stays at the hull corner; does not track molecule motion after pin; **truncation rule** (no ellipsis): first title line only (body fallback) → phrase clip within **8 words** (prefer sentence `.!?…`, else clause `,;:—`) → pixel-fit to `.note-h` at `min(28rem, 42vw)` whole words only; `.note-h` scale, transparent background
 - **Blocks / mixed modes** (optional): same floating label with attached-block pill row via `MicroMock.buildTagsRowHTML`; config: `moleculeHoverMode`, `moleculeHoverBlocksPercent`, `moleculeHoverBlocksPerRow`, `moleculeHoverBlocksSingleRowMax`
 - Warehouse hover port (`.warehouse-hover-port`) remains in the message band but is unused for L1 hover
 - Code path: `PhysicsEngine.updateMoleculeHoverState()`
@@ -321,6 +321,17 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-09 | Expand-drag block menu **4→3 rows** (`expandRows`); pinned block tray starts below handle band (matches map — launcher no longer covers top block row) |
+| 2026-07-09 | Deployed surface blocks raised to `z-index: 896` while strip pinned / popup open — above `warehouse-popup-backdrop` (895) so they stay grabbable; strip guard in `startDrag` now applies only to blocks still docked in the tray |
+| 2026-07-09 | L1 hover label: pixel-fit subtracts inline padding; never keeps an overflowing word (no mid-word CSS clip) |
+| 2026-07-09 | L1 deployed blocks: drag to reposition on canvas (captured molecules follow); tap opens L3 filter — **×** only removes to dock |
+| 2026-07-09 | L1 molecule hover label: **+10px** down (`--molecule-hover-shift-y` on `.molecule-hover-title`; hull-corner and inter-row corridor modes) |
+| 2026-07-09 | About open on **L1/L3**: full-viewport blur via `backdrop-filter` on sheet backdrop (dock, layer nav, links, canvas — not `#app` only) |
+| 2026-07-09 | About panel: details block **+10px** further right (`margin-left` 10→20px) |
+| 2026-07-09 | About panel: details block **+20px** right (`margin-left` −10→+10); logo **+10px** right |
+| 2026-07-09 | About panel: arrows→title gap **10→5px**; title→body gap **15→7.5px** (second −50% pass) |
+| 2026-07-09 | About panel: arrows→title gap **20→10px**; title→body gap **30→15px** |
+| 2026-07-09 | About panel: title uses **opening title fit** (char gaps, `opening-screen__title`); text + details **5 cols** each; backdrop blur/grain synced to `opening.background`; decorative **entry note** centered on panel bottom-right |
 | 2026-07-08 | Related notes panel: title **באותו נושא:** at regular text size; suggestion cards enlarged to focus-note style (`focusScale`), **one per row** at focus width; ID **color 2**, **10px** left inset, sticky animation removed; **40px** gap from focus note |
 | 2026-07-08 | Focus inspector: title + tags **20px** right padding; related notes **color 6** panel (5px radius, 20px pad); suggestions **L1 macro origin only**, **2+ tag combinations** only |
 | 2026-07-08 | Expand-drag panel **12×4** — **3×2 map** + **9 col** blocks (row 2 under arrow); blocks **20px** end inset, **10px** left shift, scroll flush top |

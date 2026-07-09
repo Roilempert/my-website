@@ -3,13 +3,26 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="Human Notes - Alternative Index" />
-  <title>עקבות | אינדקס אלטרנטיבי</title>
+  <meta name="description" content="דברים" />
+  <title>דברים</title>
   <link rel="icon" href="assets/ui/site-icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=20260708113231" />
+  <link rel="stylesheet" href="styles.css?v=20260709014056" />
+  <!-- Screen transition: if we arrived from the opening screen, start covered
+       (set synchronously, before body paints, to avoid a flash). -->
+  <script>
+    try {
+      if (sessionStorage.getItem('screenTransition') === '1') {
+        sessionStorage.removeItem('screenTransition');
+        document.documentElement.classList.add('is-screen-entering');
+      }
+    } catch (e) { /* ignore */ }
+  </script>
+  <!-- No-server mode: serve data/assets from baked-in registry under file:// -->
+  <script src="js/offline-data-shim.js" defer></script>
+  <script src="data/embedded-data.js" defer></script>
   <script src="vendor/matter.min.js" defer></script>
   <script src="js/config.js" defer></script>
-  <script src="js/app.js?v=20260708113231" defer></script>
+  <script src="js/app.js?v=20260709014056" defer></script>
 </head>
   <body class="site-grid">
     <div id="site-background" data-site-layer="background" aria-hidden="true"></div>
@@ -23,5 +36,6 @@
     </div>
     <div id="nav-surface" data-site-layer="nav" aria-hidden="true"></div>
     <main id="app" data-site-layer="canvas"></main>
+    <div id="screen-transition-cover" aria-hidden="true"></div>
   </body>
 </html>

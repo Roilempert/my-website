@@ -89,6 +89,7 @@ Active work continues on **`main`**. The archive branch stays frozen unless you 
 |-----|---------|
 | [`REFERENCE-2026-06-25-layout-boot.md`](REFERENCE-2026-06-25-layout-boot.md) | Site loads, warehouse, data pipeline, boot order (25 Jun 2026) |
 | [`REFERENCE-2026-06-28-navigation-map-scaling.md`](REFERENCE-2026-06-28-navigation-map-scaling.md) | Minimap L1/L2 scaling (28 Jun 2026) |
+| [`REFERENCE-2026-07-09-deployed-block-regrab.md`](REFERENCE-2026-07-09-deployed-block-regrab.md) | L1 deployed block not draggable after drop — backdrop z-index + strip guard (9 Jul 2026) |
 
 Pair layout-boot with `CHECKPOINT.md` for physics.
 

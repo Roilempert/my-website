@@ -169,8 +169,7 @@ const ActionWarehouse = {
 
         const drag = this.dragState;
         cancelAnimationFrame(drag.rafId);
-        document.removeEventListener('pointermove', this.boundMove);
-        document.removeEventListener('pointerup', this.boundUp);
+        this.unwireDragPointerTracking(drag.block, null);
 
         const block = drag.block;
         block?.element?.classList.remove('is-dragging');
@@ -2397,6 +2396,56 @@ const ActionWarehouse = {
 
     /* --- Drag mechanics (spring-follow + velocity tilt) --- */
 
+    wireDragPointerTracking(block, e) {
+        this.boundMove = (ev) => this.onPointerMove(ev);
+        this.boundUp = (ev) => this.endDrag(ev);
+        this.boundCancel = (ev) => this.endDrag(ev);
+        const opts = { capture: true };
+        document.addEventListener('pointermove', this.boundMove, opts);
+        document.addEventListener('pointerup', this.boundUp, opts);
+        document.addEventListener('pointercancel', this.boundCancel, opts);
+        if (block?.element?.setPointerCapture && e?.pointerId != null) {
+            try { block.element.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
+        }
+    },
+
+    unwireDragPointerTracking(block, e) {
+        if (!this.boundMove) return;
+        const opts = { capture: true };
+        document.removeEventListener('pointermove', this.boundMove, opts);
+        document.removeEventListener('pointerup', this.boundUp, opts);
+        document.removeEventListener('pointercancel', this.boundCancel, opts);
+        if (block?.element?.releasePointerCapture && e?.pointerId != null) {
+            try { block.element.releasePointerCapture(e.pointerId); } catch (_) { /* noop */ }
+        }
+    },
+
+    /** Promote click-pending → live drag without releasing pointer capture (critical for surface blocks). */
+    promoteClickPendingToDrag(e, drag) {
+        const block = drag.block;
+        const restoreX = block.element.getBoundingClientRect().left;
+        const restoreY = block.element.getBoundingClientRect().top;
+        this.clearMacroIndicationGhost();
+        this.beginDragLift(block, e, {
+            depthUi: !!drag.depthUiClickDeploy,
+            liftFromSurface: drag.surfaceReposition ||
+                (!drag.depthUiClickDeploy && !drag.macroClickIndicate),
+            startClientX: drag.startClientX,
+            startClientY: drag.startClientY,
+            restoreX,
+            restoreY
+        });
+        if (!this.dragState) return;
+        this.dragState.pointerX = e.clientX;
+        this.dragState.pointerY = e.clientY;
+        block.x = e.clientX - this.dragState.grabDX;
+        block.y = e.clientY - this.dragState.grabDY;
+        this.applyTransform(block, 0);
+        if (!this.dragState.depthUi) {
+            this.syncBody(block, { reuseCachedMetrics: true });
+        }
+    },
+
     beginDragLift(block, e, dragMeta = {}) {
         const depthUi = dragMeta.depthUi === true;
         const pullFromFrame = !!block.nestedIn;
@@ -2415,7 +2464,7 @@ const ActionWarehouse = {
 
         block.element.classList.add('is-dragging');
         block.element.classList.remove('is-deployed', 'is-nested', 'is-depth-ui-mounted');
-        if (!pullFromFrame) {
+        if (!pullFromFrame && !liftFromSurface) {
             this.markSlotEmpty(block);
         }
         document.body.appendChild(block.element);
@@ -2467,12 +2516,22 @@ const ActionWarehouse = {
         }
 
         this.dragLoop();
+
+        // Keep / re-assert capture on the same element — never release mid-gesture.
+        if (e?.pointerId != null && block.element.setPointerCapture) {
+            try { block.element.setPointerCapture(e.pointerId); } catch (_) { /* noop */ }
+        }
     },
 
     startDrag(block, e) {
         const depthUi = this.isDepthUiLevel();
         if (this.dragState || (!depthUi && DepthController.currentLevel !== 1)) return;
+        // Block grabs from a collapsed strip only for blocks still docked in their
+        // tray slot. Deployed blocks keep their home slot in the strip tray, and the
+        // grab pointerdown itself unpins the strip (outside-click handler runs first) —
+        // without the docked check they could never be re-grabbed from the surface.
         if (this.isLauncherStripMode() &&
+            block.state === 'docked' &&
             block.slotElement?.parentElement === this.launcherStripTrayElement &&
             !this.launcherStripPinned) {
             return;
@@ -2496,16 +2555,14 @@ const ActionWarehouse = {
             this.dragState = {
                 block: block,
                 clickPending: true,
+                surfaceReposition: true,
                 depthUi: false,
                 startClientX: e.clientX,
                 startClientY: e.clientY,
                 pointerX: e.clientX,
                 pointerY: e.clientY
             };
-            this.boundMove = (ev) => this.onPointerMove(ev);
-            this.boundUp = (ev) => this.endDrag(ev);
-            document.addEventListener('pointermove', this.boundMove);
-            document.addEventListener('pointerup', this.boundUp);
+            this.wireDragPointerTracking(block, e);
             return;
         }
 
@@ -2523,10 +2580,7 @@ const ActionWarehouse = {
                 pointerX: e.clientX,
                 pointerY: e.clientY
             };
-            this.boundMove = (ev) => this.onPointerMove(ev);
-            this.boundUp = (ev) => this.endDrag(ev);
-            document.addEventListener('pointermove', this.boundMove);
-            document.addEventListener('pointerup', this.boundUp);
+            this.wireDragPointerTracking(block, e);
             return;
         }
 
@@ -2542,10 +2596,7 @@ const ActionWarehouse = {
                 pointerX: e.clientX,
                 pointerY: e.clientY
             };
-            this.boundMove = (ev) => this.onPointerMove(ev);
-            this.boundUp = (ev) => this.endDrag(ev);
-            document.addEventListener('pointermove', this.boundMove);
-            document.addEventListener('pointerup', this.boundUp);
+            this.wireDragPointerTracking(block, e);
             return;
         }
 
@@ -2561,19 +2612,13 @@ const ActionWarehouse = {
                 pointerX: e.clientX,
                 pointerY: e.clientY
             };
-            this.boundMove = (ev) => this.onPointerMove(ev);
-            this.boundUp = (ev) => this.endDrag(ev);
-            document.addEventListener('pointermove', this.boundMove);
-            document.addEventListener('pointerup', this.boundUp);
+            this.wireDragPointerTracking(block, e);
             return;
         }
 
         this.clearMacroIndicationGhost();
         this.beginDragLift(block, e, { depthUi });
-        this.boundMove = (ev) => this.onPointerMove(ev);
-        this.boundUp = (ev) => this.endDrag(ev);
-        document.addEventListener('pointermove', this.boundMove);
-        document.addEventListener('pointerup', this.boundUp);
+        this.wireDragPointerTracking(block, e);
     },
 
     onPointerMove(e) {
@@ -2587,25 +2632,8 @@ const ActionWarehouse = {
             );
             const clickThreshold = CONFIG.depth.clickDragThreshold ?? 6;
             if (moved >= clickThreshold) {
-                const block = drag.block;
-                const restoreX = block.element.getBoundingClientRect().left;
-                const restoreY = block.element.getBoundingClientRect().top;
-                document.removeEventListener('pointermove', this.boundMove);
-                document.removeEventListener('pointerup', this.boundUp);
-                this.dragState = null;
-                this.clearMacroIndicationGhost();
-                this.beginDragLift(block, e, {
-                    depthUi: !!drag.depthUiClickDeploy,
-                    liftFromSurface: !drag.depthUiClickDeploy && !drag.macroClickIndicate,
-                    startClientX: drag.startClientX,
-                    startClientY: drag.startClientY,
-                    restoreX,
-                    restoreY
-                });
-                this.boundMove = (ev) => this.onPointerMove(ev);
-                this.boundUp = (ev) => this.endDrag(ev);
-                document.addEventListener('pointermove', this.boundMove);
-                document.addEventListener('pointerup', this.boundUp);
+                // Do not unwire / release capture here — that drops the gesture.
+                this.promoteClickPendingToDrag(e, drag);
             }
             return;
         }
@@ -2655,7 +2683,7 @@ const ActionWarehouse = {
                      Math.min(CONFIG.warehouse.drag.maxTilt, drag.velX * 0.6));
         this.applyTransform(block, tilt);
         if (!drag.depthUi) {
-            this.syncBody(block);
+            this.syncBody(block, { reuseCachedMetrics: true });
         }
         if (block.type === 'frame' && (block.nestedBlocks || []).length > 0) {
             this.refreshFrameLayout(block);
@@ -2674,8 +2702,7 @@ const ActionWarehouse = {
         const block = drag.block;
 
         if (drag.clickPending) {
-            document.removeEventListener('pointermove', this.boundMove);
-            document.removeEventListener('pointerup', this.boundUp);
+            this.unwireDragPointerTracking(block, e);
             this.dragState = null;
 
             const moved = Math.hypot(
@@ -2688,19 +2715,31 @@ const ActionWarehouse = {
                     this.animateDeployToDepthBar(block);
                 } else if (drag.macroClickIndicate) {
                     this.animateMacroDeployIndication(block);
-                } else if (drag.depthUiReturn ||
-                    block.element.classList.contains('is-removable')) {
+                } else if (drag.depthUiReturn) {
+                    this.returnToDock(block);
+                } else if (drag.surfaceReposition &&
+                    typeof DepthTransitionOrchestrator !== 'undefined') {
+                    DepthTransitionOrchestrator.runBlockClick(block);
+                } else if (block.element.classList.contains('is-removable')) {
                     this.returnToDock(block);
                 } else if (typeof DepthTransitionOrchestrator !== 'undefined') {
                     DepthTransitionOrchestrator.runBlockClick(block);
                 }
+                return;
+            }
+
+            // Moved past threshold without a live promote (rare) — snap to release offset.
+            const rect = block.element.getBoundingClientRect();
+            const releasePageX = rect.left + (e.clientX - drag.startClientX) + window.pageXOffset;
+            const releasePageY = rect.top + (e.clientY - drag.startClientY) + window.pageYOffset;
+            if (drag.surfaceReposition || block.element.classList.contains('is-deployed')) {
+                this.deployBlockAtPageCoords(block, releasePageX, releasePageY);
             }
             return;
         }
 
         cancelAnimationFrame(drag.rafId);
-        document.removeEventListener('pointermove', this.boundMove);
-        document.removeEventListener('pointerup', this.boundUp);
+        this.unwireDragPointerTracking(block, e);
 
         const moved = Math.hypot(
             e.clientX - drag.startClientX,
@@ -2712,26 +2751,17 @@ const ActionWarehouse = {
             drag.liftFromSurface &&
             drag.wasCaptureOnSurface &&
             moved < clickThreshold &&
-            DepthController.currentLevel === 1 &&
-            typeof DepthTransitionOrchestrator !== 'undefined'
+            DepthController.currentLevel === 1
         ) {
             this.dragState = null;
             block.isDragging = false;
             block.carryOrbitWhileDragging = false;
-            block.x = drag.restoreX;
-            block.y = drag.restoreY;
             block.element.classList.remove('is-dragging');
-            block.element.classList.add('is-deployed');
-            this.applyTransform(block, 0);
-            this.syncBlockRemovable(block);
-            if (block.body) {
-                Matter.Body.setPosition(block.body, { x: block.bodyX, y: block.bodyY });
-            }
-            if (block.element.classList.contains('is-removable')) {
-                this.returnToDock(block);
-                return;
-            }
-            DepthTransitionOrchestrator.runBlockClick(block);
+            this.deployBlockAtPageCoords(
+                block,
+                drag.restoreX + window.pageXOffset,
+                drag.restoreY + window.pageYOffset
+            );
             return;
         }
 
@@ -2790,8 +2820,11 @@ const ActionWarehouse = {
             return;
         }
 
-        // Deployed blocks stay static: immovable anchors the dots organize around.
-        // Convert viewport coords to page coords so the block scrolls with the canvas.
+        if (block.element.releasePointerCapture) {
+            try { block.element.releasePointerCapture(e.pointerId); } catch (_) { /* noop */ }
+        }
+
+        // Reposition on canvas — viewport drag coords → page space for scroll sync.
         block.x += window.pageXOffset;
         block.y += window.pageYOffset;
         this.deployBlockAtPageCoords(block, block.x, block.y);
@@ -2806,8 +2839,12 @@ const ActionWarehouse = {
             block.element.parentElement === block.slotElement;
         if (docked) {
             this.markSlotEmpty(block);
-            document.body.appendChild(block.element);
             block.element.classList.remove('is-deployed', 'is-nested', 'is-depth-ui-mounted', 'is-dragging');
+        }
+
+        // Always keep deployed blocks on body so L1 `#app { pointer-events: none }` cannot swallow hits.
+        if (block.element.parentElement !== document.body) {
+            document.body.appendChild(block.element);
         }
 
         const { width, height } = this.blockMetrics(block);
@@ -2829,6 +2866,7 @@ const ActionWarehouse = {
         this.syncFrameBodyOwnership(block);
         if (block.type === 'frame') this.refreshFrameLayout(block);
         this.syncBlockRemovable(block);
+        this.markCaptureBlockCoordsDirty();
         this.updateWorkspaceState();
         if (typeof NavigationMap !== 'undefined') {
             NavigationMap.flushPendingBlockLayoutRender();
@@ -2871,6 +2909,7 @@ const ActionWarehouse = {
         block.state = 'docked';
         block.nestedIn = null;
         block.carryOrbitWhileDragging = false;
+        this.markCaptureBlockCoordsDirty?.();
         if (this.isDepthUiLevel()) {
             this.updateDotFocusFilter();
         } else {
@@ -2920,10 +2959,16 @@ const ActionWarehouse = {
         block.body = null;
     },
 
-    syncBody(block) {
-        const { width, height } = this.blockMetrics(block);
-        block.collisionW = width;
-        block.collisionH = height;
+    syncBody(block, { reuseCachedMetrics = false } = {}) {
+        let width = block.collisionW;
+        let height = block.collisionH;
+        if (!reuseCachedMetrics || !(width > 0) || !(height > 0)) {
+            const metrics = this.blockMetrics(block);
+            width = metrics.width;
+            height = metrics.height;
+            block.collisionW = width;
+            block.collisionH = height;
+        }
         block.bodyX = block.x + width / 2 + window.pageXOffset;
         block.bodyY = block.y + height / 2 + window.pageYOffset;
         if (block.body) Matter.Body.setPosition(block.body, { x: block.bodyX, y: block.bodyY });

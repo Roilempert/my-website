@@ -107,6 +107,8 @@ navigation.contentPadding: scale(120)
 
 - While dragging: `position: fixed` + `syncBody` with `pageXOffset`
 - After placement: `block.x` in page coordinates (no double `pageXOffset` in `bodyX`)
+- **Deployed re-grab:** `docs/REFERENCE-2026-07-09-deployed-block-regrab.md` — backdrop z-index (896) + strip guard only when `block.state === 'docked'`
+- Deployed blocks stay on `document.body`; click-pending → `promoteClickPendingToDrag` without releasing capture
 
 ### Navigation minimap (`NavigationMap`)
 
