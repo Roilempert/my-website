@@ -1,4 +1,4 @@
-/* opening build 20260708174603 */
+/* opening build 20260709021753 */
 /* ==========================================================================
    Opening Background — L1-style molecules with fold-mirror symmetry
    Tag colors from the data sheet; dots + sibling links + subtle hull outline.
@@ -236,8 +236,14 @@ const OpeningBackground = {
         const mirrorDiv = this._mirrorDivisor(cfg);
         const dotMin = cfg.dotCountMin ?? 2;
         const dotMax = cfg.dotCountMax ?? 5;
-        const maxUnique = Math.max(1, Math.ceil((cfg.blobCount ?? 8) / mirrorDiv));
-        const pillUnique = Math.max(0, Math.ceil((cfg.pillCount ?? 0) / mirrorDiv));
+        const uniqueMolecules = typeof cfg.scatterUniqueMolecules === 'number'
+            ? cfg.scatterUniqueMolecules
+            : Math.max(1, Math.ceil((cfg.blobCount ?? 8) / mirrorDiv));
+        const uniquePills = typeof cfg.scatterUniquePills === 'number'
+            ? cfg.scatterUniquePills
+            : Math.max(0, Math.ceil((cfg.pillCount ?? 0) / mirrorDiv));
+        const maxUnique = uniqueMolecules;
+        const pillUnique = uniquePills;
         const maxDotSlots = maxUnique * dotMax + pillUnique;
         let remaining = Math.min(paletteLen, maxDotSlots) - pillUnique;
         remaining = Math.max(0, remaining);
@@ -1230,6 +1236,56 @@ const OpeningBackground = {
         ctx.globalCompositeOperation = 'source-over';
     },
 
+    _sampleMirrorRadius(minDim, rand, cfg, slotIndex = null, slotCount = 1) {
+        const rMin = minDim * (cfg.scatterRadiusMin ?? 0.08);
+        const rMax = minDim * (cfg.scatterRadiusMax ?? 0.28);
+        const span = Math.max(0, rMax - rMin);
+
+        if (cfg.scatterRadiusStratify && slotIndex != null && slotCount > 0) {
+            const bands = Math.max(1, cfg.scatterRadiusBands ?? 3);
+            const bandIndex = slotIndex % bands;
+            const bandSize = span / bands;
+            const jitter = bandSize * (cfg.scatterRadiusJitter ?? 0.68);
+            const inset = (bandSize - jitter) * 0.5;
+            return rMin + bandSize * bandIndex + inset + rand() * jitter;
+        }
+
+        return rMin + rand() * span;
+    },
+
+    _sampleMirrorScatterXY(minDim, centerX, centerY, rand, cfg, slotIndex = null, slotCount = 1) {
+        if (cfg.scatterAngular) {
+            const degMin = cfg.scatterAngleMinDeg ?? 0;
+            const degMax = cfg.scatterAngleMaxDeg ?? 90;
+            const span = Math.max(0, degMax - degMin);
+            let angleDeg;
+            if (cfg.scatterAngularStratify && slotIndex != null && slotCount > 1) {
+                const slice = span / slotCount;
+                const jitter = slice * (cfg.scatterAngleJitter ?? 0.72);
+                const inset = (slice - jitter) * 0.5;
+                angleDeg = degMin + slice * slotIndex + inset + rand() * jitter;
+            } else {
+                angleDeg = degMin + rand() * span;
+            }
+            const angle = angleDeg * (Math.PI / 180);
+            const r = this._sampleMirrorRadius(minDim, rand, cfg, slotIndex, slotCount);
+            return {
+                cx: centerX + Math.cos(angle) * r,
+                cy: centerY - Math.sin(angle) * r
+            };
+        }
+
+        const spread = minDim * (cfg.scatterSpread ?? 0.28);
+        const insetRatio = cfg.scatterMirrorInset ?? 0.04;
+        const reach = cfg.scatterMirrorReach ?? 1;
+        const inset = spread * insetRatio;
+        const range = Math.max(inset, (spread - inset) * reach);
+        return {
+            cx: centerX + inset + rand() * range,
+            cy: centerY - inset - rand() * range
+        };
+    },
+
     _buildScatterMolecules(w, h, targetCount, rand, cfg, safeRect = null) {
         const minDim = Math.min(w, h);
         const radiusMin = minDim * (cfg.radiusMin ?? 0.04);
@@ -1240,7 +1296,9 @@ const OpeningBackground = {
         const mirrorFolds = cfg.mirrorFolds ?? 2;
         const useMirror = mirrorFolds >= 2;
         const mirrorDivisor = useMirror ? 4 : 1;
-        const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
+        const uniqueCount = typeof cfg.scatterUniqueMolecules === 'number'
+            ? cfg.scatterUniqueMolecules
+            : Math.max(1, Math.ceil(targetCount / mirrorDivisor));
         const blobs = [];
 
         const maxAttempts = cfg.scatterMaxAttempts ?? 32;
@@ -1251,18 +1309,18 @@ const OpeningBackground = {
             let cy;
             let placed = false;
 
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const sampleXY = () => {
                 if (useMirror) {
-                    const insetRatio = cfg.scatterMirrorInset ?? 0.04;
-                    const reach = cfg.scatterMirrorReach ?? 1;
-                    const inset = spread * insetRatio;
-                    const range = Math.max(inset, (spread - inset) * reach);
-                    cx = centerX + inset + rand() * range;
-                    cy = centerY - inset - rand() * range;
-                } else {
-                    cx = centerX + (rand() - 0.5) * 2 * spread;
-                    cy = centerY + (rand() - 0.5) * 2 * spread;
+                    return this._sampleMirrorScatterXY(minDim, centerX, centerY, rand, cfg, i, uniqueCount);
                 }
+                return {
+                    cx: centerX + (rand() - 0.5) * 2 * spread,
+                    cy: centerY + (rand() - 0.5) * 2 * spread
+                };
+            };
+
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                ({ cx, cy } = sampleXY());
 
                 if (!safeRect || !this._pointInSafeRect(cx, cy, scale, safeRect)) {
                     placed = true;
@@ -1270,7 +1328,9 @@ const OpeningBackground = {
                 }
             }
 
-            if (!placed) continue;
+            if (!placed) {
+                ({ cx, cy } = sampleXY());
+            }
 
             const colorRand = this._rand((this._layoutSeed + i * 7919) >>> 0);
             const spec = this._sampleMoleculeSpec(colorRand, cfg, i);
@@ -1293,7 +1353,9 @@ const OpeningBackground = {
         const mirrorFolds = cfg.mirrorFolds ?? 2;
         const useMirror = mirrorFolds >= 2;
         const mirrorDivisor = useMirror ? 4 : 1;
-        const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
+        const uniqueCount = typeof cfg.scatterUniquePills === 'number'
+            ? cfg.scatterUniquePills
+            : Math.max(1, Math.ceil(targetCount / mirrorDivisor));
         const pills = [];
 
         const maxAttempts = cfg.scatterMaxAttempts ?? 32;
@@ -1304,18 +1366,18 @@ const OpeningBackground = {
             let placed = false;
             const hitR = minDim * 0.05;
 
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const sampleXY = () => {
                 if (useMirror) {
-                    const insetRatio = cfg.scatterMirrorInset ?? 0.06;
-                    const reach = cfg.scatterMirrorReach ?? 0.92;
-                    const inset = spread * insetRatio;
-                    const range = Math.max(inset, (spread - inset) * reach);
-                    cx = centerX + inset + rand() * range;
-                    cy = centerY - inset - rand() * range;
-                } else {
-                    cx = centerX + (rand() - 0.5) * 2 * spread;
-                    cy = centerY + (rand() - 0.5) * 2 * spread;
+                    return this._sampleMirrorScatterXY(minDim, centerX, centerY, rand, cfg, i, uniqueCount);
                 }
+                return {
+                    cx: centerX + (rand() - 0.5) * 2 * spread,
+                    cy: centerY + (rand() - 0.5) * 2 * spread
+                };
+            };
+
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                ({ cx, cy } = sampleXY());
 
                 if (!safeRect || !this._pointInSafeRect(cx, cy, hitR, safeRect)) {
                     placed = true;
@@ -1323,7 +1385,9 @@ const OpeningBackground = {
                 }
             }
 
-            if (!placed) continue;
+            if (!placed) {
+                ({ cx, cy } = sampleXY());
+            }
 
             pills.push(this._buildPillBlock(cx, cy, minDim, rand, cfg, i));
         }
@@ -1337,19 +1401,54 @@ const OpeningBackground = {
         const frameCfg = CONFIG?.opening?.titleSafeFrame || {};
         if (frameCfg.enabled === false) return null;
 
-        const title = document.querySelector('#opening-screen .opening-screen__title');
-        if (!title) return null;
-
         const padX = frameCfg.padX ?? 40;
         const padY = frameCfg.padY ?? 30;
-        const r = title.getBoundingClientRect();
+        const subtitlePadY = frameCfg.subtitlePadY ?? 24;
 
-        return {
-            left: r.left - padX,
-            top: r.top - padY,
-            right: r.right + padX,
-            bottom: r.bottom + padY
+        const mergeInto = (rect, next) => {
+            if (!next) return rect;
+            if (!rect) return { ...next };
+            return {
+                left: Math.min(rect.left, next.left),
+                top: Math.min(rect.top, next.top),
+                right: Math.max(rect.right, next.right),
+                bottom: Math.max(rect.bottom, next.bottom)
+            };
         };
+
+        let rect = null;
+        const title = document.querySelector('#opening-screen .opening-screen__content .opening-screen__title')
+            || document.querySelector('#opening-screen .opening-screen__title');
+
+        if (title) {
+            const r = title.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) {
+                rect = mergeInto(rect, {
+                    left: r.left - padX,
+                    top: r.top - padY,
+                    right: r.right + padX,
+                    bottom: r.bottom + padY
+                });
+            }
+        }
+
+        if (frameCfg.includeSubtitle !== false) {
+            const subtitle = document.querySelector('#opening-screen .opening-screen__content .opening-screen__subtitle')
+                || document.querySelector('#opening-screen .opening-screen__subtitle');
+            if (subtitle) {
+                const r = subtitle.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) {
+                    rect = mergeInto(rect, {
+                        left: r.left - padX,
+                        top: r.top - subtitlePadY,
+                        right: r.right + padX,
+                        bottom: r.bottom + subtitlePadY
+                    });
+                }
+            }
+        }
+
+        return rect;
     },
 
     _pointInSafeRect(cx, cy, radius, rect) {
@@ -1395,7 +1494,6 @@ const OpeningBackground = {
             ? this._buildScatterPills(w, h, pillTarget, rand, cfg, safeRect)
             : [];
         const drawBlobs = [];
-
         const pushBlob = (instance) => {
             if (safeRect && this._blobHitsSafeRect(instance, safeRect)) return;
             drawBlobs.push(instance);
@@ -2049,7 +2147,6 @@ const OpeningHoverLabel = {
 const OpeningData = {
     items: [],
     tagColorsMap: new Map(),
-    hoverLines: [],
 
     async init() {
         const url = CONFIG.opening?.dataUrl || 'data/opening-palette.json';
@@ -2066,34 +2163,7 @@ const OpeningData = {
             clearTimeout(timer);
         }
 
-        await this._loadHoverLines();
-
         window.AppState = { items: this.items, tagColorsMap: this.tagColorsMap };
-    },
-
-    async _loadHoverLines() {
-        const miniCfg = CONFIG.opening?.miniTitle || {};
-        if (miniCfg.enabled === false) {
-            this.hoverLines = [];
-            return;
-        }
-
-        const url = miniCfg.notesUrl
-            || CONFIG.data?.local?.main
-            || 'data/main.csv';
-        const maxWords = miniCfg.maxWords ?? CONFIG.depth?.moleculeHoverMaxWords ?? 8;
-
-        try {
-            const response = await fetch(url, { cache: 'force-cache' });
-            if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
-            const csv = await response.text();
-            if (typeof OpeningHoverLabel !== 'undefined') {
-                this.hoverLines = OpeningHoverLabel.extractFromMainCsv(csv, maxWords);
-            }
-        } catch (err) {
-            console.warn('Opening hover lines failed:', err);
-            this.hoverLines = [];
-        }
     },
 
     ingest(data) {
@@ -2145,11 +2215,11 @@ const OpeningScreen = {
     bootFlushed: false,
     el: null,
     continueBtn: null,
-    continueEnabledAt: 0,
+    entryNote: null,
     mountedAt: 0,
-    _enableTimer: null,
     _revealTimer: null,
     _revealFallbackTimer: null,
+    _stageTimers: [],
     _titleFullText: '',
     _titleTypewriterTimer: null,
     _titleTypewriterGen: 0,
@@ -2158,8 +2228,19 @@ const OpeningScreen = {
     _warmupStarted: false,
     _preloadStarted: false,
     _onResize: null,
-    _miniTitleTimer: null,
-    _miniTitleIndex: -1,
+    _notesRendered: false,
+    _artRevealScheduled: false,
+    _contentRevealStarted: false,
+    _contentRevealTimer: null,
+    _entryNoteRaf: null,
+    _entryNoteMotion: null,
+    _entryNotePointer: { x: 0, y: 0, active: false },
+    _entryNotePointerBound: false,
+    _entryNoteHovered: false,
+    _boundEntryNoteMove: null,
+    _boundEntryNoteLeave: null,
+    _boundEntryNoteHoverIn: null,
+    _boundEntryNoteHoverOut: null,
 
     cfg() {
         return CONFIG.opening || {};
@@ -2266,25 +2347,35 @@ const OpeningScreen = {
         this._applyLabels();
         this._mountCorners();
 
-        this._onResize = () => this._fitOpeningTitle();
+        this._onResize = () => {
+            this._fitOpeningTitle();
+            this._positionOpeningCopy();
+            this._positionSubtitleParts();
+        };
         window.addEventListener('resize', this._onResize);
 
-        this.continueBtn = this.el.querySelector('.opening-screen__continue');
+        this.entryNote = this.el.querySelector('.opening-screen__entry-note');
+        this.continueBtn = this.entryNote;
 
-        if (this.continueBtn) {
-            this.continueBtn.disabled = true;
-            this.continueBtn.addEventListener('click', () => this.onContinue());
+        if (this.entryNote) {
+            this.entryNote.disabled = true;
+            this.entryNote.addEventListener('click', () => this.onContinue());
         }
 
         this.el.classList.add('is-visible', 'is-art-pending');
         const fadeMs = this.cfg().artFadeDurationMs ?? 600;
         this.el.style.setProperty('--opening-art-fade-duration', `${fadeMs}ms`);
+        this.el.style.setProperty('--opening-subtitle-split-gap', this.cfg().subtitleSplitGap ?? '3rem');
+        this.el.style.setProperty('--opening-subtitle-second-nudge-x', `${this.cfg().subtitleSecondNudgeX ?? 0}px`);
 
         requestAnimationFrame(() => {
-            this._fitOpeningTitle();
-            this._startTitleTypewriter();
+            requestAnimationFrame(() => {
+                this._fitOpeningTitle();
+                this._positionOpeningCopy();
+                this._positionSubtitleParts();
+                this._startTitleTypewriter();
+            });
         });
-        this._scheduleContinueEnable();
         this._scheduleArtReadyFallback();
     },
 
@@ -2310,57 +2401,239 @@ const OpeningScreen = {
         const title = this.el?.querySelector('.opening-screen__title');
         title?.classList.remove('is-typing', 'is-cursor-wait');
         title?.classList.add('is-title-typed');
-        this._startMiniTitleRotation();
         this._tryRevealArt();
     },
 
     _tryRevealArt() {
-        if (!this.artReady || !this.titleTyped || !this.el) return;
+        if (!this.artReady || !this.titleTyped || !this.el || this._artRevealScheduled) return;
+        this._artRevealScheduled = true;
 
         const delayMs = this.cfg().artRevealAfterTitleMs ?? 500;
         clearTimeout(this._revealTimer);
         this._revealTimer = setTimeout(() => {
             this.el?.classList.remove('is-art-pending');
             this.el?.classList.add('is-art-ready');
-            this._onArtRevealed();
+
+            // Molecules fade first; text layers cascade after a short pause.
+            const start = this.cfg().revealStartDelayMs ?? 450;
+            clearTimeout(this._contentRevealTimer);
+            this._contentRevealTimer = setTimeout(() => this._onArtRevealed(), start);
         }, delayMs);
     },
 
+    // Staggered reveal: subtitle → entry note.
     _onArtRevealed() {
-        this.continueEnabledAt = performance.now() + (this.cfg().minDisplayMs ?? 600);
-        this._tryEnableContinue();
+        if (this._contentRevealStarted) return;
+        this._contentRevealStarted = true;
+
+        const stagger = this.cfg().revealStaggerMs ?? 420;
+
+        this._stageTimers.forEach(clearTimeout);
+        this._stageTimers = [];
+
+        this._stageTimers.push(setTimeout(() => this._revealSubtitle(), stagger));
+        this._stageTimers.push(setTimeout(() => this._revealEntryNote(), stagger * 2));
     },
 
-    _scheduleContinueEnable() {
-        const minMs = this.cfg().minDisplayMs ?? 600;
-        this.continueEnabledAt = performance.now() + minMs;
-        clearTimeout(this._enableTimer);
-        this._enableTimer = setTimeout(() => this._tryEnableContinue(), minMs);
+    _revealSubtitle() {
+        this.el?.classList.add('is-reveal-subtitle');
     },
 
-    _tryEnableContinue() {
-        if (!this.continueBtn || this.skipped || this.dismissing) return;
-        if (!this.artReady || !this.titleTyped) return;
-        if (!this.el?.classList.contains('is-art-ready')) return;
-        if (performance.now() < this.continueEnabledAt) {
-            clearTimeout(this._enableTimer);
-            this._enableTimer = setTimeout(
-                () => this._tryEnableContinue(),
-                Math.max(0, this.continueEnabledAt - performance.now())
-            );
+    _revealEntryNote() {
+        if (!this.entryNote || this.skipped || this.dismissing) return;
+        this.entryNote.disabled = false;
+        this.entryNote.classList.add('is-ready');
+        this._startEntryNoteMotion();
+    },
+
+    _entryNoteCfg() {
+        return this.cfg().entryNote || {};
+    },
+
+    _entryNoteSwayCfg() {
+        return this._entryNoteCfg().sway || {};
+    },
+
+    _entryNoteRotateDeg() {
+        return this._entryNoteCfg().rotateDeg ?? 0;
+    },
+
+    _applyEntryNoteTransform(tx, ty) {
+        if (!this.entryNote) return;
+        const deg = this._entryNoteRotateDeg();
+        this.entryNote.style.transform =
+            `rotate(${deg}deg) translate(${tx.toFixed(2)}px, ${ty.toFixed(2)}px)`;
+    },
+
+    _entryNoteMotionReduced() {
+        const sway = this._entryNoteSwayCfg();
+        if (sway.enabled === false) return true;
+        return typeof window.matchMedia === 'function'
+            && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    },
+
+    _startEntryNoteMotion() {
+        if (!this.entryNote || this._entryNoteMotionReduced()) {
+            this._applyEntryNoteTransform(0, 0);
             return;
         }
-        this.continueBtn.disabled = false;
-        this.continueBtn.classList.add('is-ready');
+
+        const cfg = this._entryNoteSwayCfg();
+        const amp = cfg.driftAmp ?? 14;
+        const speed = cfg.driftSpeed ?? 0.00022;
+        const rand = (min, max) => min + Math.random() * (max - min);
+
+        this._entryNoteMotion = {
+            ampX: amp * rand(0.85, 1.15),
+            ampY: amp * rand(0.85, 1.15),
+            fx: speed * rand(0.75, 1.25),
+            fy: speed * rand(0.75, 1.25),
+            phaseX: rand(0, Math.PI * 2),
+            phaseY: rand(0, Math.PI * 2),
+            vx: 0,
+            vy: 0,
+            pushX: 0,
+            pushY: 0,
+            hoverStop: 0
+        };
+
+        this._bindEntryNotePointer();
+        if (this._entryNoteRaf != null) return;
+
+        const tick = (now) => {
+            this._entryNoteRaf = requestAnimationFrame(tick);
+            this._entryNoteTick(now);
+        };
+        this._entryNoteRaf = requestAnimationFrame(tick);
     },
+
+    _stopEntryNoteMotion() {
+        if (this._entryNoteRaf != null) {
+            cancelAnimationFrame(this._entryNoteRaf);
+            this._entryNoteRaf = null;
+        }
+        this._entryNoteMotion = null;
+        this._unbindEntryNotePointer();
+    },
+
+    _entryNoteTick(now) {
+        const cfg = this._entryNoteSwayCfg();
+        const m = this._entryNoteMotion;
+        const el = this.entryNote;
+        if (!el || !m) return;
+
+        if (this._entryNoteHovered) {
+            m.hoverStop = Math.min(1, (m.hoverStop ?? 0) + 0.07);
+        } else {
+            m.hoverStop = Math.max(0, (m.hoverStop ?? 0) - 0.05);
+        }
+
+        const driftScale = 1 - (m.hoverStop ?? 0);
+        const driftX = m.ampX * Math.sin(now * m.fx + m.phaseX) * driftScale;
+        const driftY = m.ampY * Math.sin(now * m.fy + m.phaseY) * driftScale;
+
+        let tvx = 0;
+        let tvy = 0;
+        const p = this._entryNotePointer;
+        if (p.active && driftScale > 0.05) {
+            const rect = el.getBoundingClientRect();
+            const cx = rect.left + rect.width / 2 + m.pushX;
+            const cy = rect.top + rect.height / 2 + m.pushY;
+            const dx = cx - p.x;
+            const dy = cy - p.y;
+            const dist = Math.hypot(dx, dy);
+            const radius = cfg.repelRadius ?? 180;
+            const maxShift = cfg.repelMaxShift ?? 8;
+            if (dist < radius && dist > 0.5) {
+                const falloff = 1 - dist / radius;
+                const strength = maxShift * falloff * falloff;
+                tvx = (dx / dist) * strength;
+                tvy = (dy / dist) * strength;
+            }
+        }
+
+        const smooth = cfg.repelSmoothing ?? 0.12;
+        const ret = cfg.repelReturn ?? 0.965;
+        const hoverStop = m.hoverStop ?? 0;
+        m.vx += (tvx - m.vx) * smooth * (1 - hoverStop);
+        m.vy += (tvy - m.vy) * smooth * (1 - hoverStop);
+
+        if (hoverStop < 0.98) {
+            m.pushX = (m.pushX + m.vx) * ret;
+            m.pushY = (m.pushY + m.vy) * ret;
+        } else {
+            m.vx = 0;
+            m.vy = 0;
+        }
+
+        this._applyEntryNoteTransform(driftX + m.pushX, driftY + m.pushY);
+    },
+
+    _bindEntryNotePointer() {
+        if (this._entryNotePointerBound) return;
+        this._entryNotePointerBound = true;
+
+        this._boundEntryNoteMove = (e) => {
+            this._entryNotePointer.x = e.clientX;
+            this._entryNotePointer.y = e.clientY;
+            this._entryNotePointer.active = true;
+        };
+        this._boundEntryNoteLeave = () => { this._entryNotePointer.active = false; };
+
+        window.addEventListener('pointermove', this._boundEntryNoteMove, { passive: true });
+        window.addEventListener('pointerleave', this._boundEntryNoteLeave);
+        window.addEventListener('blur', this._boundEntryNoteLeave);
+
+        if (this.entryNote) {
+            this._boundEntryNoteHoverIn = () => {
+                this._entryNoteHovered = true;
+            };
+            this._boundEntryNoteHoverOut = () => {
+                this._entryNoteHovered = false;
+            };
+            this.entryNote.addEventListener('pointerenter', this._boundEntryNoteHoverIn);
+            this.entryNote.addEventListener('pointerleave', this._boundEntryNoteHoverOut);
+            this.entryNote.addEventListener('focus', this._boundEntryNoteHoverIn);
+            this.entryNote.addEventListener('blur', this._boundEntryNoteHoverOut);
+        }
+    },
+
+    _unbindEntryNotePointer() {
+        if (!this._entryNotePointerBound) return;
+        this._entryNotePointerBound = false;
+        window.removeEventListener('pointermove', this._boundEntryNoteMove);
+        window.removeEventListener('pointerleave', this._boundEntryNoteLeave);
+        window.removeEventListener('blur', this._boundEntryNoteLeave);
+        if (this.entryNote) {
+            if (this._boundEntryNoteHoverIn) {
+                this.entryNote.removeEventListener('pointerenter', this._boundEntryNoteHoverIn);
+            }
+            if (this._boundEntryNoteHoverOut) {
+                this.entryNote.removeEventListener('pointerleave', this._boundEntryNoteHoverOut);
+                this.entryNote.removeEventListener('blur', this._boundEntryNoteHoverOut);
+            }
+            this.entryNote.removeEventListener('focus', this._boundEntryNoteHoverIn);
+        }
+        this._boundEntryNoteMove = null;
+        this._boundEntryNoteLeave = null;
+        this._boundEntryNoteHoverIn = null;
+        this._boundEntryNoteHoverOut = null;
+        this._entryNotePointer.active = false;
+        this._entryNoteHovered = false;
+    },
+
+    _titleLetterGapPx: 0,
 
     _titleFitCfg() {
         const opening = this.cfg().titleFit || {};
         const about = CONFIG.about || {};
         return {
+            fontSizePx: opening.fontSizePx ?? about.titleFontSizePx ?? null,
             minPx: opening.minPx ?? about.titleMinPx ?? 24,
             maxPx: opening.maxPx ?? about.titleMaxPx ?? 400,
-            reducePt: opening.reducePt ?? about.titleReducePt ?? 20
+            reducePt: opening.reducePt ?? about.titleReducePt ?? 32,
+            sizeScale: opening.sizeScale ?? about.titleSizeScale ?? 1,
+            letterGapPx: opening.letterGapPx ?? about.titleLetterGapPx ?? 56
         };
     },
 
@@ -2368,240 +2641,497 @@ const OpeningScreen = {
         return [...(this._titleFullText || '')];
     },
 
-    _renderTitleChars(title, visibleCount) {
+    _ensureTitleSkeleton(title) {
         const chars = this._titleChars();
         if (!title || !chars.length) return;
 
+        const skeletonKey = chars.join('');
+        if (
+            title.dataset.titleSkeletonText === skeletonKey
+            && title.querySelectorAll('.opening-screen__title-char').length === chars.length
+        ) {
+            return;
+        }
+
+        title.dataset.titleSkeletonText = skeletonKey;
         title.textContent = '';
         const frag = document.createDocumentFragment();
 
-        // Zero-width caret placed at the current typing boundary. It never
-        // occupies layout width, so revealing letters or hiding it at the end
-        // causes no reflow, and it always sits next to the letter being typed.
+        chars.forEach((ch, index) => {
+            const span = document.createElement('span');
+            span.className = 'opening-screen__title-char is-pending';
+            span.textContent = ch;
+            frag.appendChild(span);
+            if (index < chars.length - 1) {
+                const gap = document.createElement('span');
+                gap.className = 'opening-screen__title-gap';
+                gap.setAttribute('aria-hidden', 'true');
+                frag.appendChild(gap);
+            }
+        });
+
         const caret = document.createElement('span');
         caret.className = 'opening-screen__title-cursor';
         caret.setAttribute('aria-hidden', 'true');
-
-        chars.forEach((ch, index) => {
-            if (index === visibleCount) frag.appendChild(caret);
-            const span = document.createElement('span');
-            span.className = 'opening-screen__title-char';
-            span.textContent = ch;
-            if (index >= visibleCount) span.classList.add('is-pending');
-            frag.appendChild(span);
-        });
-        if (visibleCount >= chars.length) frag.appendChild(caret);
-
+        frag.appendChild(caret);
         title.appendChild(frag);
     },
 
+    _positionTitleCaret(title, visibleCount) {
+        const caret = title.querySelector('.opening-screen__title-cursor');
+        const charEls = title.querySelectorAll('.opening-screen__title-char');
+        if (!caret || !charEls.length) return;
+
+        const titleRect = title.getBoundingClientRect();
+        let edgeX;
+
+        if (visibleCount >= charEls.length) {
+            edgeX = charEls[charEls.length - 1].getBoundingClientRect().left;
+        } else {
+            edgeX = charEls[visibleCount].getBoundingClientRect().right;
+        }
+
+        caret.style.left = `${edgeX - titleRect.left}px`;
+    },
+
+    _renderTitleChars(title, visibleCount) {
+        if (!title) return;
+        this._ensureTitleSkeleton(title);
+
+        title.querySelectorAll('.opening-screen__title-char').forEach((el, index) => {
+            el.classList.toggle('is-pending', index >= visibleCount);
+        });
+
+        requestAnimationFrame(() => this._positionTitleCaret(title, visibleCount));
+    },
+
     _fitOpeningTitle() {
-        const title = this.el?.querySelector('.opening-screen__title');
+        const title = this.el?.querySelector('.opening-screen__content .opening-screen__title');
         if (!title) return;
 
         const text = (this._titleFullText || this.cfg().labels?.title || title.textContent || '').trim();
         if (!text) return;
 
         const visibleCount = title.querySelectorAll('.opening-screen__title-char:not(.is-pending)').length;
-        title.textContent = text;
-        title.style.fontSize = '';
-        title.style.letterSpacing = '0px';
+        const cfg = this._titleFitCfg();
+        const reducePx = cfg.reducePt * (96 / 72);
+        const targetPx = cfg.fontSizePx ?? Math.max(cfg.minPx, (cfg.maxPx - reducePx) * cfg.sizeScale);
 
-        const { minPx, maxPx, reducePt } = this._titleFitCfg();
-        const reducePx = reducePt * (96 / 72);
-        const maxWidth = title.clientWidth;
-        if (maxWidth <= 0) {
-            this._renderTitleChars(title, visibleCount);
-            return;
-        }
-
-        let lo = minPx;
-        let hi = maxPx;
-        let best = minPx;
-
-        while (lo <= hi) {
-            const mid = Math.floor((lo + hi) / 2);
-            title.style.fontSize = `${mid}px`;
-            title.style.letterSpacing = '0px';
-            if (title.scrollWidth <= maxWidth) {
-                best = mid;
-                lo = mid + 1;
-            } else {
-                hi = mid - 1;
-            }
-        }
-
-        const targetPx = Math.max(minPx, best - reducePx);
         title.style.fontSize = `${targetPx}px`;
         title.style.letterSpacing = '0px';
 
-        const units = [...text].length;
-        if (units > 1) {
-            const naturalWidth = title.scrollWidth;
-            if (naturalWidth < maxWidth) {
-                title.style.letterSpacing = `${(maxWidth - naturalWidth) / (units - 1)}px`;
-            }
-        }
-
-        title.textContent = text;
+        const letterGapPx = cfg.letterGapPx;
+        this._titleLetterGapPx = letterGapPx;
+        title.style.setProperty('--opening-title-gap', `${letterGapPx}px`);
+        this.el?.style.setProperty('--opening-title-gap', `${letterGapPx}px`);
 
         const lineHeight = 0.88;
-        title.style.minHeight = `${targetPx * lineHeight}px`;
+        this.el?.querySelectorAll('.opening-screen__title').forEach((el) => {
+            el.style.fontSize = `${targetPx}px`;
+            el.style.minHeight = `${targetPx * lineHeight}px`;
+        });
+
+        const phantom = this.el?.querySelector('.opening-screen__title--phantom');
+        if (phantom) {
+            this._ensureTitleSkeleton(phantom);
+            phantom.querySelectorAll('.opening-screen__title-char').forEach((el) => {
+                el.classList.remove('is-pending');
+            });
+        }
+
         this.el?.style.setProperty('--opening-title-font-size', `${targetPx}px`);
         this.el?.style.setProperty('--opening-title-line-height', String(lineHeight));
         this._renderTitleChars(title, visibleCount);
+        this._positionTitleCaret(title, visibleCount);
         if (typeof OpeningBackground !== 'undefined' && OpeningBackground.refitOpeningLayout) {
             OpeningBackground.refitOpeningLayout();
         }
+        this._positionOpeningCopy();
+        this._positionSubtitleParts();
     },
 
-    _miniTitleEl() {
-        return this.el?.querySelector('.opening-screen__mini-title');
-    },
+    _positionSubtitleParts() {
+        const title = this.el?.querySelector('.opening-screen__content .opening-screen__title');
+        if (!title || !this.el) return;
 
-    _miniTitleCfg() {
-        return this.cfg().miniTitle || {};
-    },
+        const titleWidth = title.getBoundingClientRect().width;
+        if (titleWidth <= 0) return;
 
-    _miniTitleMeasureCtx: null,
+        this.el.style.setProperty('--opening-title-width', `${titleWidth}px`);
 
-    _getMiniTitleMeasureCtx() {
-        if (!this._miniTitleMeasureCtx) {
-            const canvas = document.createElement('canvas');
-            this._miniTitleMeasureCtx = canvas.getContext('2d');
+        let maxPartHeight = 0;
+        this.el.querySelectorAll('.opening-screen__subtitle').forEach((subtitle) => {
+            subtitle.style.width = `${titleWidth}px`;
+            subtitle.querySelectorAll(
+                '.opening-screen__subtitle-part--first, .opening-screen__subtitle-part--second'
+            ).forEach((part) => {
+                maxPartHeight = Math.max(maxPartHeight, part.getBoundingClientRect().height);
+            });
+        });
+
+        if (maxPartHeight > 0) {
+            this.el.querySelectorAll('.opening-screen__subtitle').forEach((subtitle) => {
+                subtitle.style.minHeight = `${maxPartHeight}px`;
+            });
         }
-        return this._miniTitleMeasureCtx;
     },
 
-    _getMiniTitleFont() {
-        const root = getComputedStyle(document.documentElement);
-        const weight = root.getPropertyValue('--type-display-weight').trim() || '400';
-        const size = root.getPropertyValue('--type-display-size').trim() || '1.6667rem';
-        const family = root.getPropertyValue('--type-family-note-h').trim() || 'TheBasics-Dots, sans-serif';
-        return `normal ${weight} ${size} ${family}`;
+    _positionOpeningCopy() {
+        if (!this.el) return;
+
+        const title = this.el.querySelector('.opening-screen__content .opening-screen__title');
+        const subtitle = this.el.querySelector('.opening-screen__content .opening-screen__subtitle');
+        if (!title) return;
+
+        this.el.style.setProperty('--opening-copy-shift-y', '0px');
+        void title.offsetHeight;
+
+        const titleRect = title.getBoundingClientRect();
+        const subtitleRect = subtitle?.getBoundingClientRect();
+        const top = titleRect.top;
+        const bottom = subtitleRect && subtitleRect.height > 0
+            ? subtitleRect.bottom
+            : titleRect.bottom;
+        const shift = (window.innerHeight * 0.5) - ((top + bottom) * 0.5)
+            + (this.cfg().copyNudgeY ?? 0);
+
+        this.el.style.setProperty('--opening-copy-shift-y', `${shift}px`);
     },
 
-    _getMiniTitleMaxWidthPx() {
-        const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
-        return Math.min(28 * rootPx, window.innerWidth * 0.42);
+    _notesEl() {
+        return this.el?.querySelector('.opening-screen__notes');
     },
 
-    _miniTitleQuarter: -1,
-
-    _miniTitleQuarters() {
-        return [
-            { x: 28, y: 30 },
-            { x: 72, y: 30 },
-            { x: 28, y: 70 },
-            { x: 72, y: 70 }
-        ];
+    _notesCfg() {
+        return this.cfg().notes || {};
     },
 
-    _placeMiniTitleRandomly(el) {
-        if (!el) return;
-        const quarters = this._miniTitleQuarters();
-        let next = Math.floor(Math.random() * quarters.length);
-        if (next === this._miniTitleQuarter && quarters.length > 1) {
-            next = (next + 1) % quarters.length;
+    _noteFitProbe: null,
+
+    _cssVarPx(varName) {
+        const raw = getComputedStyle(document.documentElement).getPropertyValue(varName).trim();
+        const n = parseFloat(raw);
+        if (!Number.isFinite(n)) return 0;
+        if (raw.endsWith('rem')) {
+            const rootPx = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16;
+            return n * rootPx;
         }
-        this._miniTitleQuarter = next;
-
-        const q = quarters[next];
-        el.style.left = `${q.x}%`;
-        el.style.top = `${q.y}%`;
-        el.style.transform = 'translate(-50%, -50%)';
+        return n;
     },
 
-    _fitMiniTitleToWidth(text, maxWidth) {
-        if (!text || maxWidth <= 0) return text || '';
+    _getNoteBoxPx() {
+        const grid = this._notesCfg().grid || {};
+        const cols = grid.cols ?? 3;
+        const rows = grid.rows ?? 3;
+        const cellW = this._cssVarPx('--site-grid-cell-w');
+        const cellH = this._cssVarPx('--site-grid-cell-h');
+        const gap = this._cssVarPx('--site-grid-gap');
+        return {
+            cols,
+            rows,
+            width: cols * cellW + (cols - 1) * gap,
+            height: rows * cellH + (rows - 1) * gap
+        };
+    },
 
-        const ctx = this._getMiniTitleMeasureCtx();
-        ctx.font = this._getMiniTitleFont();
+    _ensureNoteFitProbe() {
+        if (this._noteFitProbe) return this._noteFitProbe;
+        const probe = document.createElement('p');
+        probe.setAttribute('aria-hidden', 'true');
+        probe.style.cssText = [
+            'position:fixed',
+            'left:-9999px',
+            'top:0',
+            'visibility:hidden',
+            'margin:0',
+            'box-sizing:border-box',
+            'padding:var(--space-10)'
+        ].join(';');
+        document.body.appendChild(probe);
+        this._noteFitProbe = probe;
+        return probe;
+    },
 
-        if (ctx.measureText(text).width <= maxWidth) return text;
+    _fitNoteTextToBox(text) {
+        if (!text) return '';
+
+        const box = this._getNoteBoxPx();
+        if (box.width <= 0 || box.height <= 0) return text;
+
+        const probe = this._ensureNoteFitProbe();
+        probe.className = 'opening-screen__note note-title';
+        probe.style.width = `${box.width}px`;
+        probe.style.height = `${box.height}px`;
+        probe.style.display = 'block';
 
         const words = text.split(/\s+/).filter(Boolean);
+        if (!words.length) return '';
+
         let result = '';
         for (const word of words) {
             const candidate = result ? `${result} ${word}` : word;
-            if (ctx.measureText(candidate).width > maxWidth) break;
+            probe.textContent = candidate;
+            if (probe.scrollHeight > probe.clientHeight + 1) break;
             result = candidate;
         }
 
-        return result || words[0] || '';
+        return result || words[0];
     },
 
-    _pickRandomHoverLine() {
-        const lines = OpeningData?.hoverLines || [];
-        if (!lines.length) return null;
-        if (lines.length === 1) return lines[0];
+    _applyNotePosition(el, spot) {
+        el.style.left = 'auto';
+        el.style.right = `${100 - spot.anchorRightPct}%`;
+        el.style.top = `${spot.anchorTopPct}%`;
+    },
 
-        let next = Math.floor(Math.random() * lines.length);
-        if (next === this._miniTitleIndex) {
-            next = (next + 1) % lines.length;
+    _notesPlacementCfg() {
+        return this._notesCfg().placement || {};
+    },
+
+    _notesQuarterBounds() {
+        const cfg = this._notesPlacementCfg();
+        const m = cfg.marginPct ?? 10;
+        const g = cfg.quarterCenterGapPct ?? 4;
+        const mid = 50;
+
+        return [
+            { xMin: m, xMax: mid - g, yMin: m, yMax: mid - g },
+            { xMin: mid + g, xMax: 100 - m, yMin: m, yMax: mid - g },
+            { xMin: m, xMax: mid - g, yMin: mid + g, yMax: 100 - m },
+            { xMin: mid + g, xMax: 100 - m, yMin: mid + g, yMax: 100 - m }
+        ];
+    },
+
+    _shuffleIndices(count) {
+        const order = Array.from({ length: count }, (_, i) => i);
+        for (let i = order.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [order[i], order[j]] = [order[j], order[i]];
         }
-        this._miniTitleIndex = next;
-        return lines[next];
+        return order;
     },
 
-    _setMiniTitle(hover) {
-        const el = this._miniTitleEl();
-        if (!el) return;
+    _getNoteContentKeepOutRect() {
+        const pad = this._notesPlacementCfg();
+        const padX = pad.titlePadX ?? 56;
+        const padY = pad.titlePadY ?? 40;
+        const subtitlePadY = pad.subtitlePadY ?? 24;
 
-        if (!hover?.text) {
-            el.textContent = '';
-            el.classList.remove('is-visible', 'note-title', 'note-body');
-            el.hidden = true;
-            return;
+        const mergeInto = (rect, next) => {
+            if (!next) return rect;
+            if (!rect) return { ...next };
+            return {
+                left: Math.min(rect.left, next.left),
+                top: Math.min(rect.top, next.top),
+                right: Math.max(rect.right, next.right),
+                bottom: Math.max(rect.bottom, next.bottom)
+            };
+        };
+
+        let rect = null;
+        const title = this.el?.querySelector('.opening-screen__title');
+        const subtitle = this.el?.querySelector('.opening-screen__subtitle');
+
+        if (title) {
+            const r = title.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) {
+                rect = mergeInto(rect, {
+                    left: r.left - padX,
+                    top: r.top - padY,
+                    right: r.right + padX,
+                    bottom: r.bottom + padY
+                });
+            }
         }
 
-        el.hidden = false;
-        el.classList.toggle('note-title', hover.role !== 'body');
-        el.classList.toggle('note-body', hover.role === 'body');
-        const maxWidth = this._getMiniTitleMaxWidthPx();
-        el.textContent = this._fitMiniTitleToWidth(hover.text, maxWidth);
-        this._placeMiniTitleRandomly(el);
-        el.classList.add('is-visible');
-    },
-
-    _showMiniTitle() {
-        if (this._miniTitleCfg().enabled === false) return;
-        this._setMiniTitle(this._pickRandomHoverLine());
-    },
-
-    _startMiniTitleRotation() {
-        if (this._miniTitleCfg().enabled === false) return;
-
-        clearInterval(this._miniTitleTimer);
-        this._showMiniTitle();
-
-        const rotateMs = this._miniTitleCfg().rotateMs ?? 4500;
-        if (rotateMs > 0) {
-            this._miniTitleTimer = setInterval(() => this._showMiniTitle(), rotateMs);
+        if (subtitle) {
+            const r = subtitle.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) {
+                rect = mergeInto(rect, {
+                    left: r.left - padX,
+                    top: r.top - subtitlePadY,
+                    right: r.right + padX,
+                    bottom: r.bottom + subtitlePadY
+                });
+            }
         }
+
+        return rect;
     },
 
-    _stopMiniTitleRotation() {
-        clearInterval(this._miniTitleTimer);
-        this._miniTitleTimer = null;
+    _noteAnchorBoxPx(anchorRightPct, anchorTopPct) {
+        const box = this._getNoteBoxPx();
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const right = (anchorRightPct / 100) * w;
+        const top = (anchorTopPct / 100) * h;
+        return {
+            left: right - box.width,
+            top,
+            right,
+            bottom: top + box.height
+        };
+    },
+
+    _noteAnchorOverlapsKeepOut(anchorRightPct, anchorTopPct, keepOut) {
+        if (!keepOut) return false;
+        const box = this._noteAnchorBoxPx(anchorRightPct, anchorTopPct);
+        return box.left < keepOut.right
+            && box.right > keepOut.left
+            && box.top < keepOut.bottom
+            && box.bottom > keepOut.top;
+    },
+
+    _pickNoteAnchorInQuarter(q, keepOut) {
+        const cfg = this._notesPlacementCfg();
+        const maxAttempts = cfg.maxAttempts ?? 48;
+        const box = this._getNoteBoxPx();
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+        const boxWPct = (box.width / w) * 100;
+        const boxHPct = (box.height / h) * 100;
+        const rightMin = q.xMin + boxWPct;
+        const rightMax = q.xMax;
+        const topMin = q.yMin;
+        const topMax = q.yMax - boxHPct;
+
+        const candidates = [];
+        if (rightMin <= rightMax && topMax >= topMin) {
+            candidates.push({ anchorRightPct: rightMax, anchorTopPct: topMin });
+            candidates.push({ anchorRightPct: rightMin, anchorTopPct: topMin });
+            candidates.push({ anchorRightPct: rightMax, anchorTopPct: topMax });
+            candidates.push({ anchorRightPct: rightMin, anchorTopPct: topMax });
+
+            for (let i = 0; i < maxAttempts; i++) {
+                candidates.push({
+                    anchorRightPct: rightMin + Math.random() * (rightMax - rightMin),
+                    anchorTopPct: topMin + Math.random() * (topMax - topMin)
+                });
+            }
+        }
+
+        for (const candidate of candidates) {
+            if (!this._noteAnchorOverlapsKeepOut(candidate.anchorRightPct, candidate.anchorTopPct, keepOut)) {
+                return candidate;
+            }
+        }
+
+        let best = { anchorRightPct: rightMax, anchorTopPct: topMin };
+        let bestDist = -1;
+        const cx = keepOut ? (keepOut.left + keepOut.right) / 2 : w / 2;
+        const cy = keepOut ? (keepOut.top + keepOut.bottom) / 2 : h / 2;
+
+        for (const candidate of candidates) {
+            const boxPx = this._noteAnchorBoxPx(candidate.anchorRightPct, candidate.anchorTopPct);
+            const bx = (boxPx.left + boxPx.right) / 2;
+            const by = (boxPx.top + boxPx.bottom) / 2;
+            const dist = Math.hypot(bx - cx, by - cy);
+            if (dist > bestDist) {
+                bestDist = dist;
+                best = candidate;
+            }
+        }
+
+        return best;
+    },
+
+    _pickNotePositions(count) {
+        const quarters = this._notesQuarterBounds();
+        const quarterOrder = this._shuffleIndices(quarters.length);
+        const keepOut = this._getNoteContentKeepOutRect();
+
+        const placed = [];
+        for (let i = 0; i < count; i++) {
+            const q = quarters[quarterOrder[i % quarters.length]];
+            placed.push(this._pickNoteAnchorInQuarter(q, keepOut));
+        }
+
+        return placed;
+    },
+
+    _renderNotes() {
+        if (this._notesCfg().enabled === false) return;
+        if (this._notesRendered) return;
+
+        const host = this._notesEl();
+        if (!host) return;
+
+        const items = (this._notesCfg().items || []).filter((item) => item?.text);
+        if (!items.length) return;
+
+        this._notesRendered = true;
+        host.textContent = '';
+
+        const positions = this._pickNotePositions(items.length);
+        const stagger = this._notesCfg().staggerMs ?? 140;
+
+        items.forEach((item, i) => {
+            const spot = positions[i];
+            const el = document.createElement('p');
+            el.className = item.role === 'body'
+                ? 'opening-screen__note note-body'
+                : 'opening-screen__note note-title';
+            el.textContent = this._fitNoteTextToBox(item.text);
+            this._applyNotePosition(el, spot);
+            host.appendChild(el);
+
+            setTimeout(() => {
+                requestAnimationFrame(() => el.classList.add('is-visible'));
+            }, i * stagger);
+        });
+    },
+
+    _clearNotes() {
+        if (this._noteFitProbe) {
+            this._noteFitProbe.remove();
+            this._noteFitProbe = null;
+        }
+        const host = this._notesEl();
+        if (host) host.textContent = '';
+        this._notesRendered = false;
     },
 
     _applyLabels() {
         const labels = this.cfg().labels || {};
         const title = this.el.querySelector('.opening-screen__title');
         const subtitle = this.el.querySelector('.opening-screen__subtitle');
-        const btn = this.el.querySelector('.opening-screen__continue');
+        const entry = this.el.querySelector('.opening-screen__entry-note');
+        const entryCfg = this.cfg().entryNote || {};
         if (title) {
             this._titleFullText = labels.title || title.textContent || '';
             title.textContent = '';
             title.setAttribute('aria-label', this._titleFullText);
             this._renderTitleChars(title, 0);
         }
-        if (subtitle && labels.subtitle) subtitle.textContent = labels.subtitle;
-        if (btn && labels.continue) {
-            btn.textContent = labels.continue;
-            btn.setAttribute('aria-label', labels.continue);
+        if (subtitle) this._applySubtitleLabels(labels);
+        if (entry) {
+            const arrow = entry.querySelector('.opening-screen__entry-note-arrow');
+            const hint = entry.querySelector('.opening-screen__entry-note-hint');
+            if (arrow) arrow.textContent = entryCfg.arrow ?? '<----';
+            if (hint) hint.textContent = entryCfg.hoverLabel ?? 'הבא';
+            entry.setAttribute(
+                'aria-label',
+                entryCfg.ariaLabel ?? entryCfg.hoverLabel ?? 'הבא'
+            );
+            entry.style.setProperty('--opening-entry-rotate', `${entryCfg.rotateDeg ?? 0}deg`);
+            entry.style.setProperty('--opening-entry-offset-x', `${entryCfg.offsetX ?? 0}px`);
+            entry.style.setProperty('--opening-entry-offset-y', `${entryCfg.offsetY ?? 0}px`);
         }
+    },
+
+    _applySubtitleLabels(labels = {}) {
+        const first = labels.subtitleFirst
+            ?? (labels.subtitle ? labels.subtitle.split(/\.\s+(?=המילים)/)[0] + '.' : '');
+        const second = labels.subtitleSecond
+            ?? (labels.subtitle ? labels.subtitle.split(/\.\s+(?=המילים)/).slice(1).join('').trim() : '');
+
+        this.el?.querySelectorAll('.opening-screen__subtitle').forEach((subtitle) => {
+            const firstEl = subtitle.querySelector('.opening-screen__subtitle-part--first');
+            const secondEl = subtitle.querySelector('.opening-screen__subtitle-part--second');
+            if (firstEl && first) firstEl.textContent = first;
+            if (secondEl && second) secondEl.textContent = second;
+            if (!firstEl && !secondEl && labels.subtitle) subtitle.textContent = labels.subtitle;
+        });
     },
 
     _cancelTitleTypewriter() {
@@ -2675,16 +3205,21 @@ const OpeningScreen = {
             OpeningBackground.onDataReady();
         }
 
-        if (this.titleTyped) this._startMiniTitleRotation();
-
         if (this.userDismissed && !this.bootFlushed) {
             this._enterSite();
+            return;
+        }
+
+        if (this._contentRevealStarted) {
+            this._revealEntryNote();
+        } else if (this.el?.classList.contains('is-art-ready')) {
+            this._onArtRevealed();
         }
     },
 
     onContinue() {
         if (this.dismissing || this.skipped) return;
-        if (this.continueBtn?.disabled) return;
+        if (this.entryNote?.disabled) return;
         this.dismiss();
     },
 
@@ -2693,7 +3228,12 @@ const OpeningScreen = {
         this.dismissing = true;
         this.userDismissed = true;
         this._cancelTitleTypewriter();
-        this._stopMiniTitleRotation();
+        this._stopEntryNoteMotion();
+        this._clearNotes();
+        this._stageTimers.forEach(clearTimeout);
+        this._stageTimers = [];
+        clearTimeout(this._contentRevealTimer);
+        this._contentRevealTimer = null;
         clearTimeout(this._revealFallbackTimer);
         this._revealFallbackTimer = null;
         if (this._onResize) {
@@ -2701,19 +3241,94 @@ const OpeningScreen = {
             this._onResize = null;
         }
 
-        const exitMs = this.cfg().exitDurationMs ?? 600;
-        this.el?.classList.add('is-exiting');
-
-        setTimeout(() => {
+        this._playExitTransition(() => {
+            this.el?.classList.remove('is-cover-expanding');
             document.body.classList.remove('opening-active');
             this.el?.classList.remove('is-visible', 'is-exiting');
             if (this.el) {
                 this.el.hidden = true;
                 this.el.setAttribute('aria-hidden', 'true');
             }
-
             this._enterSite();
-        }, exitMs);
+        });
+    },
+
+    _snapCoverFullScreen(cover) {
+        cover.style.transition = 'none';
+        cover.style.left = '0';
+        cover.style.top = '0';
+        cover.style.right = '0';
+        cover.style.bottom = '0';
+        cover.style.width = 'auto';
+        cover.style.height = 'auto';
+        cover.style.transform = 'none';
+        cover.style.borderRadius = '0';
+        cover.classList.remove('screen-transition-cover--pill', 'screen-transition-cover--note');
+        void cover.offsetWidth;
+    },
+
+    _playExitTransition(done) {
+        const cfg = this.cfg().screenTransition || {};
+        const expandMs = cfg.expandMs ?? this.cfg().exitDurationMs ?? 600;
+        const w = window.innerWidth;
+        const h = window.innerHeight;
+
+        this.el?.classList.add('is-exiting', 'is-cover-expanding');
+
+        let startLeft = w * 0.5 - 60;
+        let startBottom = h * 0.5 - 22;
+        let startW = 120;
+        let startH = 44;
+        let startRadius = 5;
+
+        const note = this.entryNote;
+        if (note) {
+            const r = note.getBoundingClientRect();
+            startLeft = r.left;
+            startBottom = h - r.bottom;
+            startW = Math.max(1, r.width);
+            startH = Math.max(1, r.height);
+            const br = parseFloat(getComputedStyle(note).borderRadius);
+            startRadius = Number.isFinite(br) && br > 0 ? br : 5;
+            note.style.visibility = 'hidden';
+        }
+
+        try { sessionStorage.setItem('screenTransition', '1'); } catch (_) { /* ignore */ }
+
+        const cover = document.createElement('div');
+        cover.className = 'screen-transition-cover screen-transition-cover--note';
+        cover.setAttribute('aria-hidden', 'true');
+        cover.style.left = `${startLeft}px`;
+        cover.style.bottom = `${startBottom}px`;
+        cover.style.top = 'auto';
+        cover.style.width = `${startW}px`;
+        cover.style.height = `${startH}px`;
+        cover.style.borderRadius = `${startRadius}px`;
+        document.body.appendChild(cover);
+
+        void cover.offsetWidth;
+        const easing = 'cubic-bezier(0.4, 0, 0.2, 1)';
+        cover.style.transition = [
+            `left ${expandMs}ms ${easing}`,
+            `bottom ${expandMs}ms ${easing}`,
+            `width ${expandMs}ms ${easing}`,
+            `height ${expandMs}ms ${easing}`,
+            `border-radius ${expandMs}ms ${easing}`
+        ].join(', ');
+        cover.style.left = '0';
+        cover.style.bottom = '0';
+        cover.style.width = '100%';
+        cover.style.height = '100%';
+        cover.style.borderRadius = '0';
+
+        let finished = false;
+        const finish = () => {
+            if (finished) return;
+            finished = true;
+            this._snapCoverFullScreen(cover);
+            done();
+        };
+        setTimeout(finish, expandMs + 80);
     },
 
     _enterSite() {
@@ -3485,10 +4100,33 @@ const SiteAbout = {
     _dragThresholdPx: 8,
     _dragStartY: 0,
     _dragStartProgress: 0,
+    _wheelSnapTimer: null,
     _onResize: null,
 
     cfg() {
         return CONFIG.about || {};
+    },
+
+    _escapeHtml(text) {
+        return String(text ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    },
+
+    _cornerNoteLines() {
+        const lines = this.cfg().cornerNoteLines;
+        if (Array.isArray(lines) && lines.length) return lines;
+        const fallback = this.cfg().cornerNoteText ?? 'רועי היה פה';
+        const parts = String(fallback).trim().split(/\s+/);
+        if (parts.length >= 2) return [parts[0], parts.slice(1).join(' ')];
+        return [fallback];
+    },
+
+    _cornerNoteLabelHtml() {
+        return this._cornerNoteLines()
+            .map((line) => `<span class="site-about__corner-note-line">${this._escapeHtml(line)}</span>`)
+            .join('');
     },
 
     _renderDetailsHtml() {
@@ -3525,6 +4163,7 @@ const SiteAbout = {
         const logoHtml = logoSrc
             ? `<div class="site-about__brand"><img class="site-about__logo" src="${logoSrc}" alt="בצלאל אקדמיה לאמנות ועיצוב"></div>`
             : '';
+        const cornerNoteLines = this._cornerNoteLines();
 
         this.root = document.createElement('div');
         this.root.className = 'site-about';
@@ -3559,7 +4198,7 @@ const SiteAbout = {
                     ${arrowGlyph}
                 </div>
                 <div class="site-about__content">
-                    <h2 class="site-about__headline main-t" dir="rtl">${mainTitle}</h2>
+                    <h2 class="site-about__headline opening-screen__title main-t" dir="rtl">${mainTitle}</h2>
                     ${logoHtml}
                     <div class="site-about__text general-t" dir="rtl">${bodyHtml}</div>
                     <div class="site-about__details" dir="rtl">${detailsHtml}</div>
@@ -3567,8 +4206,30 @@ const SiteAbout = {
             </section>
         `;
 
+        this.cornerNote = document.createElement('div');
+        this.cornerNote.className = 'site-about__corner-note opening-screen__entry-note note-title';
+        this.cornerNote.setAttribute('role', 'group');
+        this.cornerNote.setAttribute('aria-label', cornerNoteLines.join(' '));
+
+        this.cornerNoteLabel = document.createElement('div');
+        this.cornerNoteLabel.className = 'opening-screen__entry-note-label site-about__corner-note-editor';
+        this.cornerNoteLabel.contentEditable = 'plaintext-only';
+        this.cornerNoteLabel.setAttribute('role', 'textbox');
+        this.cornerNoteLabel.setAttribute('aria-multiline', 'true');
+        this.cornerNoteLabel.setAttribute('spellcheck', 'false');
+        this.cornerNoteLabel.setAttribute('tabindex', '0');
+        this.cornerNoteLabel.innerHTML = this._cornerNoteLabelHtml();
+
+        this.cornerNote.appendChild(this.cornerNoteLabel);
+
+        this.cornerNoteLabel.addEventListener('mousedown', (e) => e.stopPropagation());
+        this.cornerNoteLabel.addEventListener('pointerdown', (e) => e.stopPropagation());
+        this.cornerNoteLabel.addEventListener('click', (e) => e.stopPropagation());
+        this.cornerNoteLabel.addEventListener('keydown', (e) => e.stopPropagation());
+
         this.sheet.appendChild(this.trigger);
         this.sheet.appendChild(this.panel);
+        this.sheet.appendChild(this.cornerNote);
         this.root.appendChild(this.backdrop);
         this.root.appendChild(this.sheet);
         document.body.appendChild(this.root);
@@ -3581,8 +4242,16 @@ const SiteAbout = {
         this.trigger.addEventListener('click', (e) => e.preventDefault());
         this.trigger.addEventListener('keydown', (e) => this._onTriggerKeyDown(e));
 
+        this._onWheel = (e) => this._handleWheel(e);
+        this.root.addEventListener('wheel', this._onWheel, { passive: false, capture: true });
+
         this._onKeyDown = (e) => {
             if (e.key === 'Escape' && this._progress > 0) {
+                if (this.cornerNoteLabel?.contains(document.activeElement)) {
+                    e.preventDefault();
+                    this.cornerNoteLabel.blur();
+                    return;
+                }
                 e.preventDefault();
                 this.close();
             }
@@ -3591,12 +4260,15 @@ const SiteAbout = {
 
         this._onResize = () => {
             const wasOpen = this.isOpen;
+            this._syncBackdropTokens();
             this._measureDimensions();
             this._fitMainTitle();
             this._progress = wasOpen ? 1 : 0;
             this._applyProgress(false);
         };
         window.addEventListener('resize', this._onResize);
+
+        this._syncBackdropTokens();
 
         requestAnimationFrame(() => {
             this._measureDimensions();
@@ -3605,49 +4277,114 @@ const SiteAbout = {
         });
     },
 
+    _titleFitCfg() {
+        const opening = CONFIG.opening?.titleFit || {};
+        const about = this.cfg();
+        return {
+            fontSizePx: opening.fontSizePx ?? about.titleFontSizePx ?? null,
+            minPx: opening.minPx ?? about.titleMinPx ?? 24,
+            maxPx: opening.maxPx ?? about.titleMaxPx ?? 400,
+            reducePt: opening.reducePt ?? about.titleReducePt ?? 32,
+            sizeScale: opening.sizeScale ?? about.titleSizeScale ?? 1,
+            letterGapPx: opening.letterGapPx ?? about.titleLetterGapPx ?? 56
+        };
+    },
+
+    _titleChars(text) {
+        return [...(text || '')];
+    },
+
+    _ensureTitleSkeleton(headline) {
+        const text = (headline.dataset.titleText || headline.textContent || '').trim();
+        const chars = this._titleChars(text);
+        if (!headline || !chars.length) return;
+
+        const skeletonKey = chars.join('');
+        if (
+            headline.dataset.titleSkeletonText === skeletonKey
+            && headline.querySelectorAll('.opening-screen__title-char').length === chars.length
+        ) {
+            return;
+        }
+
+        headline.dataset.titleSkeletonText = skeletonKey;
+        headline.dataset.titleText = text;
+        headline.textContent = '';
+        const frag = document.createDocumentFragment();
+
+        chars.forEach((ch, index) => {
+            const span = document.createElement('span');
+            span.className = 'opening-screen__title-char';
+            span.textContent = ch;
+            frag.appendChild(span);
+            if (index < chars.length - 1) {
+                const gap = document.createElement('span');
+                gap.className = 'opening-screen__title-gap';
+                gap.setAttribute('aria-hidden', 'true');
+                frag.appendChild(gap);
+            }
+        });
+
+        headline.appendChild(frag);
+    },
+
+    _syncBackdropTokens() {
+        const openingBg = CONFIG.opening?.background || {};
+        const blurScale = openingBg.blurScale ?? 0.028;
+        const canvasBlurPx = 6;
+        const contentBlurPx = Math.max(
+            8,
+            Math.min(24, Math.round(window.innerHeight * blurScale * 0.85))
+        );
+        const blurPx = contentBlurPx + canvasBlurPx;
+        const grainTilePx = openingBg.grainTilePx ?? 40;
+        const grainAlpha = (openingBg.grainAlpha ?? 14) / 255;
+        const grainBlendMode = openingBg.grainBlendMode ?? 'soft-light';
+        const washPct = Math.round((openingBg.glowAlpha ?? 0.07) * 100);
+        const noteRotateDeg = this.cfg().cornerNoteRotateDeg ?? 25;
+        const noteOffsetX = this.cfg().cornerNoteOffsetX ?? 20;
+        const noteOffsetY = this.cfg().cornerNoteOffsetY ?? -40;
+        const noteLineHeightScale = this.cfg().cornerNoteLineHeightScale ?? 1.1;
+        const targets = [document.documentElement, this.root].filter(Boolean);
+
+        targets.forEach((el) => {
+            el.style.setProperty('--site-about-bg-blur', `${blurPx}px`);
+            el.style.setProperty('--site-about-backdrop-wash', `${washPct}%`);
+            el.style.setProperty('--site-about-backdrop-grain-opacity', String(grainAlpha));
+            el.style.setProperty('--site-about-backdrop-grain-blend', grainBlendMode);
+            el.style.setProperty('--site-about-backdrop-grain-tile', `${grainTilePx}px`);
+            el.style.setProperty('--site-about-corner-note-rotate', `${noteRotateDeg}deg`);
+            el.style.setProperty('--site-about-corner-note-offset-x', `${noteOffsetX}px`);
+            el.style.setProperty('--site-about-corner-note-offset-y', `${noteOffsetY}px`);
+            el.style.setProperty('--site-about-corner-note-line-height-scale', String(noteLineHeightScale));
+        });
+    },
+
     _fitMainTitle() {
         const headline = this.panel?.querySelector('.site-about__headline');
         if (!headline) return;
 
-        headline.style.fontSize = '';
-        headline.style.letterSpacing = '0px';
+        const text = (this.cfg().mainTitle || headline.dataset.titleText || headline.textContent || '').trim();
+        if (!text) return;
 
-        const minPx = this.cfg().titleMinPx ?? 24;
-        const maxPx = this.cfg().titleMaxPx ?? 400;
-        const reducePt = this.cfg().titleReducePt ?? 12;
-        const reducePx = reducePt * (96 / 72);
-        const spacingBoost = this.cfg().titleLetterSpacingBoost ?? 1.55;
-        const maxWidth = headline.clientWidth;
-        if (maxWidth <= 0) return;
+        headline.dataset.titleText = text;
+        this._ensureTitleSkeleton(headline);
 
-        let lo = minPx;
-        let hi = maxPx;
-        let best = minPx;
+        const cfg = this._titleFitCfg();
+        const reducePx = cfg.reducePt * (96 / 72);
+        const targetPx = cfg.fontSizePx ?? Math.max(cfg.minPx, (cfg.maxPx - reducePx) * cfg.sizeScale);
+        const lineHeight = 0.88;
 
-        while (lo <= hi) {
-            const mid = Math.floor((lo + hi) / 2);
-            headline.style.fontSize = `${mid}px`;
-            headline.style.letterSpacing = '0px';
-            if (headline.scrollWidth <= maxWidth) {
-                best = mid;
-                lo = mid + 1;
-            } else {
-                hi = mid - 1;
-            }
-        }
-
-        const targetPx = Math.max(minPx, best - reducePx);
         headline.style.fontSize = `${targetPx}px`;
         headline.style.letterSpacing = '0px';
+        headline.style.minHeight = `${targetPx * lineHeight}px`;
+        headline.style.setProperty('--opening-title-gap', `${cfg.letterGapPx}px`);
+        headline.style.setProperty('--opening-title-font-size', `${targetPx}px`);
+        headline.style.setProperty('--opening-title-line-height', String(lineHeight));
 
-        const text = (headline.textContent || '').trim();
-        const units = [...text].length;
-        if (units <= 1) return;
-
-        const naturalWidth = headline.scrollWidth;
-        if (naturalWidth >= maxWidth) return;
-
-        headline.style.letterSpacing = `${((maxWidth - naturalWidth) / (units - 1)) * spacingBoost}px`;
+        headline.querySelectorAll('.opening-screen__title-char').forEach((el) => {
+            el.classList.remove('is-pending');
+        });
     },
 
     _cssVarPx(varName) {
@@ -3775,11 +4512,13 @@ const SiteAbout = {
         this.root?.style.setProperty('--site-about-panel-cols', String(cols));
 
         const logoCols = this.cfg().logoCols ?? 1;
-        const textCols = this.cfg().textCols ?? 6;
+        const textCols = this.cfg().textCols ?? 5;
         const detailsCols = this.cfg().detailsCols ?? 5;
+        const contentGapCols = this.cfg().contentGapCols ?? 1;
         const logoStart = 1;
         const detailsStart = logoCols + 1;
-        const textStart = detailsStart + detailsCols;
+        const detailsGridSpan = Math.floor(Number(detailsCols));
+        const textStart = detailsStart + detailsGridSpan + contentGapCols;
 
         this.root?.style.setProperty('--site-about-logo-cols', String(logoCols));
         this.root?.style.setProperty('--site-about-logo-col-start', String(logoStart));
@@ -3804,6 +4543,62 @@ const SiteAbout = {
 
     _dragTravel() {
         return this._openLift || 1;
+    },
+
+    _wheelHitTarget(e) {
+        const hit = document.elementFromPoint(e.clientX, e.clientY);
+        return hit && this.root?.contains(hit) ? hit : null;
+    },
+
+    _isPanelScrollable() {
+        if (!this.panel) return false;
+        return this.panel.scrollHeight > this.panel.clientHeight + 1;
+    },
+
+    _shouldPanelConsumeWheel(e, hit) {
+        if (!this.panel || this._progress < 1 || !this._isPanelScrollable()) return false;
+        if (!this.panel.contains(hit)) return false;
+
+        const atTop = this.panel.scrollTop <= 0;
+        const atBottom = this.panel.scrollTop + this.panel.clientHeight >= this.panel.scrollHeight - 1;
+
+        // At scroll top, wheel-down closes the sheet — leave that to the sheet handler.
+        if (atTop && e.deltaY < 0) return false;
+
+        if (e.deltaY > 0 && !atTop) return true;
+        if (e.deltaY < 0 && !atBottom) return true;
+        return false;
+    },
+
+    _applyWheelDelta(deltaY) {
+        const travel = this._dragTravel();
+        // Match tab drag + natural trackpad direction (up on tab opens, down closes).
+        this._progress = Math.min(1, Math.max(0, this._progress + deltaY / travel));
+        this.root.classList.add('is-dragging');
+        this._applyProgress(false);
+
+        clearTimeout(this._wheelSnapTimer);
+        this._wheelSnapTimer = setTimeout(() => {
+            this._wheelSnapTimer = null;
+            this.root.classList.remove('is-dragging');
+            const threshold = this.cfg().snapThreshold ?? 0.35;
+            this._progress = this._progress >= threshold ? 1 : 0;
+            this._applyProgress(true);
+        }, this.cfg().wheelSnapMs ?? 140);
+    },
+
+    _handleWheel(e) {
+        if (!this.root || this._pointerActive) return;
+
+        const hit = this._wheelHitTarget(e);
+        if (!hit) return;
+
+        if (hit.closest?.('.site-about__corner-note')) return;
+
+        if (this._shouldPanelConsumeWheel(e, hit)) return;
+
+        e.preventDefault();
+        this._applyWheelDelta(e.deltaY);
     },
 
     _onPointerDown(e) {
@@ -3913,6 +4708,7 @@ const SiteAbout = {
         const lift = this._progress * this._openLift;
         this.root.style.setProperty('--site-about-lift', `${lift}px`);
         this.root.style.setProperty('--site-about-progress', String(this._progress));
+        document.documentElement.style.setProperty('--site-about-progress', String(this._progress));
         this.isOpen = this._progress >= 1;
 
         this.root.classList.toggle('is-open', this.isOpen);
@@ -3923,6 +4719,8 @@ const SiteAbout = {
         this.trigger?.setAttribute('aria-expanded', this.isOpen ? 'true' : 'false');
         this.panel?.setAttribute('aria-hidden', this._progress <= 0 ? 'true' : 'false');
         document.body.classList.toggle('is-site-about-open', this._progress > 0);
+        document.body.classList.toggle('is-site-about-snap', !!animate);
+        document.body.classList.toggle('is-site-about-dragging', this.root.classList.contains('is-dragging'));
 
         this._setBackgroundFrozen(this._progress > 0);
 

@@ -18,10 +18,33 @@ const SiteAbout = {
     _dragThresholdPx: 8,
     _dragStartY: 0,
     _dragStartProgress: 0,
+    _wheelSnapTimer: null,
     _onResize: null,
 
     cfg() {
         return CONFIG.about || {};
+    },
+
+    _escapeHtml(text) {
+        return String(text ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+    },
+
+    _cornerNoteLines() {
+        const lines = this.cfg().cornerNoteLines;
+        if (Array.isArray(lines) && lines.length) return lines;
+        const fallback = this.cfg().cornerNoteText ?? 'רועי היה פה';
+        const parts = String(fallback).trim().split(/\s+/);
+        if (parts.length >= 2) return [parts[0], parts.slice(1).join(' ')];
+        return [fallback];
+    },
+
+    _cornerNoteLabelHtml() {
+        return this._cornerNoteLines()
+            .map((line) => `<span class="site-about__corner-note-line">${this._escapeHtml(line)}</span>`)
+            .join('');
     },
 
     _renderDetailsHtml() {
@@ -58,6 +81,7 @@ const SiteAbout = {
         const logoHtml = logoSrc
             ? `<div class="site-about__brand"><img class="site-about__logo" src="${logoSrc}" alt="בצלאל אקדמיה לאמנות ועיצוב"></div>`
             : '';
+        const cornerNoteLines = this._cornerNoteLines();
 
         this.root = document.createElement('div');
         this.root.className = 'site-about';
@@ -92,7 +116,7 @@ const SiteAbout = {
                     ${arrowGlyph}
                 </div>
                 <div class="site-about__content">
-                    <h2 class="site-about__headline main-t" dir="rtl">${mainTitle}</h2>
+                    <h2 class="site-about__headline opening-screen__title main-t" dir="rtl">${mainTitle}</h2>
                     ${logoHtml}
                     <div class="site-about__text general-t" dir="rtl">${bodyHtml}</div>
                     <div class="site-about__details" dir="rtl">${detailsHtml}</div>
@@ -100,8 +124,30 @@ const SiteAbout = {
             </section>
         `;
 
+        this.cornerNote = document.createElement('div');
+        this.cornerNote.className = 'site-about__corner-note opening-screen__entry-note note-title';
+        this.cornerNote.setAttribute('role', 'group');
+        this.cornerNote.setAttribute('aria-label', cornerNoteLines.join(' '));
+
+        this.cornerNoteLabel = document.createElement('div');
+        this.cornerNoteLabel.className = 'opening-screen__entry-note-label site-about__corner-note-editor';
+        this.cornerNoteLabel.contentEditable = 'plaintext-only';
+        this.cornerNoteLabel.setAttribute('role', 'textbox');
+        this.cornerNoteLabel.setAttribute('aria-multiline', 'true');
+        this.cornerNoteLabel.setAttribute('spellcheck', 'false');
+        this.cornerNoteLabel.setAttribute('tabindex', '0');
+        this.cornerNoteLabel.innerHTML = this._cornerNoteLabelHtml();
+
+        this.cornerNote.appendChild(this.cornerNoteLabel);
+
+        this.cornerNoteLabel.addEventListener('mousedown', (e) => e.stopPropagation());
+        this.cornerNoteLabel.addEventListener('pointerdown', (e) => e.stopPropagation());
+        this.cornerNoteLabel.addEventListener('click', (e) => e.stopPropagation());
+        this.cornerNoteLabel.addEventListener('keydown', (e) => e.stopPropagation());
+
         this.sheet.appendChild(this.trigger);
         this.sheet.appendChild(this.panel);
+        this.sheet.appendChild(this.cornerNote);
         this.root.appendChild(this.backdrop);
         this.root.appendChild(this.sheet);
         document.body.appendChild(this.root);
@@ -114,8 +160,16 @@ const SiteAbout = {
         this.trigger.addEventListener('click', (e) => e.preventDefault());
         this.trigger.addEventListener('keydown', (e) => this._onTriggerKeyDown(e));
 
+        this._onWheel = (e) => this._handleWheel(e);
+        this.root.addEventListener('wheel', this._onWheel, { passive: false, capture: true });
+
         this._onKeyDown = (e) => {
             if (e.key === 'Escape' && this._progress > 0) {
+                if (this.cornerNoteLabel?.contains(document.activeElement)) {
+                    e.preventDefault();
+                    this.cornerNoteLabel.blur();
+                    return;
+                }
                 e.preventDefault();
                 this.close();
             }
@@ -124,12 +178,15 @@ const SiteAbout = {
 
         this._onResize = () => {
             const wasOpen = this.isOpen;
+            this._syncBackdropTokens();
             this._measureDimensions();
             this._fitMainTitle();
             this._progress = wasOpen ? 1 : 0;
             this._applyProgress(false);
         };
         window.addEventListener('resize', this._onResize);
+
+        this._syncBackdropTokens();
 
         requestAnimationFrame(() => {
             this._measureDimensions();
@@ -138,49 +195,114 @@ const SiteAbout = {
         });
     },
 
+    _titleFitCfg() {
+        const opening = CONFIG.opening?.titleFit || {};
+        const about = this.cfg();
+        return {
+            fontSizePx: opening.fontSizePx ?? about.titleFontSizePx ?? null,
+            minPx: opening.minPx ?? about.titleMinPx ?? 24,
+            maxPx: opening.maxPx ?? about.titleMaxPx ?? 400,
+            reducePt: opening.reducePt ?? about.titleReducePt ?? 32,
+            sizeScale: opening.sizeScale ?? about.titleSizeScale ?? 1,
+            letterGapPx: opening.letterGapPx ?? about.titleLetterGapPx ?? 56
+        };
+    },
+
+    _titleChars(text) {
+        return [...(text || '')];
+    },
+
+    _ensureTitleSkeleton(headline) {
+        const text = (headline.dataset.titleText || headline.textContent || '').trim();
+        const chars = this._titleChars(text);
+        if (!headline || !chars.length) return;
+
+        const skeletonKey = chars.join('');
+        if (
+            headline.dataset.titleSkeletonText === skeletonKey
+            && headline.querySelectorAll('.opening-screen__title-char').length === chars.length
+        ) {
+            return;
+        }
+
+        headline.dataset.titleSkeletonText = skeletonKey;
+        headline.dataset.titleText = text;
+        headline.textContent = '';
+        const frag = document.createDocumentFragment();
+
+        chars.forEach((ch, index) => {
+            const span = document.createElement('span');
+            span.className = 'opening-screen__title-char';
+            span.textContent = ch;
+            frag.appendChild(span);
+            if (index < chars.length - 1) {
+                const gap = document.createElement('span');
+                gap.className = 'opening-screen__title-gap';
+                gap.setAttribute('aria-hidden', 'true');
+                frag.appendChild(gap);
+            }
+        });
+
+        headline.appendChild(frag);
+    },
+
+    _syncBackdropTokens() {
+        const openingBg = CONFIG.opening?.background || {};
+        const blurScale = openingBg.blurScale ?? 0.028;
+        const canvasBlurPx = 6;
+        const contentBlurPx = Math.max(
+            8,
+            Math.min(24, Math.round(window.innerHeight * blurScale * 0.85))
+        );
+        const blurPx = contentBlurPx + canvasBlurPx;
+        const grainTilePx = openingBg.grainTilePx ?? 40;
+        const grainAlpha = (openingBg.grainAlpha ?? 14) / 255;
+        const grainBlendMode = openingBg.grainBlendMode ?? 'soft-light';
+        const washPct = Math.round((openingBg.glowAlpha ?? 0.07) * 100);
+        const noteRotateDeg = this.cfg().cornerNoteRotateDeg ?? 25;
+        const noteOffsetX = this.cfg().cornerNoteOffsetX ?? 20;
+        const noteOffsetY = this.cfg().cornerNoteOffsetY ?? -40;
+        const noteLineHeightScale = this.cfg().cornerNoteLineHeightScale ?? 1.1;
+        const targets = [document.documentElement, this.root].filter(Boolean);
+
+        targets.forEach((el) => {
+            el.style.setProperty('--site-about-bg-blur', `${blurPx}px`);
+            el.style.setProperty('--site-about-backdrop-wash', `${washPct}%`);
+            el.style.setProperty('--site-about-backdrop-grain-opacity', String(grainAlpha));
+            el.style.setProperty('--site-about-backdrop-grain-blend', grainBlendMode);
+            el.style.setProperty('--site-about-backdrop-grain-tile', `${grainTilePx}px`);
+            el.style.setProperty('--site-about-corner-note-rotate', `${noteRotateDeg}deg`);
+            el.style.setProperty('--site-about-corner-note-offset-x', `${noteOffsetX}px`);
+            el.style.setProperty('--site-about-corner-note-offset-y', `${noteOffsetY}px`);
+            el.style.setProperty('--site-about-corner-note-line-height-scale', String(noteLineHeightScale));
+        });
+    },
+
     _fitMainTitle() {
         const headline = this.panel?.querySelector('.site-about__headline');
         if (!headline) return;
 
-        headline.style.fontSize = '';
-        headline.style.letterSpacing = '0px';
+        const text = (this.cfg().mainTitle || headline.dataset.titleText || headline.textContent || '').trim();
+        if (!text) return;
 
-        const minPx = this.cfg().titleMinPx ?? 24;
-        const maxPx = this.cfg().titleMaxPx ?? 400;
-        const reducePt = this.cfg().titleReducePt ?? 12;
-        const reducePx = reducePt * (96 / 72);
-        const spacingBoost = this.cfg().titleLetterSpacingBoost ?? 1.55;
-        const maxWidth = headline.clientWidth;
-        if (maxWidth <= 0) return;
+        headline.dataset.titleText = text;
+        this._ensureTitleSkeleton(headline);
 
-        let lo = minPx;
-        let hi = maxPx;
-        let best = minPx;
+        const cfg = this._titleFitCfg();
+        const reducePx = cfg.reducePt * (96 / 72);
+        const targetPx = cfg.fontSizePx ?? Math.max(cfg.minPx, (cfg.maxPx - reducePx) * cfg.sizeScale);
+        const lineHeight = 0.88;
 
-        while (lo <= hi) {
-            const mid = Math.floor((lo + hi) / 2);
-            headline.style.fontSize = `${mid}px`;
-            headline.style.letterSpacing = '0px';
-            if (headline.scrollWidth <= maxWidth) {
-                best = mid;
-                lo = mid + 1;
-            } else {
-                hi = mid - 1;
-            }
-        }
-
-        const targetPx = Math.max(minPx, best - reducePx);
         headline.style.fontSize = `${targetPx}px`;
         headline.style.letterSpacing = '0px';
+        headline.style.minHeight = `${targetPx * lineHeight}px`;
+        headline.style.setProperty('--opening-title-gap', `${cfg.letterGapPx}px`);
+        headline.style.setProperty('--opening-title-font-size', `${targetPx}px`);
+        headline.style.setProperty('--opening-title-line-height', String(lineHeight));
 
-        const text = (headline.textContent || '').trim();
-        const units = [...text].length;
-        if (units <= 1) return;
-
-        const naturalWidth = headline.scrollWidth;
-        if (naturalWidth >= maxWidth) return;
-
-        headline.style.letterSpacing = `${((maxWidth - naturalWidth) / (units - 1)) * spacingBoost}px`;
+        headline.querySelectorAll('.opening-screen__title-char').forEach((el) => {
+            el.classList.remove('is-pending');
+        });
     },
 
     _cssVarPx(varName) {
@@ -308,11 +430,13 @@ const SiteAbout = {
         this.root?.style.setProperty('--site-about-panel-cols', String(cols));
 
         const logoCols = this.cfg().logoCols ?? 1;
-        const textCols = this.cfg().textCols ?? 6;
+        const textCols = this.cfg().textCols ?? 5;
         const detailsCols = this.cfg().detailsCols ?? 5;
+        const contentGapCols = this.cfg().contentGapCols ?? 1;
         const logoStart = 1;
         const detailsStart = logoCols + 1;
-        const textStart = detailsStart + detailsCols;
+        const detailsGridSpan = Math.floor(Number(detailsCols));
+        const textStart = detailsStart + detailsGridSpan + contentGapCols;
 
         this.root?.style.setProperty('--site-about-logo-cols', String(logoCols));
         this.root?.style.setProperty('--site-about-logo-col-start', String(logoStart));
@@ -337,6 +461,62 @@ const SiteAbout = {
 
     _dragTravel() {
         return this._openLift || 1;
+    },
+
+    _wheelHitTarget(e) {
+        const hit = document.elementFromPoint(e.clientX, e.clientY);
+        return hit && this.root?.contains(hit) ? hit : null;
+    },
+
+    _isPanelScrollable() {
+        if (!this.panel) return false;
+        return this.panel.scrollHeight > this.panel.clientHeight + 1;
+    },
+
+    _shouldPanelConsumeWheel(e, hit) {
+        if (!this.panel || this._progress < 1 || !this._isPanelScrollable()) return false;
+        if (!this.panel.contains(hit)) return false;
+
+        const atTop = this.panel.scrollTop <= 0;
+        const atBottom = this.panel.scrollTop + this.panel.clientHeight >= this.panel.scrollHeight - 1;
+
+        // At scroll top, wheel-down closes the sheet — leave that to the sheet handler.
+        if (atTop && e.deltaY < 0) return false;
+
+        if (e.deltaY > 0 && !atTop) return true;
+        if (e.deltaY < 0 && !atBottom) return true;
+        return false;
+    },
+
+    _applyWheelDelta(deltaY) {
+        const travel = this._dragTravel();
+        // Match tab drag + natural trackpad direction (up on tab opens, down closes).
+        this._progress = Math.min(1, Math.max(0, this._progress + deltaY / travel));
+        this.root.classList.add('is-dragging');
+        this._applyProgress(false);
+
+        clearTimeout(this._wheelSnapTimer);
+        this._wheelSnapTimer = setTimeout(() => {
+            this._wheelSnapTimer = null;
+            this.root.classList.remove('is-dragging');
+            const threshold = this.cfg().snapThreshold ?? 0.35;
+            this._progress = this._progress >= threshold ? 1 : 0;
+            this._applyProgress(true);
+        }, this.cfg().wheelSnapMs ?? 140);
+    },
+
+    _handleWheel(e) {
+        if (!this.root || this._pointerActive) return;
+
+        const hit = this._wheelHitTarget(e);
+        if (!hit) return;
+
+        if (hit.closest?.('.site-about__corner-note')) return;
+
+        if (this._shouldPanelConsumeWheel(e, hit)) return;
+
+        e.preventDefault();
+        this._applyWheelDelta(e.deltaY);
     },
 
     _onPointerDown(e) {
@@ -446,6 +626,7 @@ const SiteAbout = {
         const lift = this._progress * this._openLift;
         this.root.style.setProperty('--site-about-lift', `${lift}px`);
         this.root.style.setProperty('--site-about-progress', String(this._progress));
+        document.documentElement.style.setProperty('--site-about-progress', String(this._progress));
         this.isOpen = this._progress >= 1;
 
         this.root.classList.toggle('is-open', this.isOpen);
@@ -456,6 +637,8 @@ const SiteAbout = {
         this.trigger?.setAttribute('aria-expanded', this.isOpen ? 'true' : 'false');
         this.panel?.setAttribute('aria-hidden', this._progress <= 0 ? 'true' : 'false');
         document.body.classList.toggle('is-site-about-open', this._progress > 0);
+        document.body.classList.toggle('is-site-about-snap', !!animate);
+        document.body.classList.toggle('is-site-about-dragging', this.root.classList.contains('is-dragging'));
 
         this._setBackgroundFrozen(this._progress > 0);
 

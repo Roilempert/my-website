@@ -39,6 +39,7 @@ const AppState = {
                         if (typeof NavigationMap !== 'undefined') {
                             NavigationMap.onBootComplete();
                         }
+                        this.onWorldReady();
                     }
                 });
             } catch (err) {
@@ -50,6 +51,7 @@ const AppState = {
                 } catch (mapErr) {
                     console.warn('NavigationMap.onBootComplete failed:', mapErr);
                 }
+                this.onWorldReady();
             }
         };
 
@@ -84,6 +86,38 @@ const AppState = {
             this.appContainer.classList.add('is-ready');
             this.appContainer.style.opacity = '1';
         });
+    },
+
+    _worldReady: false,
+    onWorldReady() {
+        if (this._worldReady) return;
+        this._worldReady = true;
+
+        try {
+            if (typeof MicroMock !== 'undefined' && !MicroMock.isPrewarmComplete()) {
+                MicroMock.prewarmAllSync();
+            }
+        } catch (err) {
+            console.warn('Micro prewarm on world-ready failed:', err);
+        }
+
+        this._fadeOutEntryCover();
+    },
+
+    _fadeOutEntryCover() {
+        const root = document.documentElement;
+        if (!root.classList.contains('is-screen-entering')) return;
+
+        const fadeMs = CONFIG?.opening?.screenTransition?.fadeMs ?? 600;
+        root.style.setProperty('--screen-transition-fade', `${fadeMs}ms`);
+
+        const cover = document.getElementById('screen-transition-cover');
+        root.classList.remove('is-screen-entering');
+        if (!cover) return;
+
+        const remove = () => cover.remove();
+        cover.addEventListener('transitionend', remove, { once: true });
+        setTimeout(remove, fadeMs + 400);
     },
 
     flushPendingBoot() {

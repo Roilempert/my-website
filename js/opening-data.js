@@ -4,7 +4,6 @@
 const OpeningData = {
     items: [],
     tagColorsMap: new Map(),
-    hoverLines: [],
 
     async init() {
         const url = CONFIG.opening?.dataUrl || 'data/opening-palette.json';
@@ -21,34 +20,7 @@ const OpeningData = {
             clearTimeout(timer);
         }
 
-        await this._loadHoverLines();
-
         window.AppState = { items: this.items, tagColorsMap: this.tagColorsMap };
-    },
-
-    async _loadHoverLines() {
-        const miniCfg = CONFIG.opening?.miniTitle || {};
-        if (miniCfg.enabled === false) {
-            this.hoverLines = [];
-            return;
-        }
-
-        const url = miniCfg.notesUrl
-            || CONFIG.data?.local?.main
-            || 'data/main.csv';
-        const maxWords = miniCfg.maxWords ?? CONFIG.depth?.moleculeHoverMaxWords ?? 8;
-
-        try {
-            const response = await fetch(url, { cache: 'force-cache' });
-            if (!response.ok) throw new Error(`HTTP ${response.status} for ${url}`);
-            const csv = await response.text();
-            if (typeof OpeningHoverLabel !== 'undefined') {
-                this.hoverLines = OpeningHoverLabel.extractFromMainCsv(csv, maxWords);
-            }
-        } catch (err) {
-            console.warn('Opening hover lines failed:', err);
-            this.hoverLines = [];
-        }
     },
 
     ingest(data) {

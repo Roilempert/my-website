@@ -332,7 +332,7 @@ Object.assign(ActionWarehouse, {
     syncDeployedBlockPositions() {
         this.blocks.forEach(block => {
             if (!block.isDragging || !block.body) return;
-            this.syncBody(block);
+            this.syncBody(block, { reuseCachedMetrics: true });
         });
     },
 
@@ -557,13 +557,25 @@ Object.assign(ActionWarehouse, {
     },
 
     refreshCaptureBlockCoords() {
+        const scrollX = window.pageXOffset;
+        const scrollY = window.pageYOffset;
+        const scrollChanged = this._captureScrollX !== scrollX || this._captureScrollY !== scrollY;
+        if (!scrollChanged && !this._captureCoordsDirty) return;
+        this._captureScrollX = scrollX;
+        this._captureScrollY = scrollY;
+        this._captureCoordsDirty = false;
+
         this.getActiveCaptureBlocks().forEach(block => {
             if (block.isDragging || !block.element) return;
             const rect = block.element.getBoundingClientRect();
             block.x = rect.left;
             block.y = rect.top;
-            this.syncBody(block);
+            this.syncBody(block, { reuseCachedMetrics: true });
         });
+    },
+
+    markCaptureBlockCoordsDirty() {
+        this._captureCoordsDirty = true;
     },
 
     clampTargetToBlockRing(x, y, block, maxRing = scale(280)) {

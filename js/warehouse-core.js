@@ -45,6 +45,7 @@ const ActionWarehouse = {
     launcherStripElement: null,
     launcherPillElement: null,
     launcherMapMountElement: null,
+    launcherStatsElement: null,
     launcherStripTrayElement: null,
     launcherElement: null,
     launcherGlyphElement: null,
@@ -684,10 +685,11 @@ const ActionWarehouse = {
     },
 
     getBlockTrayParent(def) {
-        const stripCfg = CONFIG.warehouse?.popup?.launcherStrip;
-        if (this.isLauncherStripMode() && stripCfg?.tagOnly !== false) {
+        if (this.isLauncherStripMode() && this.launcherStripTrayElement) {
             const type = def.type || 'tag';
-            if (type === 'tag' && this.launcherStripTrayElement) {
+            const stripCfg = CONFIG.warehouse?.popup?.launcherStrip;
+            const tagOnly = stripCfg?.tagOnly === true;
+            if (type === 'tag' || (!tagOnly && type === 'author')) {
                 return this.launcherStripTrayElement;
             }
         }
@@ -762,7 +764,16 @@ const ActionWarehouse = {
             this.launcherMapMountElement.className = 'warehouse-launcher-map-mount';
             this.launcherMapMountElement.setAttribute('aria-hidden', 'true');
 
+            this.launcherStatsElement = document.createElement('div');
+            this.launcherStatsElement.className = 'warehouse-launcher-stats general-t';
+            this.launcherStatsElement.setAttribute('dir', 'rtl');
+            this.launcherStatsElement.setAttribute('aria-hidden', 'true');
+            this.launcherStatsElement.innerHTML =
+                '<span class="warehouse-launcher-stats__total"></span> ' +
+                '<span class="warehouse-launcher-stats__value"></span>';
+
             this.launcherWrapElement.appendChild(this.launcherMapMountElement);
+            this.launcherWrapElement.appendChild(this.launcherStatsElement);
             this.launcherWrapElement.appendChild(this.launcherStripTrayElement);
             this.launcherWrapElement.appendChild(this.launcherElement);
             document.body.appendChild(this.launcherWrapElement);
@@ -3312,12 +3323,27 @@ const ActionWarehouse = {
     },
 
     renderWarehouseStatistics() {
+        this.renderLauncherStats();
         if (!this.statisticsElement) return;
 
         const stats = this.getLiveStatistics();
         const rows = this.getStatisticRows(stats);
         this.ensureWarehouseStatisticsRows(rows);
         this.updateStatisticDisplayValues(rows);
+    },
+
+    // Launcher panel stats line — "<total> / <inUse> בלוקים בשימוש"
+    renderLauncherStats() {
+        const el = this.launcherStatsElement;
+        if (!el) return;
+        const totalBlocks = this.blocks.filter(
+            b => b.type === 'tag' || b.type === 'author'
+        ).length;
+        const inUse = this.getLiveStatistics().blocksInUse;
+        const totalEl = el.querySelector('.warehouse-launcher-stats__total');
+        const valueEl = el.querySelector('.warehouse-launcher-stats__value');
+        if (totalEl) totalEl.textContent = `${this.formatStatisticValue(totalBlocks)} /`;
+        if (valueEl) valueEl.textContent = `${this.formatStatisticValue(inUse)} בלוקים בשימוש`;
     },
 
     // Gray out docked tag/author pills when the workspace capture limit is reached

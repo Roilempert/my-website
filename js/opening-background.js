@@ -235,8 +235,14 @@ const OpeningBackground = {
         const mirrorDiv = this._mirrorDivisor(cfg);
         const dotMin = cfg.dotCountMin ?? 2;
         const dotMax = cfg.dotCountMax ?? 5;
-        const maxUnique = Math.max(1, Math.ceil((cfg.blobCount ?? 8) / mirrorDiv));
-        const pillUnique = Math.max(0, Math.ceil((cfg.pillCount ?? 0) / mirrorDiv));
+        const uniqueMolecules = typeof cfg.scatterUniqueMolecules === 'number'
+            ? cfg.scatterUniqueMolecules
+            : Math.max(1, Math.ceil((cfg.blobCount ?? 8) / mirrorDiv));
+        const uniquePills = typeof cfg.scatterUniquePills === 'number'
+            ? cfg.scatterUniquePills
+            : Math.max(0, Math.ceil((cfg.pillCount ?? 0) / mirrorDiv));
+        const maxUnique = uniqueMolecules;
+        const pillUnique = uniquePills;
         const maxDotSlots = maxUnique * dotMax + pillUnique;
         let remaining = Math.min(paletteLen, maxDotSlots) - pillUnique;
         remaining = Math.max(0, remaining);
@@ -1229,6 +1235,56 @@ const OpeningBackground = {
         ctx.globalCompositeOperation = 'source-over';
     },
 
+    _sampleMirrorRadius(minDim, rand, cfg, slotIndex = null, slotCount = 1) {
+        const rMin = minDim * (cfg.scatterRadiusMin ?? 0.08);
+        const rMax = minDim * (cfg.scatterRadiusMax ?? 0.28);
+        const span = Math.max(0, rMax - rMin);
+
+        if (cfg.scatterRadiusStratify && slotIndex != null && slotCount > 0) {
+            const bands = Math.max(1, cfg.scatterRadiusBands ?? 3);
+            const bandIndex = slotIndex % bands;
+            const bandSize = span / bands;
+            const jitter = bandSize * (cfg.scatterRadiusJitter ?? 0.68);
+            const inset = (bandSize - jitter) * 0.5;
+            return rMin + bandSize * bandIndex + inset + rand() * jitter;
+        }
+
+        return rMin + rand() * span;
+    },
+
+    _sampleMirrorScatterXY(minDim, centerX, centerY, rand, cfg, slotIndex = null, slotCount = 1) {
+        if (cfg.scatterAngular) {
+            const degMin = cfg.scatterAngleMinDeg ?? 0;
+            const degMax = cfg.scatterAngleMaxDeg ?? 90;
+            const span = Math.max(0, degMax - degMin);
+            let angleDeg;
+            if (cfg.scatterAngularStratify && slotIndex != null && slotCount > 1) {
+                const slice = span / slotCount;
+                const jitter = slice * (cfg.scatterAngleJitter ?? 0.72);
+                const inset = (slice - jitter) * 0.5;
+                angleDeg = degMin + slice * slotIndex + inset + rand() * jitter;
+            } else {
+                angleDeg = degMin + rand() * span;
+            }
+            const angle = angleDeg * (Math.PI / 180);
+            const r = this._sampleMirrorRadius(minDim, rand, cfg, slotIndex, slotCount);
+            return {
+                cx: centerX + Math.cos(angle) * r,
+                cy: centerY - Math.sin(angle) * r
+            };
+        }
+
+        const spread = minDim * (cfg.scatterSpread ?? 0.28);
+        const insetRatio = cfg.scatterMirrorInset ?? 0.04;
+        const reach = cfg.scatterMirrorReach ?? 1;
+        const inset = spread * insetRatio;
+        const range = Math.max(inset, (spread - inset) * reach);
+        return {
+            cx: centerX + inset + rand() * range,
+            cy: centerY - inset - rand() * range
+        };
+    },
+
     _buildScatterMolecules(w, h, targetCount, rand, cfg, safeRect = null) {
         const minDim = Math.min(w, h);
         const radiusMin = minDim * (cfg.radiusMin ?? 0.04);
@@ -1239,7 +1295,9 @@ const OpeningBackground = {
         const mirrorFolds = cfg.mirrorFolds ?? 2;
         const useMirror = mirrorFolds >= 2;
         const mirrorDivisor = useMirror ? 4 : 1;
-        const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
+        const uniqueCount = typeof cfg.scatterUniqueMolecules === 'number'
+            ? cfg.scatterUniqueMolecules
+            : Math.max(1, Math.ceil(targetCount / mirrorDivisor));
         const blobs = [];
 
         const maxAttempts = cfg.scatterMaxAttempts ?? 32;
@@ -1250,18 +1308,18 @@ const OpeningBackground = {
             let cy;
             let placed = false;
 
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const sampleXY = () => {
                 if (useMirror) {
-                    const insetRatio = cfg.scatterMirrorInset ?? 0.04;
-                    const reach = cfg.scatterMirrorReach ?? 1;
-                    const inset = spread * insetRatio;
-                    const range = Math.max(inset, (spread - inset) * reach);
-                    cx = centerX + inset + rand() * range;
-                    cy = centerY - inset - rand() * range;
-                } else {
-                    cx = centerX + (rand() - 0.5) * 2 * spread;
-                    cy = centerY + (rand() - 0.5) * 2 * spread;
+                    return this._sampleMirrorScatterXY(minDim, centerX, centerY, rand, cfg, i, uniqueCount);
                 }
+                return {
+                    cx: centerX + (rand() - 0.5) * 2 * spread,
+                    cy: centerY + (rand() - 0.5) * 2 * spread
+                };
+            };
+
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                ({ cx, cy } = sampleXY());
 
                 if (!safeRect || !this._pointInSafeRect(cx, cy, scale, safeRect)) {
                     placed = true;
@@ -1269,7 +1327,9 @@ const OpeningBackground = {
                 }
             }
 
-            if (!placed) continue;
+            if (!placed) {
+                ({ cx, cy } = sampleXY());
+            }
 
             const colorRand = this._rand((this._layoutSeed + i * 7919) >>> 0);
             const spec = this._sampleMoleculeSpec(colorRand, cfg, i);
@@ -1292,7 +1352,9 @@ const OpeningBackground = {
         const mirrorFolds = cfg.mirrorFolds ?? 2;
         const useMirror = mirrorFolds >= 2;
         const mirrorDivisor = useMirror ? 4 : 1;
-        const uniqueCount = Math.max(1, Math.ceil(targetCount / mirrorDivisor));
+        const uniqueCount = typeof cfg.scatterUniquePills === 'number'
+            ? cfg.scatterUniquePills
+            : Math.max(1, Math.ceil(targetCount / mirrorDivisor));
         const pills = [];
 
         const maxAttempts = cfg.scatterMaxAttempts ?? 32;
@@ -1303,18 +1365,18 @@ const OpeningBackground = {
             let placed = false;
             const hitR = minDim * 0.05;
 
-            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+            const sampleXY = () => {
                 if (useMirror) {
-                    const insetRatio = cfg.scatterMirrorInset ?? 0.06;
-                    const reach = cfg.scatterMirrorReach ?? 0.92;
-                    const inset = spread * insetRatio;
-                    const range = Math.max(inset, (spread - inset) * reach);
-                    cx = centerX + inset + rand() * range;
-                    cy = centerY - inset - rand() * range;
-                } else {
-                    cx = centerX + (rand() - 0.5) * 2 * spread;
-                    cy = centerY + (rand() - 0.5) * 2 * spread;
+                    return this._sampleMirrorScatterXY(minDim, centerX, centerY, rand, cfg, i, uniqueCount);
                 }
+                return {
+                    cx: centerX + (rand() - 0.5) * 2 * spread,
+                    cy: centerY + (rand() - 0.5) * 2 * spread
+                };
+            };
+
+            for (let attempt = 0; attempt < maxAttempts; attempt++) {
+                ({ cx, cy } = sampleXY());
 
                 if (!safeRect || !this._pointInSafeRect(cx, cy, hitR, safeRect)) {
                     placed = true;
@@ -1322,7 +1384,9 @@ const OpeningBackground = {
                 }
             }
 
-            if (!placed) continue;
+            if (!placed) {
+                ({ cx, cy } = sampleXY());
+            }
 
             pills.push(this._buildPillBlock(cx, cy, minDim, rand, cfg, i));
         }
@@ -1336,19 +1400,54 @@ const OpeningBackground = {
         const frameCfg = CONFIG?.opening?.titleSafeFrame || {};
         if (frameCfg.enabled === false) return null;
 
-        const title = document.querySelector('#opening-screen .opening-screen__title');
-        if (!title) return null;
-
         const padX = frameCfg.padX ?? 40;
         const padY = frameCfg.padY ?? 30;
-        const r = title.getBoundingClientRect();
+        const subtitlePadY = frameCfg.subtitlePadY ?? 24;
 
-        return {
-            left: r.left - padX,
-            top: r.top - padY,
-            right: r.right + padX,
-            bottom: r.bottom + padY
+        const mergeInto = (rect, next) => {
+            if (!next) return rect;
+            if (!rect) return { ...next };
+            return {
+                left: Math.min(rect.left, next.left),
+                top: Math.min(rect.top, next.top),
+                right: Math.max(rect.right, next.right),
+                bottom: Math.max(rect.bottom, next.bottom)
+            };
         };
+
+        let rect = null;
+        const title = document.querySelector('#opening-screen .opening-screen__content .opening-screen__title')
+            || document.querySelector('#opening-screen .opening-screen__title');
+
+        if (title) {
+            const r = title.getBoundingClientRect();
+            if (r.width > 0 && r.height > 0) {
+                rect = mergeInto(rect, {
+                    left: r.left - padX,
+                    top: r.top - padY,
+                    right: r.right + padX,
+                    bottom: r.bottom + padY
+                });
+            }
+        }
+
+        if (frameCfg.includeSubtitle !== false) {
+            const subtitle = document.querySelector('#opening-screen .opening-screen__content .opening-screen__subtitle')
+                || document.querySelector('#opening-screen .opening-screen__subtitle');
+            if (subtitle) {
+                const r = subtitle.getBoundingClientRect();
+                if (r.width > 0 && r.height > 0) {
+                    rect = mergeInto(rect, {
+                        left: r.left - padX,
+                        top: r.top - subtitlePadY,
+                        right: r.right + padX,
+                        bottom: r.bottom + subtitlePadY
+                    });
+                }
+            }
+        }
+
+        return rect;
     },
 
     _pointInSafeRect(cx, cy, radius, rect) {
@@ -1394,7 +1493,6 @@ const OpeningBackground = {
             ? this._buildScatterPills(w, h, pillTarget, rand, cfg, safeRect)
             : [];
         const drawBlobs = [];
-
         const pushBlob = (instance) => {
             if (safeRect && this._blobHitsSafeRect(instance, safeRect)) return;
             drawBlobs.push(instance);

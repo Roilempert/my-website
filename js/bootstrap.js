@@ -96,6 +96,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             console.warn('NavigationMap.onBootComplete failed:', err);
         }
+        if (typeof AppState.onWorldReady === 'function') AppState.onWorldReady();
     }, safetyMs);
 
     AppState.init()
@@ -110,6 +111,7 @@ document.addEventListener('DOMContentLoaded', () => {
             } catch (mapErr) {
                 console.warn('NavigationMap.onBootComplete failed:', mapErr);
             }
+            if (typeof AppState.onWorldReady === 'function') AppState.onWorldReady();
         })
         .finally(() => {
             clearTimeout(safetyTimer);

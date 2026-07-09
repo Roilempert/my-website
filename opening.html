@@ -3,22 +3,55 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <meta name="description" content="עקבות — ceremonial threshold" />
-  <title>עקבות | כניסה</title>
+  <meta name="description" content="דברים — ceremonial threshold" />
+  <title>דברים | כניסה</title>
   <link rel="icon" href="assets/ui/site-icon.svg" type="image/svg+xml" />
-  <link rel="stylesheet" href="styles.css?v=20260708174603" />
+  <link rel="stylesheet" href="styles.css?v=20260709021753" />
+  <!-- No-server mode: serve data/assets from baked-in registry under file:// -->
+  <script src="js/offline-data-shim.js" defer></script>
+  <script src="data/embedded-data.js" defer></script>
   <script src="js/config.js" defer></script>
-  <script src="js/opening-app.js?v=20260708174603" defer></script>
+  <script src="js/opening-app.js?v=20260709021753" defer></script>
 </head>
 <body class="site-grid opening-page">
   <section id="opening-screen" class="opening-screen" data-site-layer="opening">
     <div class="opening-screen__corners" aria-hidden="true"></div>
-    <p class="opening-screen__mini-title note-title" aria-hidden="true"></p>
     <div class="opening-screen__art" aria-hidden="true"></div>
     <div class="opening-screen__content">
-      <h1 class="opening-screen__title main-t">הדברים</h1>
-      <p class="opening-screen__subtitle general-t">רשימת קניות, הודעת פרידה, מתכון לספינג׳. המילים שנכתבות בטלפון.</p>
-      <button type="button" class="opening-screen__continue general-t">כניסה</button>
+        <div class="opening-screen__stack">
+          <div class="opening-screen__copy">
+            <div class="opening-screen__title-block">
+              <div class="opening-screen__title-anchor">
+                <h1 class="opening-screen__title main-t">דברים</h1>
+              </div>
+              <p class="opening-screen__subtitle general-t">
+                <span class="opening-screen__subtitle-part--first">רשימת קניות, הודעת פרידה, מתכון לספינג׳.</span>
+                <span class="opening-screen__subtitle-part--second">המילים שנכתבות בטלפון.</span>
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+    <div class="opening-screen__entry-slot">
+        <div class="opening-screen__stack">
+          <div class="opening-screen__copy">
+            <div class="opening-screen__title-block">
+              <div class="opening-screen__title-anchor">
+                <h1 class="opening-screen__title main-t opening-screen__title--phantom" aria-hidden="true">דברים</h1>
+                <button type="button" class="opening-screen__entry-note note-title" disabled>
+                  <span class="opening-screen__entry-note-label">
+                    <span class="opening-screen__entry-note-arrow" dir="ltr">&lt;----</span>
+                    <span class="opening-screen__entry-note-hint" aria-hidden="true">הבא</span>
+                  </span>
+                </button>
+              </div>
+              <p class="opening-screen__subtitle general-t opening-screen__subtitle--phantom" aria-hidden="true">
+                <span class="opening-screen__subtitle-part--first">רשימת קניות, הודעת פרידה, מתכון לספינג׳.</span>
+                <span class="opening-screen__subtitle-part--second">המילים שנכתבות בטלפון.</span>
+              </p>
+            </div>
+          </div>
+        </div>
     </div>
   </section>
 </body>

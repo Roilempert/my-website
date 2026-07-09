@@ -33,7 +33,7 @@ CSS tokens in `:root` (`styles.css`):
 | `--color-3` | `#2D2D2D` | Action blocks, L2 grid dots, map objects, metadata panel, related-notes section title, SVG chrome |
 | `--color-4` | `#000000` | Note text, tag border/text, metadata text, **1pt note borders** |
 | `--color-5` | `#F2F0EE` | Canvas / note field background |
-| `--color-6` | `#E6E0DA` | Warehouse + map panel bg, layer nav label boxes, clear control (`נקה לוח`) |
+| `--color-6` | `#DED8D2` | Warehouse + map panel bg, layer nav label boxes, clear control (`נקה לוח`) |
 
 **Divider inset:** `--divider-inset: var(--space-20)` (20px) — gap between divider line ends and panel outer border (site-wide).
 
@@ -159,13 +159,14 @@ Tab at physical col 2; panel **12 shell cols** wide (cols 1–12). Pull-up sheet
 - **Default:** **86×46** outer shell (**color 6**), **5px** inset; inner pill (**color 6**); arrow (**color 3**)
 - **Hover / grab / pressed:** outer (**color 6**); inner pill (**color 3**); arrow (**color 6**)
 - **Hover:** arrow points **up** (collapsed / expanding)
-- **Open (pinned):** arrow points **down**, **color 3** (including hover while open)
-- **Open layout:** **12 cols × 3 rows** — row **1** handle band; rows **2–3** split **3 cols × 2 rows map** (left) + **9 cols blocks** (right, below handle band); blocks **20px** inset end + **10px** shift left; block tray top aligned to handle band (same as map)
+- **Open (pinned):** arrow points **down**, **color 3**; **hover / grab → color 6**
+- **Open layout:** **12 cols × 3 rows** — row **1** launcher handle; block tray **10px** below handle (`--warehouse-launcher-height` + `--space-10`); **10px** row/column gap between pills; rows **2–3** split **3 cols × 2 rows map** (left) + **9 cols** tag + author blocks (right); blocks **20px** inset end + **10px** shift left
 - **Open:** drag straight **upward** on the vertical center axis until **12 cols × 3 rows**; handle + arrow travel **vertical only** (bottom-anchored `translateY`, no top/bottom anchor swap); handle rests **top-center** when pinned
 - **Open:** drag the pill upward past the snap threshold, or **click** the arrow button while collapsed
 - **While dragging:** map + blocks clip-reveal inside the growing panel; blocks muted until fully snapped
 - **Close:** drag the pill back along the rail, **click** the arrow button, click outside, or Escape
 - Full panel: minimap (**3 cols × 2 rows**, left) + tag blocks (**9 cols**, rows 2–3, below handle band) + launcher handle (**top-center** when open)
+- **Stats line** (`.warehouse-launcher-stats`): handle band, above the map's right side (left of the button) — `<total> /` in **color 2** (focus-note category style) then `<in-use> בלוקים בשימוש` in **color 3**; `.general-t`, RTL, live-updated on block deploy/return
 
 **Legacy launcher strip** (`expandDrag: false`): hover peek + click pin — see changelog.
 
@@ -188,7 +189,7 @@ Tab at physical col 2; panel **12 shell cols** wide (cols 1–12). Pull-up sheet
   - between statistics and dock content: vertical divider ends 5px from dock top/bottom
   - between hover port and system message: vertical divider at message-band midpoint — 5px top inset, extends to the block-tray hairline (T join with horizontal divider)
   - above the block tray / under the message band: horizontal divider starts at the statistics divider and ends 5px from the dock right edge, creating a joined rotated T shape
-- **Viewport marker:** compact, **fixed** at center of map frame — does **not** move; map **content** pans behind it, clipped to panel bounds. Marker proportions follow the raw browser viewport; L1 uses live macro dots; L2 uses micro grid glyph/card rects.
+- **Viewport marker:** **fixed** at the center of the launcher map panel — does **not** move; the map **pans behind it** so the marker always frames what is on screen. **Outline only** — **color 3**, **5px** radius, no fill. Launcher marker ratios **0.9 × 0.5** of the panel (`CONFIG.navigationMap.launcherEmbed`). L1 uses live macro dots; L2 uses micro grid glyph/card rects.
 - **Remove:** English `ACTION REPOSITORY` label.
 
 ### Action blocks (dock panel)
@@ -321,6 +322,12 @@ Export from Figma as **one grouped SVG per decoration** (not shape-by-shape). Sa
 
 | Date | Change |
 |------|--------|
+| 2026-07-09 | L1 map dot cap `macroMapMaxDots` **900 → 4000** — DOM-ordered collection was silently dropping the bottom grid rows (~1,430 live dots) |
+| 2026-07-09 | Launcher panel stats line — handle band above map's right side: total blocks (color 2, category style) `/` blocks-in-use `בלוקים בשימוש` (color 3); updates live via `renderLauncherStats` |
+| 2026-07-09 | Launcher minimap: back to **fixed center marker** with map panning behind (`launcherEmbed.viewportMarkerMode: 'fixed'`, follow on); marker ratios **0.9×0.5** of panel; wrap fills the mount 1:1 (no clip-scale/edge fade) |
+| 2026-07-09 | `--color-6` darkened slightly (`#E6E0DA` → `#DED8D2`) |
+| 2026-07-09 | Launcher minimap: mount fills content band (aligned with block tray); map wrap **clip-scale 1** (no edge fade); viewport marker outline-only **color 3**, **5px** radius, no fill |
+| 2026-07-09 | Expand-drag block menu tidy: block tray **10px** below launcher (`--warehouse-launcher-height` + `--space-10`); **10px** row/column gap; pinned hover arrow **color 6**; author blocks in strip (`tagOnly: false`) |
 | 2026-07-09 | Expand-drag block menu **4→3 rows** (`expandRows`); pinned block tray starts below handle band (matches map — launcher no longer covers top block row) |
 | 2026-07-09 | Deployed surface blocks raised to `z-index: 896` while strip pinned / popup open — above `warehouse-popup-backdrop` (895) so they stay grabbable; strip guard in `startDrag` now applies only to blocks still docked in the tray |
 | 2026-07-09 | L1 hover label: pixel-fit subtracts inline padding; never keeps an overflowing word (no mid-word CSS clip) |

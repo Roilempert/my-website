@@ -27,6 +27,10 @@ const PhysicsEngine = {
     syncLoopLastTs: 0,
     navPhysicsTickLastTs: 0,
     renderStepTs: 0,
+    _moleculeBoundsCache: null,
+    _moleculeBoundsCacheScrollX: -1,
+    _moleculeBoundsCacheScrollY: -1,
+    _uniqueNoteIndices: null,
 
     setTransitionFrozen(value) {
         this.transitionFrozen = !!value;
@@ -152,9 +156,6 @@ const PhysicsEngine = {
             this.mouseWorldY = e.pageY;
             this.mouseClientX = e.clientX;
             this.mouseClientY = e.clientY;
-            if (DepthController.currentLevel === 1 && this.bodiesData.length > 0) {
-                this.updateMoleculeHoverState();
-            }
         });
 
         this.initMoleculePointer();
@@ -1548,6 +1549,7 @@ const PhysicsEngine = {
 
         ActionWarehouse.refreshWorkspaceGrid();
         ActionWarehouse.updateDotFocusFilter();
+        this.invalidateMoleculeBoundsCache();
         this.captureRenderSnapshot();
     },
 
@@ -1588,6 +1590,25 @@ const PhysicsEngine = {
         });
     },
 
+    invalidateMoleculeBoundsCache() {
+        this._moleculeBoundsCache = null;
+        this._uniqueNoteIndices = null;
+    },
+
+    getUniqueNoteIndices() {
+        if (!this._uniqueNoteIndices) {
+            this._uniqueNoteIndices = [...new Set(this.bodiesData.map(d => d.noteIndex))];
+        }
+        return this._uniqueNoteIndices;
+    },
+
+    isPointInMoleculeBounds(clientX, clientY, noteIndex, pad = CONFIG.depth.moleculeClickPadding ?? 16) {
+        const b = this.moleculeViewportBounds(noteIndex);
+        if (!b) return false;
+        return clientX >= b.minX - pad && clientX <= b.maxX + pad &&
+            clientY >= b.minY - pad && clientY <= b.maxY + pad;
+    },
+
     syncLoop() {
         requestAnimationFrame(() => this.syncLoop());
 
@@ -1600,6 +1621,8 @@ const PhysicsEngine = {
         const depthFocusLinks = typeof DepthFocusLinks !== 'undefined' &&
             DepthFocusLinks.shouldDraw();
         const skipCanvasDraw = this.shouldThrottleMacroCanvas();
+
+        this.invalidateMoleculeBoundsCache();
 
         if (!macroVisualActive && !depthFocusLinks) {
             if (this.isActive) {
@@ -1618,7 +1641,9 @@ const PhysicsEngine = {
         if (macroVisualActive) {
             this.isActive = true;
             this.syncDotTransforms();
-            this.updateMoleculeHoverState();
+            if (!ActionWarehouse?.dragState) {
+                this.updateMoleculeHoverState();
+            }
         } else {
             this.isActive = false;
         }
@@ -1660,13 +1685,25 @@ const PhysicsEngine = {
 
     // Axis-aligned bounds of a note's hull in viewport coordinates
     moleculeViewportBounds(noteIndex) {
+        const scrollX = window.pageXOffset;
+        const scrollY = window.pageYOffset;
+        if (!this._moleculeBoundsCache ||
+            this._moleculeBoundsCacheScrollX !== scrollX ||
+            this._moleculeBoundsCacheScrollY !== scrollY) {
+            this._moleculeBoundsCache = new Map();
+            this._moleculeBoundsCacheScrollX = scrollX;
+            this._moleculeBoundsCacheScrollY = scrollY;
+        }
+
+        if (this._moleculeBoundsCache.has(noteIndex)) {
+            return this._moleculeBoundsCache.get(noteIndex);
+        }
+
         const pad = CONFIG.outlines.padding + CONFIG.physics.body.radius;
         let minX = Infinity;
         let minY = Infinity;
         let maxX = -Infinity;
         let maxY = -Infinity;
-        const scrollX = window.pageXOffset;
-        const scrollY = window.pageYOffset;
 
         this.bodiesData.forEach(item => {
             if (item.noteIndex !== noteIndex) return;
@@ -1680,17 +1717,17 @@ const PhysicsEngine = {
             maxY = Math.max(maxY, y + pad);
         });
 
-        if (minX === Infinity) return null;
-        return { minX, minY, maxX, maxY };
+        const bounds = minX === Infinity ? null : { minX, minY, maxX, maxY };
+        this._moleculeBoundsCache.set(noteIndex, bounds);
+        return bounds;
     },
 
     hitTestMolecule(clientX, clientY) {
-        const notes = new Set(this.bodiesData.map(d => d.noteIndex));
         let hit = -1;
         let bestDist = Infinity;
         const pad = CONFIG.depth.moleculeClickPadding ?? 16;
 
-        notes.forEach(noteIndex => {
+        this.getUniqueNoteIndices().forEach(noteIndex => {
             if (ActionWarehouse.isNoteFiltered(noteIndex)) return;
             const b = this.moleculeViewportBounds(noteIndex);
             if (!b) return;
@@ -1794,7 +1831,7 @@ const PhysicsEngine = {
 
         const maxWords = CONFIG.depth?.moleculeHoverMaxWords ?? 8;
         const phraseClip = this.clipHoverAtPhraseBoundary(line, maxWords);
-        return this.fitHoverLabelToWidth(phraseClip, this.getMoleculeHoverMaxWidthPx());
+        return this.fitHoverLabelToWidth(phraseClip, this.getMoleculeHoverContentWidthPx());
     },
 
     clipHoverAtPhraseBoundary(line, maxWords) {
@@ -1849,21 +1886,37 @@ const PhysicsEngine = {
         return Math.min(window.innerWidth * vw / 100, rem * rootPx);
     },
 
+    /** Content width inside `.molecule-hover-title` after inline padding. */
+    getMoleculeHoverContentWidthPx() {
+        const root = getComputedStyle(document.documentElement);
+        const rootPx = parseFloat(root.fontSize) || 16;
+        const space10 = root.getPropertyValue('--space-10').trim();
+        const padEach = space10.endsWith('rem')
+            ? parseFloat(space10) * rootPx
+            : parseFloat(space10) || rootPx * 0.625;
+        const fudge = 2; // canvas vs DOM subpixel slack
+        return Math.max(0, this.getMoleculeHoverMaxWidthPx() - padEach * 2 - fudge);
+    },
+
     fitHoverLabelToWidth(text, maxWidth) {
-        if (!text || maxWidth <= 0) return text || '';
+        if (!text) return '';
+        const contentMax = maxWidth > 0 ? maxWidth : this.getMoleculeHoverContentWidthPx();
+        if (contentMax <= 0) return '';
+
         const ctx = this.getMoleculeHoverMeasureCtx();
         ctx.font = this.getMoleculeHoverFont();
 
-        if (ctx.measureText(text).width <= maxWidth) return text;
+        if (ctx.measureText(text).width <= contentMax) return text;
 
         const words = text.split(/\s+/).filter(Boolean);
         let result = '';
         for (const word of words) {
             const candidate = result ? `${result} ${word}` : word;
-            if (ctx.measureText(candidate).width > maxWidth) break;
+            if (ctx.measureText(candidate).width > contentMax) break;
             result = candidate;
         }
-        return result || words[0] || '';
+        // Whole words only — never return an overflowing word for CSS to clip mid-glyph.
+        return result;
     },
 
     noteHasAttachedBlocks(item) {
@@ -2024,6 +2077,11 @@ const PhysicsEngine = {
             return;
         }
 
+        if (warehouse?.dragState) {
+            hideHover();
+            return;
+        }
+
         if (document.body.classList.contains('is-space-pan') ||
             document.body.classList.contains('is-canvas-panning')) {
             hideHover();
@@ -2039,6 +2097,15 @@ const PhysicsEngine = {
         if (typeof isPointOverWarehouseChrome === 'function' &&
             isPointOverWarehouseChrome(this.mouseClientX, this.mouseClientY)) {
             hideHover();
+            return;
+        }
+
+        const pinned = this.moleculeHoverPinnedIndex;
+        if (pinned >= 0 &&
+            label?.classList.contains('is-visible') &&
+            this.isPointInMoleculeBounds(this.mouseClientX, this.mouseClientY, pinned)) {
+            this.hoveredNoteIndex = pinned;
+            document.body.classList.add('is-molecule-hover');
             return;
         }
 

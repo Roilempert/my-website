@@ -6,64 +6,56 @@ PRESENTATION MACHINE
 21.5-inch iMac — the site is built and tuned for this screen at the exhibition.
 
 
-You will NOT find a start button in the folder right-click menu.
-Follow these steps in Finder:
-
+>>> EASIEST WAY — NO SERVER, NO TERMINAL, NO PYTHON <<<
+========================================================
+The site now runs straight from a file. Nothing to install.
 
 STEP 1 — OPEN THE PROJECT FOLDER
---------------------------------
-Double-click the folder:  my-website
+  Double-click the folder:  my-website
 
-(You must go INSIDE the folder first.)
+STEP 2 — DOUBLE-CLICK THE START FILE
+  Double-click:  opening.html
+
+  It opens in the default browser (the ceremonial opening screen).
+  Click  כניסה  to enter the experience.
+
+That's it. The note data is baked into the files (data/embedded-data.js),
+so the site works fully offline with no local server.
+
+TIP — open in Chrome, full screen
+  If opening.html opens in Safari and you prefer Chrome:
+  RIGHT-CLICK opening.html → Open With → Google Chrome.
+  Then press  Cmd+Ctrl+F  for full screen.
+
+NOTE — this build is NOT live
+  Data is a frozen snapshot, not the live Google Sheet. To refresh the
+  snapshot after editing the sheet/CSVs, on a Mac with Node run:
+      ./build-embedded-data.sh
+  (Only needed by whoever updates the content — not at the exhibition.)
 
 
-STEP 2 — IF macOS SAYS "UNIDENTIFIED DEVELOPER"
------------------------------------------------
-Read:  READ ME FIRST — macOS security.txt
+---------------------------------------------------------
+OPTIONAL — the old local-server launcher (only if needed)
+---------------------------------------------------------
+The double-click method above replaces this. Use the server only if you
+specifically want the live Google Sheets data.
 
-Quick fix (mouse only):
-  RIGHT-CLICK  Start Local Server.command  →  Open  →  Open
+Double-click (or right-click → Open the first time):
 
+  Start Local Server.command      (or  Start Site.app)
 
-STEP 3 — START THE SITE
------------------------
-Double-click (or right-click Open, first time only):
-
-  >>>  Start Local Server.command  <<<
-
-(A Terminal window opens by itself. You do NOT need to type anything.)
-
-Wait until you see:
+A Terminal window opens by itself; wait for:
 
   Site is ready: http://127.0.0.1:8080/opening.html
 
-Then Chrome opens automatically (opening screen). Leave Terminal open.
+The launcher tries Python, then Ruby, then Perl. If it says all three are
+missing, that Mac needs Xcode Command Line Tools — but you do NOT need any
+of this: just use the double-click method above instead.
 
 
-Alternative: double-click  Start Site.app  (does the same thing)
-
-
-IF YOU SEE "SERVER FAILED"
---------------------------
-The new launcher works without the scripts/ folder.
-
-1. Copy the whole my-website folder again from USB
-2. Close ALL Terminal windows (red X)
-3. RIGHT-CLICK  Start Local Server.command  →  Open  →  Open
-4. Read the Terminal window — it now shows the real error
-
-The launcher tries Python, then Ruby, then Perl (Perl is built into
-every Mac, so it should always start even on a fresh machine).
-
-Only if it says Python/Ruby/Perl ALL missing:
-  This Mac needs "Command Line Tools" installed once (ask someone with a keyboard).
-
-
-STEP 3 — IF macOS BLOCKS THE FILE (first time only)
----------------------------------------------------
+IF macOS BLOCKS A FILE (first time only)
+----------------------------------------
 Right-click the file → Open → click Open in the dialog.
-
-(Do NOT look for it in the folder right-click menu.)
 
 
 STEP 4 — IF THE BROWSER IS EMPTY
@@ -104,12 +96,14 @@ NEED TO COPY AGAIN?
 If you copied the folder before these files existed, copy the whole
 my-website folder again from the USB / other Mac. You need:
 
-  Start Site.app
-  Start Local Server.command
+  opening.html
+  experience.html
+  index.html               (redirect → opening)
+  data/embedded-data.js    (baked data — required for no-server mode)
+  js/offline-data-shim.js  (serves baked data under file://)
   data/main.csv
   data/tags.csv
   data/opening-palette.json
-  opening.html
-  experience.html
-  index.html          (redirect → opening)
   js/  vendor/  styles.css  assets/
+  Start Site.app                 (optional — live-data server)
+  Start Local Server.command     (optional — live-data server)

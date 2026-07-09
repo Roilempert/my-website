@@ -8,7 +8,7 @@
     --color-3: #2D2D2D;
     --color-4: #000000;
     --color-5: #F2F0EE;
-    --color-6: #E6E0DA;
+    --color-6: #DED8D2;
 
     /* Exhibition spacing scale: Figma px to CSS rem tokens */
     --space-5: 0.3125rem;
@@ -2989,8 +2989,9 @@ body.view-level-3 .site-navigation-maps.is-inspector-dimmed {
     z-index: 1;
     box-sizing: border-box;
     pointer-events: none;
-    border: var(--navigation-map-viewport-outline-width, 0.75px) solid var(--navigation-map-viewport-outline, rgba(16, 16, 16, 0.55));
-    background: var(--navigation-map-viewport-fill, rgba(16, 16, 16, 0.05));
+    border: var(--navigation-map-viewport-outline-width, 0.75px) solid var(--navigation-map-viewport-outline, var(--color-3));
+    background: var(--navigation-map-viewport-fill, transparent);
+    border-radius: var(--navigation-map-viewport-radius, var(--space-5));
 }
 
 .site-navigation-maps__viewport-marker.is-hidden {
@@ -3169,15 +3170,26 @@ body.is-warehouse-launcher-strip-mode .warehouse-launcher-wrap.is-pinned .wareho
 }
 
 body.is-warehouse-launcher-strip-mode .warehouse-launcher-map-mount .site-navigation-maps,
-body.site-grid.is-warehouse-launcher-strip-mode .warehouse-launcher-map-mount .site-navigation-maps {
+body.site-grid.is-warehouse-launcher-strip-mode .warehouse-launcher-map-mount .site-navigation-maps,
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-map-mount .site-navigation-maps {
     position: absolute;
     inset: 0;
-    left: 0;
-    top: 0;
-    bottom: auto;
     width: 100%;
     height: 100%;
     transform: none;
+}
+
+.warehouse-launcher-map-mount .site-navigation-maps__map-wrap {
+    --navigation-map-clip-scale: 1;
+    --navigation-map-edge-fade: 0%;
+    position: absolute;
+    inset: 0;
+    width: auto;
+    height: auto;
+    margin: 0;
+    transform: none;
+    -webkit-mask-image: none;
+    mask-image: none;
 }
 
 /* Tray — hover: single row peek; pinned: multi-row scroll */
@@ -3366,7 +3378,7 @@ body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher:not(.is-grabbed)
 body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher:hover .warehouse-launcher__glyph,
 body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher:focus-visible .warehouse-launcher__glyph,
 body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher.is-grabbed .warehouse-launcher__glyph {
-    background-color: var(--color-3);
+    background-color: var(--color-6);
 }
 
 body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher {
@@ -3378,16 +3390,14 @@ body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .
 }
 
 body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher-map-mount {
-    top: calc(var(--space-10) + var(--warehouse-launcher-handle-band, var(--site-grid-cell-h)));
-    bottom: auto;
-    left: var(--space-10);
+    inset: calc(var(--warehouse-launcher-height) + var(--space-10)) auto var(--space-10) var(--space-10);
     width: var(--warehouse-launcher-map-width);
-    height: var(--warehouse-launcher-map-height, var(--site-grid-cell-h));
+    height: auto;
     z-index: 2;
 }
 
 body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher-strip__tray {
-    top: calc(var(--space-10) + var(--warehouse-launcher-handle-band, var(--site-grid-cell-h)));
+    top: calc(var(--warehouse-launcher-height) + var(--space-10));
     left: calc(
         var(--space-10) + var(--warehouse-launcher-map-width) + var(--space-10) -
         var(--warehouse-launcher-blocks-shift-left, var(--space-10))
@@ -3401,6 +3411,8 @@ body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .
     box-sizing: border-box;
     pointer-events: auto;
     align-content: flex-start;
+    column-gap: var(--space-10);
+    row-gap: var(--space-10);
     overflow-y: auto;
     overscroll-behavior: contain;
     scroll-padding-top: 0;
@@ -3456,11 +3468,9 @@ body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-strip__row-break
 body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-map-mount {
     display: none;
     position: absolute;
-    left: var(--space-10);
-    top: calc(var(--space-10) + var(--warehouse-launcher-handle-band, var(--site-grid-cell-h)));
-    bottom: auto;
+    inset: calc(var(--warehouse-launcher-height) + var(--space-10)) auto var(--space-10) var(--space-10);
     width: var(--warehouse-launcher-map-width);
-    height: var(--warehouse-launcher-map-height, var(--site-grid-cell-h));
+    height: auto;
     box-sizing: border-box;
     background: var(--color-6);
     border-radius: var(--warehouse-radius, 0.3125rem);
@@ -3470,6 +3480,38 @@ body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-map-mount {
 
 body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-showing-content .warehouse-launcher-map-mount {
     display: block;
+}
+
+/* Stats line — handle band, above the map's right side (left of the button) */
+.warehouse-launcher-stats {
+    display: none;
+    position: absolute;
+    top: 0;
+    left: var(--space-10);
+    width: var(--warehouse-launcher-map-width);
+    height: var(--warehouse-launcher-height);
+    align-items: center;
+    justify-content: flex-start;
+    box-sizing: border-box;
+    direction: rtl;
+    text-align: start;
+    white-space: nowrap;
+    color: var(--color-3);
+    pointer-events: none;
+    z-index: 2;
+}
+
+body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-showing-content .warehouse-launcher-stats {
+    display: flex;
+}
+
+.warehouse-launcher-stats__total {
+    color: var(--color-2);
+    margin-inline-end: var(--space-5);
+}
+
+.warehouse-launcher-stats__value {
+    color: var(--color-3);
 }
 
 body.is-warehouse-launcher-expand-drag-mode .warehouse-launcher-wrap.is-pinned .warehouse-launcher-map-mount {

@@ -74,7 +74,7 @@ const CONFIG = {
             main: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ7yUXgr2RmRgAg9hWSPesVZsqkROq-PedKOh6KpERDO9HcC5ru11oobFPN8Mhsnruw26JKe4peAIFT/pub?gid=693502086&single=true&output=csv',
             tags: 'https://docs.google.com/spreadsheets/d/e/2PACX-1vQ7yUXgr2RmRgAg9hWSPesVZsqkROq-PedKOh6KpERDO9HcC5ru11oobFPN8Mhsnruw26JKe4peAIFT/pub?gid=946159072&single=true&output=csv'
         },
-        preferLocal: false,
+        preferLocal: true,
         // Column indices in the main CSV (zero-based)
         columns: {
             authorFullName: 1,
@@ -110,18 +110,19 @@ const CONFIG = {
             {
                 category: 'פונטים בשימוש',
                 output: [
-                    'פרנקריהל Universal, TheBasics — הגילדה',
+                    'TheBasics, פרנקריהל Universal  — הגילדה',
                     'נרקיס יאיר — פונטף'
                 ]
             },
             { category: 'יעוץ ומחקר', output: 'איתי שרף ואלון צוקרמן' },
             { category: 'עיצוב מחקר ופיתוח', output: 'רועי למפרט' }
         ],
-        mainTitle: 'הדברים',
+        mainTitle: 'דברים',
         titleMaxPx: 400,
         titleMinPx: 24,
-        titleReducePt: 20,
-        titleLetterSpacingBoost: 1.581,
+        titleReducePt: 32,
+        titleSizeScale: 0.837,
+        titleLetterGapPx: 49.01,
         logoSrc: 'assets/ui/Bezalel_academy_of_arts_and_design_new_logo.svg',
         arrowSrc: 'assets/ui/arrow.svg',
         panelCols: 12,
@@ -129,12 +130,18 @@ const CONFIG = {
         tabColStart: 2,
         logoCols: 1,
         textCols: 5,
-        detailsCols: 6,
+        detailsCols: 5.5,
+        contentGapCols: 1,
         tabTopRowStart: 2,
         openToVh: 50,
         panelHeightVh: 38,
         openMaxPx: 960,
-        snapThreshold: 0.35
+        snapThreshold: 0.35,
+        cornerNoteRotateDeg: 25,
+        cornerNoteLines: ['רועי', 'היה פה'],
+        cornerNoteOffsetX: 20,
+        cornerNoteOffsetY: -40,
+        cornerNoteLineHeightScale: 1.1
     },
 
     /* --- Boot Sequence --- */
@@ -248,24 +255,55 @@ const CONFIG = {
         titleTypewriterMsPerChar: 320,
         titleCursorWaitMs: 1800,
         titleCols: 12,
+        copyNudgeY: -70,
+        subtitleSplitGap: '3rem',
+        subtitleSecondNudgeX: 30,
         titleFit: {
-            minPx: 24,
-            maxPx: 360,
-            reducePt: 20
+            maxPx: 400,
+            reducePt: 32,
+            sizeScale: 0.837,
+            letterGapPx: 49.01
         },
         titleSafeFrame: {
             enabled: true,
-            padX: 18,
-            padY: 14
+            padX: 110,
+            padY: 64,
+            includeSubtitle: true,
+            subtitlePadY: 36
         },
-        miniTitle: {
-            enabled: true,
-            notesUrl: 'data/main.csv',
-            rotateMs: 4500,
-            maxWords: 8
+        notes: {
+            enabled: false,
+            grid: { cols: 3, rows: 3 },
+            staggerMs: 140,
+            placement: {
+                marginPct: 10,
+                quarterCenterGapPct: 4,
+                titlePadX: 56,
+                titlePadY: 40,
+                subtitlePadY: 24,
+                maxAttempts: 48
+            },
+            items: []
+        },
+        entryNote: {
+            rotateDeg: -20,
+            offsetX: -70,
+            offsetY: -150,
+            arrow: '<----',
+            hoverLabel: 'הבא',
+            ariaLabel: 'הבא'
         },
         artReadyFallbackMs: 12000,
+        // Staggered reveal after the title types: molecules, subtitle, entry note.
+        revealStartDelayMs: 450,
+        revealStaggerMs: 420,
         exitDurationMs: 600,
+        // Entry note expands upward to a full-screen cover; experience fades it when L1 is ready.
+        screenTransition: {
+            expandMs: 1200,
+            fadeMs: 1800,
+            coverOverscan: 1
+        },
         background: {
             mode: 'full',
             showBlobs: true,
@@ -276,30 +314,46 @@ const CONFIG = {
             blobBlendMode: 'source-over',
             blobLayerAlpha: 1,
             transparent: true,
-            bgColor: 'var(--color-5)',
+            bgColor: '#F6F4F2',
             blurScale: 0.028,
             contentBlurPx: 0,
             glowAlpha: 0.07,
             pillGlowAlpha: 0.42,
-            dotVisualScale: 0.85,
+            dotVisualScale: 1,
             hullStrokeWidth: 0.27,
             hullStrokeAlpha: 0.62,
-            hullPaddingPx: 7,
+            hullPaddingPx: 9,
             linkAlpha: 0.48,
             dotCountMin: 2,
             dotCountMax: 5,
-            blobCount: 36,
-            pillCount: 4,
+            blobCount: 20,
+            pillCount: 12,
             pillTextRowColor: '#FFFFFF',
             pillTextRowHeightRatio: 0.16,
             pillTextRowGap: 4,
             pillTextRowAlpha: 0.92,
-            scatterSpread: 0.64,
-            scatterMirrorInset: 0.02,
-            scatterMirrorReach: 1.12,
+            scatterSpread: 0.78,
+            scatterAngular: true,
+            scatterAngularStratify: true,
+            scatterAngleJitter: 0.88,
+            scatterRadiusStratify: true,
+            scatterRadiusBands: 3,
+            scatterRadiusJitter: 0.78,
+            scatterRadiusMin: 0.18,
+            scatterRadiusMax: 0.48,
+            scatterAngleMinDeg: 0,
+            scatterAngleMaxDeg: 90,
+            scatterUniqueMolecules: 5,
+            scatterUniquePills: 3,
+            scatterMirrorInset: 0.06,
+            scatterMirrorReach: 0.62,
             spawnJitterRatio: 0.16,
-            radiusMin: 0.06,
-            radiusMax: 0.16,
+            radiusMin: 0.065,
+            radiusMax: 0.17,
+            pillHeightMin: 0.021,
+            pillHeightMax: 0.036,
+            pillWidthMinRatio: 1.15,
+            pillWidthMaxRatio: 2.2,
             maxDpr: 1,
             repaintThrottleMs: 48,
             dotMotion: true,
@@ -333,9 +387,9 @@ const CONFIG = {
             'assets/fonts/FrankRuhl_Universal-Mono.woff2'
         ],
         labels: {
-            title: 'הדברים',
+            title: 'דברים',
             subtitle: 'רשימת קניות, הודעת פרידה, מתכון לספינג׳. המילים שנכתבות בטלפון.',
-            continue: 'כניסה'
+            continue: ' ^ '
         }
     },
 
@@ -692,10 +746,10 @@ const CONFIG = {
         frameInset: 0,
         backgroundColor: null,
         showWorldFill: false,
-        showViewportFill: true,
+        showViewportFill: false,
         showViewportOutline: true,
-        viewportFillColor: 'rgba(45, 45, 45, 0.08)',
-        viewportOutlineColor: 'rgba(45, 45, 45, 0.72)',
+        viewportFillColor: 'transparent',
+        viewportOutlineColor: '#2D2D2D',
         viewportOutlineWidth: 0.75,
         offsetY: { value: -0.35, unit: 'cellH' },
         /* Clip frame larger than grid slot; soft fade at clip edges */
@@ -759,7 +813,9 @@ const CONFIG = {
         /* L1 minimap — live DOM layer dots match the visible macro field (not physics-only) */
         macroMapUseDomPositions: true,
         macroMapUseLayerDots: true,
-        macroMapMaxDots: 900,
+        /* Cap must exceed total layer-dot count — collection is DOM-ordered,
+           so a low cap silently drops the bottom grid rows from the map */
+        macroMapMaxDots: 4000,
         /* Shared macro coordinate frame on L1 only; L2/L3 fit active grid layout */
         sharedReferenceScale: true,
         /* Fixed viewport marker UI size; map scale follows the visible map viewport */
@@ -772,7 +828,16 @@ const CONFIG = {
         /* L2/L3 minimap — cell rects from one batched DOM read; no full silhouette bake */
         depthMapLayoutSettleMs: 480,
         depthMapMaxCollect: 320,
-        depthMapBoundsPad: 32
+        depthMapBoundsPad: 32,
+        /* Launcher popup embed — fixed marker centered in the panel; the map
+           pans behind it so the marker always frames the live viewport.
+           Marker ratios sized for the launcher panel band. */
+        launcherEmbed: {
+            viewportMarkerMode: 'fixed',
+            viewportFollow: true,
+            viewportMarkerWidthRatio: 0.9,
+            viewportMarkerHeightRatio: 0.5
+        }
     },
 
     /* --- Artifact Inspector (focus/isolation overlay) --- */
@@ -950,12 +1015,12 @@ const CONFIG = {
                 enabled: true,
                 expandDrag: true,
                 expandCols: 12,
-                expandRows: 4,
+                expandRows: 3,
                 mapCols: 3,
                 blockCols: 9,
                 mapRows: 2,
                 showMap: true,
-                tagOnly: true,
+                tagOnly: false,
                 snapThreshold: 0.82,
                 firstPressTeaser: {
                     enabled: true,
@@ -1278,7 +1343,7 @@ function applyWarehouseLauncherStripTokens(root = document.documentElement) {
     if (!isWarehouseLauncherStripMode() || !stripCfg) return;
     const mapCols = Math.max(1, stripCfg.mapCols ?? 3);
     const expandCols = Math.max(1, stripCfg.expandCols ?? 12);
-    const expandRows = Math.max(1, stripCfg.expandRows ?? 4);
+    const expandRows = Math.max(1, stripCfg.expandRows ?? 3);
     const blockCols = Math.max(1, stripCfg.blockCols ?? Math.max(1, expandCols - mapCols));
     const mapRows = Math.max(1, stripCfg.mapRows ?? 2);
     root.style.setProperty('--warehouse-launcher-expand-width', siteGridSpanWidth(expandCols));
@@ -2054,7 +2119,7 @@ function applyPresentationProfile() {
             openingBg.blobCount = Math.min(openingBg.blobCount, 20);
         }
         if (typeof openingBg.pillCount === 'number') {
-            openingBg.pillCount = Math.min(openingBg.pillCount, 4);
+            openingBg.pillCount = Math.min(openingBg.pillCount, 12);
         }
         if (!openingBg.repaintThrottleMs) {
             openingBg.repaintThrottleMs = 56;

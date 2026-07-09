@@ -344,6 +344,7 @@ const NavigationMap = {
             const launcherMapMount = document.getElementById('warehouse-launcher-map-mount');
             const mapMount = document.getElementById('warehouse-map-mount');
             if (launcherMapMount) {
+                mapsPanel.classList.add('site-navigation-maps--launcher');
                 launcherMapMount.appendChild(mapsPanel);
                 launcherMapMount.removeAttribute('aria-hidden');
             } else if (mapMount) {
@@ -397,6 +398,10 @@ const NavigationMap = {
 
     isMapReady() {
         return !!this.mapsPanel && this._bootComplete === true;
+    },
+
+    isLauncherEmbed() {
+        return !!this.mapsPanel?.closest('.warehouse-launcher-map-mount');
     },
 
     onBootComplete() {
@@ -987,8 +992,8 @@ const NavigationMap = {
             offsetX,
             offsetY,
             toMap: (pageX, pageY) => ({
-                x: offsetX + (pageX - panBounds.minX) * t.scale,
-                y: offsetY + (pageY - panBounds.minY) * t.scale
+                x: offsetX + (pageX - panBounds.minX) * (t.scaleX ?? t.scale),
+                y: offsetY + (pageY - panBounds.minY) * (t.scaleY ?? t.scale)
             })
         };
     },
@@ -1274,8 +1279,8 @@ const NavigationMap = {
         t.anchorX = inset + innerW / 2;
         t.anchorY = inset + innerH / 2;
         t.toMap = (pageX, pageY) => ({
-            x: t.baseOffsetX + (pageX - panBounds.minX) * t.scale,
-            y: t.baseOffsetY + (pageY - panBounds.minY) * t.scale
+            x: t.baseOffsetX + (pageX - panBounds.minX) * (t.scaleX ?? t.scale),
+            y: t.baseOffsetY + (pageY - panBounds.minY) * (t.scaleY ?? t.scale)
         });
 
         return t;
@@ -1652,8 +1657,18 @@ const NavigationMap = {
             if (Number.isFinite(mul) && mul > 0) scale *= mul;
         }
 
-        const drawW = contentWorldW * scale;
-        const drawH = contentWorldH * scale;
+        // Fill-area mode (launcher embed): independent axis scales stretch the
+        // world to the exact frame rect — top-to-bottom, edge-to-edge.
+        let scaleX = scale;
+        let scaleY = scale;
+        if (style.mapFillArea === true && fixedMarkerScale == null) {
+            scaleX = innerW / contentWorldW;
+            scaleY = innerH / contentWorldH;
+            scale = scaleY;
+        }
+
+        const drawW = contentWorldW * scaleX;
+        const drawH = contentWorldH * scaleY;
 
         const baseOffsetX = inset + (innerW - drawW) / 2;
         const baseOffsetY = inset + (innerH - drawH) / 2;
@@ -1699,22 +1714,24 @@ const NavigationMap = {
         }
 
         const toMap = (pageX, pageY) => ({
-            x: baseOffsetX + (pageX - panBounds.minX) * scale,
-            y: baseOffsetY + (pageY - panBounds.minY) * scale
+            x: baseOffsetX + (pageX - panBounds.minX) * scaleX,
+            y: baseOffsetY + (pageY - panBounds.minY) * scaleY
         });
 
         const vpTl = viewport
-            ? { x: offsetX + (viewport.left - panBounds.minX) * scale, y: offsetY + (viewport.top - panBounds.minY) * scale }
+            ? { x: offsetX + (viewport.left - panBounds.minX) * scaleX, y: offsetY + (viewport.top - panBounds.minY) * scaleY }
             : null;
         const vpBr = viewport
             ? {
-                x: offsetX + (viewport.left + viewport.width - panBounds.minX) * scale,
-                y: offsetY + (viewport.top + viewport.height - panBounds.minY) * scale
+                x: offsetX + (viewport.left + viewport.width - panBounds.minX) * scaleX,
+                y: offsetY + (viewport.top + viewport.height - panBounds.minY) * scaleY
             }
             : null;
 
         return {
             scale,
+            scaleX,
+            scaleY,
             offsetX,
             offsetY,
             baseOffsetX,
@@ -1750,8 +1767,8 @@ const NavigationMap = {
             offsetX,
             offsetY,
             toMap: (pageX, pageY) => ({
-                x: offsetX + (pageX - panBounds.minX) * t.scale,
-                y: offsetY + (pageY - panBounds.minY) * t.scale
+                x: offsetX + (pageX - panBounds.minX) * (t.scaleX ?? t.scale),
+                y: offsetY + (pageY - panBounds.minY) * (t.scaleY ?? t.scale)
             })
         };
 
@@ -2092,7 +2109,11 @@ const NavigationMap = {
     },
 
     getMapStyle() {
-        return CONFIG.navigationMap || {};
+        const base = CONFIG.navigationMap || {};
+        if (base.launcherEmbed && this.isLauncherEmbed()) {
+            return { ...base, ...base.launcherEmbed };
+        }
+        return base;
     },
 
     getLevelGlyphScale(level) {
@@ -2894,8 +2915,8 @@ const NavigationMap = {
     mapPointToPage(mx, my, t, contentBounds) {
         const panBounds = t.panBounds || contentBounds;
         return {
-            x: (mx - t.offsetX) / t.scale + panBounds.minX,
-            y: (my - t.offsetY) / t.scale + panBounds.minY
+            x: (mx - t.offsetX) / (t.scaleX ?? t.scale) + panBounds.minX,
+            y: (my - t.offsetY) / (t.scaleY ?? t.scale) + panBounds.minY
         };
     },
 
